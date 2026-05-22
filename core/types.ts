@@ -78,10 +78,10 @@ export interface ProductCacheEntry {
 }
 
 /**
- * A YNAB budget category, synced from the user's budget.
+ * A YNAB category, synced from the user's plan.
  *
  * Stored in the `categories` IndexedDB store, keyed by id.
- * Refreshed via GET /budgets/{id}/categories.
+ * Refreshed via GET /plans/{id}/categories.
  */
 export interface Category {
   /** YNAB category UUID. */
@@ -151,8 +151,8 @@ export type MessageRequest =
   | { type: "APPROVE_TRANSACTION"; transactionId: string; items: ApprovalItem[] }
   | { type: "APPROVE_BATCH"; transactionIds: string[] }
   | { type: "GET_SETTINGS" }
-  | { type: "SAVE_SETTINGS"; token: string; budgetId: string; budgetName: string }
-  | { type: "GET_BUDGETS"; token: string }
+  | { type: "SAVE_SETTINGS"; token: string; planId: string; planName: string }
+  | { type: "GET_PLANS"; token: string }
   | { type: "REFRESH_CATEGORIES" };
 
 export interface ApprovalItem {
