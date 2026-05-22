@@ -54,7 +54,8 @@ function checkAuth(): { authenticated: boolean } {
   return { authenticated: !AUTH_PAGE_REGEX.test(window.location.href) };
 }
 
-function waitForSettled(ms = 2000): Promise<void> {
+function randomDelay(min = 1000, max = 3000): Promise<void> {
+  const ms = Math.floor(Math.random() * (max - min + 1)) + min;
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
@@ -94,7 +95,7 @@ async function loadNextPage(): Promise<boolean> {
   if (labelEl?.textContent?.trim() !== "Next Page") return false;
 
   nextButton.click();
-  await waitForSettled();
+  await randomDelay();
   return true;
 }
 
