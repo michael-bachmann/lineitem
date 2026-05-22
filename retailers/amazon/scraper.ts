@@ -43,11 +43,11 @@ const MONTHS: Record<string, string> = {
  * Parse a natural-language date like "May 17, 2026" to ISO "2026-05-17".
  * Returns an empty string if the input cannot be parsed.
  */
-export function parseNaturalDate(dateStr: string): string {
+export function parseNaturalDate(dateStr: string): string | null {
   const m = dateStr.trim().match(/^(\w+)\s+(\d{1,2}),?\s+(\d{4})$/);
-  if (!m) return "";
+  if (!m) return null;
   const month = MONTHS[m[1]];
-  if (!month) return "";
+  if (!month) return null;
   const day = m[2].padStart(2, "0");
   return `${m[3]}-${month}-${day}`;
 }
@@ -70,7 +70,7 @@ export function parseTransactionsFromDocument(
   doc: Document,
 ): RawTransaction[] {
   const results: RawTransaction[] = [];
-  let currentDate = "";
+  let currentDate: string | null = null;
 
   const dateContainers = doc.querySelectorAll(SELECTORS.dateContainer);
   dateContainers.forEach((dateEl) => {
@@ -78,6 +78,8 @@ export function parseTransactionsFromDocument(
     if (dateSpan) {
       currentDate = parseNaturalDate(dateSpan.textContent?.trim() ?? "");
     }
+    if (!currentDate) return;
+    const date = currentDate;
 
     const sibling = dateEl.nextElementSibling;
     if (!sibling) return;
@@ -107,7 +109,7 @@ export function parseTransactionsFromDocument(
       }
 
       results.push({
-        date: currentDate,
+        date,
         amountCents,
         orderId,
         cardLastFour,

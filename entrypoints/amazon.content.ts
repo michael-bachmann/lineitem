@@ -6,6 +6,7 @@ import {
 } from "@/retailers/amazon/scraper";
 import {
   AUTH_PAGE_REGEX,
+  SELECTORS,
   TRANSACTIONS_URL,
   orderDetailUrl,
 } from "@/retailers/amazon/selectors";
@@ -33,7 +34,8 @@ export default defineContentScript({
   matches: ["*://*.amazon.com/*"],
   main() {
     browser.runtime.onMessage.addListener(
-      (message: ContentMessage, _sender, sendResponse) => {
+      (message: ContentMessage, sender, sendResponse) => {
+        if (sender.id !== browser.runtime.id) return;
         handleMessage(message).then(sendResponse);
         return true;
       },
@@ -48,7 +50,7 @@ async function handleMessage(
     case "CHECK_AUTH":
       return checkAuth();
     case "SCRAPE_TRANSACTIONS":
-      return scrapeTransactions(message.maxPages ?? 5);
+      return scrapeTransactions(Math.max(1, Math.min(message.maxPages ?? 5, 20)));
     case "SCRAPE_ITEMS":
       return scrapeItems(message.orderId);
     default:
@@ -106,9 +108,7 @@ async function scrapeTransactions(
  * Amazon's pagination uses a form with a submit button; extract the form action.
  */
 function findNextPageUrl(doc: Document): string | null {
-  const nextButton = doc.querySelector(
-    'span.a-button:not(.a-button-disabled) input[type="submit"][aria-labelledby]',
-  );
+  const nextButton = doc.querySelector(SELECTORS.nextPageButton);
   if (!nextButton) return null;
 
   const form = nextButton.closest("form");
