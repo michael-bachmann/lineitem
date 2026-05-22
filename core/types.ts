@@ -153,7 +153,8 @@ export type MessageRequest =
   | { type: "GET_SETTINGS" }
   | { type: "SAVE_SETTINGS"; token: string; planId: string; planName: string }
   | { type: "GET_PLANS"; token: string }
-  | { type: "REFRESH_CATEGORIES" };
+  | { type: "REFRESH_CATEGORIES" }
+  | { type: "CLEAR_SETTINGS" };
 
 export interface ApprovalItem {
   /** Retailer's product identifier (e.g. ASIN). */
