@@ -9,12 +9,12 @@ export const SELECTORS = {
     'span.a-button:not(.a-button-disabled) input[type="submit"][aria-labelledby]',
 
   // Order detail page
-  itemBoxPrimary: ".a-fixed-left-grid.item-box, .shipment .a-fixed-left-grid",
-  itemBoxFallback: "[class*='od-item'], .yo-item",
+  itemBoxPrimary: ".a-fixed-left-grid-inner",
+  itemBoxFallback: ".a-fixed-left-grid.item-box, .shipment .a-fixed-left-grid, [class*='od-item'], .yo-item",
   productLink: "a[href*='/dp/'], a[href*='/gp/product/']",
-  priceEl: ".a-color-price",
-  priceFallback: "[class*='price'], .a-color-price",
-  quantityFallback: "[class*='quantity'], [class*='qty']",
+  priceEl: "[data-component='unitPrice'] .a-offscreen, .a-color-price",
+  priceFallback: ".a-text-price .a-offscreen, [class*='price']",
+  quantityFallback: "[data-component='quantity'], [class*='quantity'], [class*='qty']",
 } as const;
 
 export const ASIN_REGEX = /\/(?:dp|gp\/product)\/([A-Z0-9]{10})/;

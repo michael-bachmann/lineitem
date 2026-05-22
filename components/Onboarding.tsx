@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { browser } from "wxt/browser";
-import type { YnabPlan } from "@/core/ynab";
+import type { YnabPlan } from "@/lib/ynab";
 
 interface OnboardingProps {
   onComplete: (planName: string) => void;

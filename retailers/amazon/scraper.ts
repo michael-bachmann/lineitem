@@ -137,8 +137,17 @@ export function parseItemsFromDocument(doc: Document): RawItem[] {
   const results: RawItem[] = [];
 
   itemElements.forEach((item) => {
-    const titleEl = item.querySelector(SELECTORS.productLink);
-    const title = titleEl?.textContent?.trim() ?? "";
+    const productLinks = item.querySelectorAll(SELECTORS.productLink);
+    let titleEl: Element | null = null;
+    let title = "";
+    for (const link of productLinks) {
+      const text = link.textContent?.trim() ?? "";
+      if (text) {
+        titleEl = link;
+        title = text;
+        break;
+      }
+    }
     if (!title) return;
 
     let productId = "";
