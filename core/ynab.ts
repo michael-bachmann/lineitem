@@ -36,19 +36,16 @@ export async function getCategories(
   budgetId: string,
 ): Promise<Category[]> {
   const data = await ynabFetch(`/budgets/${budgetId}/categories`, token);
-  const categories: Category[] = [];
-  for (const group of data.data.category_groups) {
-    if (group.hidden || group.name === "Internal Master Category") continue;
-    for (const cat of group.categories) {
-      if (cat.hidden || cat.deleted) continue;
-      categories.push({
-        id: cat.id,
-        name: cat.name,
-        groupName: group.name,
-      });
-    }
-  }
-  return categories;
+  return data.data.category_groups
+    .filter(
+      (g: { hidden: boolean; deleted: boolean; name: string }) =>
+        !g.hidden && !g.deleted && g.name !== "Internal Master Category",
+    )
+    .flatMap((g: { name: string; categories: Array<{ id: string; name: string; hidden: boolean; deleted: boolean }> }) =>
+      g.categories
+        .filter((c) => !c.hidden && !c.deleted)
+        .map((c) => ({ id: c.id, name: c.name, groupName: g.name })),
+    );
 }
 
 export async function getUnapprovedTransactions(
@@ -65,11 +62,11 @@ export async function getUnapprovedTransactions(
 export interface YnabTransactionUpdate {
   category_id?: string | null;
   approved?: boolean;
-  memo?: string;
+  memo?: string | null;
   subtransactions?: Array<{
     amount: number;
-    category_id: string;
-    memo: string;
+    category_id: string | null;
+    memo: string | null;
   }>;
 }
 

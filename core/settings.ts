@@ -11,9 +11,9 @@ const SETTINGS_KEYS = ["ynabToken", "budgetId", "budgetName"] as const;
 export async function getSettings(): Promise<Settings> {
   const result = await browser.storage.local.get([...SETTINGS_KEYS]);
   return {
-    ynabToken: (result.ynabToken as string) ?? null,
-    budgetId: (result.budgetId as string) ?? null,
-    budgetName: (result.budgetName as string) ?? null,
+    ynabToken: (result.ynabToken ?? null) as string | null,
+    budgetId: (result.budgetId ?? null) as string | null,
+    budgetName: (result.budgetName ?? null) as string | null,
   };
 }
 
