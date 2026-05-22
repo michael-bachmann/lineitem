@@ -3,11 +3,12 @@ import { browser } from "wxt/browser";
 import type { YnabPlan } from "@/core/ynab";
 
 interface OnboardingProps {
-  onComplete: () => void;
+  onComplete: (planName: string) => void;
 }
 
 export default function Onboarding({ onComplete }: OnboardingProps) {
   const [token, setToken] = useState("");
+  const [validatedToken, setValidatedToken] = useState("");
   const [plans, setPlans] = useState<YnabPlan[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -29,6 +30,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
       if (response.error) {
         setError(response.error);
       } else {
+        setValidatedToken(trimmed);
         setPlans(response.plans);
       }
     } catch (e) {
@@ -45,14 +47,14 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
     try {
       const response = await browser.runtime.sendMessage({
         type: "SAVE_SETTINGS",
-        token: token.trim(),
+        token: validatedToken,
         planId: plan.id,
         planName: plan.name,
       });
       if (response.error) {
         setError(response.error);
       } else {
-        onComplete();
+        onComplete(plan.name);
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to save settings");

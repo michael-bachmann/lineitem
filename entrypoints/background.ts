@@ -15,7 +15,11 @@ export default defineBackground(() => {
 async function handleMessage(message: MessageRequest): Promise<unknown> {
   switch (message.type) {
     case "GET_SETTINGS": {
-      return getSettings();
+      try {
+        return await getSettings();
+      } catch (e) {
+        return { error: e instanceof Error ? e.message : "Failed to load settings" };
+      }
     }
 
     case "GET_PLANS": {

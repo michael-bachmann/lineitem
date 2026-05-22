@@ -10,23 +10,25 @@ interface SettingsProps {
 export default function Settings({ planName, onDisconnect, onBack }: SettingsProps) {
   const [refreshing, setRefreshing] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
 
   async function handleRefreshCategories() {
     setRefreshing(true);
-    setMessage(null);
+    setError(null);
+    setSuccess(null);
 
     try {
       const response = await browser.runtime.sendMessage({
         type: "REFRESH_CATEGORIES",
       });
       if (response.error) {
-        setMessage(response.error);
+        setError(response.error);
       } else {
-        setMessage("Categories refreshed.");
+        setSuccess("Categories refreshed.");
       }
     } catch (e) {
-      setMessage(e instanceof Error ? e.message : "Failed to refresh categories");
+      setError(e instanceof Error ? e.message : "Failed to refresh categories");
     } finally {
       setRefreshing(false);
     }
@@ -34,13 +36,14 @@ export default function Settings({ planName, onDisconnect, onBack }: SettingsPro
 
   async function handleDisconnect() {
     setDisconnecting(true);
-    setMessage(null);
+    setError(null);
+    setSuccess(null);
 
     try {
       await browser.runtime.sendMessage({ type: "CLEAR_SETTINGS" });
       onDisconnect();
     } catch (e) {
-      setMessage(e instanceof Error ? e.message : "Failed to disconnect");
+      setError(e instanceof Error ? e.message : "Failed to disconnect");
       setDisconnecting(false);
     }
   }
@@ -79,8 +82,11 @@ export default function Settings({ planName, onDisconnect, onBack }: SettingsPro
           {disconnecting ? "Disconnecting..." : "Disconnect YNAB"}
         </button>
 
-        {message && (
-          <p className="text-sm text-gray-400">{message}</p>
+        {error && (
+          <p className="text-sm text-red-400">{error}</p>
+        )}
+        {success && (
+          <p className="text-sm text-green-400">{success}</p>
         )}
       </div>
     </div>

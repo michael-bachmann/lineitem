@@ -34,13 +34,9 @@ export default function App() {
   if (view === "onboarding") {
     return (
       <Onboarding
-        onComplete={() => {
-          browser.runtime
-            .sendMessage({ type: "GET_SETTINGS" })
-            .then((response) => {
-              setPlanName(response.planName ?? "");
-              setView("queue");
-            });
+        onComplete={(name: string) => {
+          setPlanName(name);
+          setView("queue");
         }}
       />
     );
