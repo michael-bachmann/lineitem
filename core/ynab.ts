@@ -18,24 +18,24 @@ async function ynabFetch(path: string, token: string, options?: RequestInit) {
   return response.json();
 }
 
-export interface YnabBudget {
+export interface YnabPlan {
   id: string;
   name: string;
 }
 
-export async function getBudgets(token: string): Promise<YnabBudget[]> {
-  const data = await ynabFetch("/budgets", token);
-  return data.data.budgets.map((b: { id: string; name: string }) => ({
-    id: b.id,
-    name: b.name,
+export async function getPlans(token: string): Promise<YnabPlan[]> {
+  const data = await ynabFetch("/plans", token);
+  return data.data.plans.map((p: { id: string; name: string }) => ({
+    id: p.id,
+    name: p.name,
   }));
 }
 
 export async function getCategories(
   token: string,
-  budgetId: string,
+  planId: string,
 ): Promise<Category[]> {
-  const data = await ynabFetch(`/budgets/${budgetId}/categories`, token);
+  const data = await ynabFetch(`/plans/${planId}/categories`, token);
   return data.data.category_groups
     .filter(
       (g: { hidden: boolean; deleted: boolean; name: string }) =>
@@ -50,10 +50,10 @@ export async function getCategories(
 
 export async function getUnapprovedTransactions(
   token: string,
-  budgetId: string,
+  planId: string,
 ): Promise<YnabTransaction[]> {
   const data = await ynabFetch(
-    `/budgets/${budgetId}/transactions?type=unapproved`,
+    `/plans/${planId}/transactions?type=unapproved`,
     token,
   );
   return data.data.transactions;
@@ -72,12 +72,12 @@ export interface YnabTransactionUpdate {
 
 export async function updateTransaction(
   token: string,
-  budgetId: string,
+  planId: string,
   transactionId: string,
   update: YnabTransactionUpdate,
 ): Promise<void> {
   await ynabFetch(
-    `/budgets/${budgetId}/transactions/${transactionId}`,
+    `/plans/${planId}/transactions/${transactionId}`,
     token,
     {
       method: "PUT",
