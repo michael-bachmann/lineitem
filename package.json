@@ -1,6 +1,6 @@
 {
-  "name": "wxt-react-starter",
-  "description": "manifest.json description",
+  "name": "itemize",
+  "description": "Match YNAB transactions to Amazon orders and categorize line items",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -19,9 +19,11 @@
     "react-dom": "^19.2.4"
   },
   "devDependencies": {
+    "@tailwindcss/vite": "^4.3.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@wxt-dev/module-react": "^1.1.5",
+    "tailwindcss": "^4.3.0",
     "typescript": "^5.9.3",
     "wxt": "^0.20.26"
   }
