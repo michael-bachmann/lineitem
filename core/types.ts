@@ -9,8 +9,8 @@
 // ---------------------------------------------------------------------------
 
 /**
- * A single product within an Order. Nested in Order.items — not stored
- * as a separate IndexedDB record.
+ * A single product within a Transaction. Nested in Transaction.items —
+ * not stored as a separate IndexedDB record.
  */
 export interface LineItem {
   /** Retailer's product identifier (e.g. ASIN for Amazon). */
@@ -26,51 +26,35 @@ export interface LineItem {
 }
 
 /**
- * An Amazon (or other retailer) order containing one or more line items.
+ * A retailer-side transaction matched to a YNAB transaction by exact amount
+ * + date proximity (±3 days). Contains the line items for categorization.
  *
- * Stored in the `orders` IndexedDB store, keyed by id.
- * One order may be linked to one or more Charges (split shipments).
+ * For Amazon, this is a card-level charge (one per shipment). A single charge
+ * may span multiple orders (e.g. Amazon Day deliveries), and one order may be
+ * split across multiple charges (split shipments).
+ *
+ * Other retailers may produce one Transaction per order instead.
+ *
+ * Stored in the `transactions` IndexedDB store, keyed by id.
  */
-export interface Order {
-  /** Format: "{retailer}:{orderId}" e.g. "amazon:112-456-789" */
+export interface Transaction {
+  /** Format: "{retailer}:{date}-{amountCents}" e.g. "amazon:2026-05-17-8743" */
   id: string;
   /** Retailer identifier, e.g. "amazon". */
   retailer: string;
-  /** Retailer's native order ID, e.g. "112-456-789". */
-  orderId: string;
-  /** ISO date (YYYY-MM-DD) — when the order was placed. */
-  orderDate: string;
-  /** Order total in cents. */
-  total: number;
-  /** Line items in this order. */
-  items: LineItem[];
-  /** ISO datetime — when this order was scraped from the retailer. */
-  scrapedAt: string;
-}
-
-/**
- * A card-level charge scraped from the retailer's transactions/payments page.
- * This is the bridge between a YNAB transaction and an Order — matched by
- * exact amount + date proximity (±3 days).
- *
- * Stored in the `charges` IndexedDB store, keyed by id.
- */
-export interface Charge {
-  /** Format: "{retailer}:{chargeDate}-{amountCents}-{orderId}" */
-  id: string;
-  /** Retailer identifier, e.g. "amazon". */
-  retailer: string;
-  /** ISO date (YYYY-MM-DD) — when the charge posted. */
-  chargeDate: string;
-  /** Charge amount in cents (always positive, even for refunds). */
+  /** ISO date (YYYY-MM-DD) — when the charge posted or order was placed. */
+  date: string;
+  /** Amount in cents (always positive, even for refunds). */
   amountCents: number;
-  /** Retailer order ID linked to this charge, if available. */
-  orderId: string | null;
-  /** Last four digits of the card charged. */
+  /** Retailer order IDs associated with this transaction. */
+  orderIds: string[];
+  /** Last four digits of the card charged, if available. */
   cardLastFour: string | null;
-  /** Whether this charge is a refund rather than a purchase. */
+  /** Whether this is a refund rather than a purchase. */
   isRefund: boolean;
-  /** ISO datetime — when this charge was scraped from the retailer. */
+  /** Line items included in this transaction. */
+  items: LineItem[];
+  /** ISO datetime — when this transaction was scraped from the retailer. */
   scrapedAt: string;
 }
 
@@ -192,7 +176,7 @@ export type SyncStatus = "idle" | "syncing" | "done" | "error";
 
 export type TransactionMatchStatus =
   | { status: "loading" }
-  | { status: "matched"; order: Order; classifiedItems: ClassifiedItem[] }
+  | { status: "matched"; transaction: Transaction; classifiedItems: ClassifiedItem[] }
   | { status: "no_match" }
   | { status: "auth_required" }
   | { status: "error"; message: string };
