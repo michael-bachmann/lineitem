@@ -1,6 +1,25 @@
 import type { YnabTransaction, Category } from "./types";
 
 const BASE_URL = "https://api.ynab.com/v1";
+const INTERNAL_CATEGORY_GROUP = "Internal Master Category";
+
+interface YnabCategoryGroup {
+  name: string;
+  hidden: boolean;
+  deleted: boolean;
+  categories: YnabCategory[];
+}
+
+interface YnabCategory {
+  id: string;
+  name: string;
+  hidden: boolean;
+  deleted: boolean;
+}
+
+function isVisible(item: { hidden: boolean; deleted: boolean }): boolean {
+  return !item.hidden && !item.deleted;
+}
 
 async function ynabFetch(path: string, token: string, options?: RequestInit) {
   const response = await fetch(`${BASE_URL}${path}`, {
@@ -36,15 +55,16 @@ export async function getCategories(
   planId: string,
 ): Promise<Category[]> {
   const data = await ynabFetch(`/plans/${planId}/categories`, token);
-  return data.data.category_groups
-    .filter(
-      (g: { hidden: boolean; deleted: boolean; name: string }) =>
-        !g.hidden && !g.deleted && g.name !== "Internal Master Category",
-    )
-    .flatMap((g: { name: string; categories: Array<{ id: string; name: string; hidden: boolean; deleted: boolean }> }) =>
-      g.categories
-        .filter((c) => !c.hidden && !c.deleted)
-        .map((c) => ({ id: c.id, name: c.name, groupName: g.name })),
+  const groups: YnabCategoryGroup[] = data.data.category_groups;
+
+  return groups
+    .filter((group: YnabCategoryGroup) => isVisible(group) && group.name !== INTERNAL_CATEGORY_GROUP)
+    .flatMap((group: YnabCategoryGroup) =>
+      group.categories.filter(isVisible).map((category: YnabCategory) => ({
+        id: category.id,
+        name: category.name,
+        groupName: group.name,
+      })),
     );
 }
 
