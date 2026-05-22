@@ -4,12 +4,7 @@ import {
   type RawTransaction,
   type RawItem,
 } from "@/retailers/amazon/scraper";
-import {
-  AUTH_PAGE_REGEX,
-  SELECTORS,
-  TRANSACTIONS_URL,
-  orderDetailUrl,
-} from "@/retailers/amazon/selectors";
+import { AUTH_PAGE_REGEX, SELECTORS } from "@/retailers/amazon/selectors";
 
 interface CheckAuthMessage {
   type: "CHECK_AUTH";
@@ -22,7 +17,6 @@ interface ScrapeTransactionsMessage {
 
 interface ScrapeItemsMessage {
   type: "SCRAPE_ITEMS";
-  orderId: string;
 }
 
 type ContentMessage =
@@ -43,118 +37,72 @@ export default defineContentScript({
   },
 });
 
-async function handleMessage(
-  message: ContentMessage,
-): Promise<unknown> {
+async function handleMessage(message: ContentMessage): Promise<unknown> {
   switch (message.type) {
     case "CHECK_AUTH":
       return checkAuth();
     case "SCRAPE_TRANSACTIONS":
       return scrapeTransactions(Math.max(1, Math.min(message.maxPages ?? 5, 20)));
     case "SCRAPE_ITEMS":
-      return scrapeItems(message.orderId);
+      return scrapeItems();
     default:
       return { error: `Unknown message type: ${(message as { type: string }).type}` };
   }
 }
 
-// ---------------------------------------------------------------------------
-// CHECK_AUTH — detect login/challenge pages
-// ---------------------------------------------------------------------------
-
 function checkAuth(): { authenticated: boolean } {
   return { authenticated: !AUTH_PAGE_REGEX.test(window.location.href) };
 }
 
-// ---------------------------------------------------------------------------
-// SCRAPE_TRANSACTIONS — fetch + paginate the transactions page
-// ---------------------------------------------------------------------------
+function waitForSettled(ms = 2000): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 async function scrapeTransactions(
   maxPages: number,
 ): Promise<{ transactions: RawTransaction[] } | { error: string }> {
-  try {
-    const allTransactions: RawTransaction[] = [];
-    let url: string | null = TRANSACTIONS_URL;
+  if (AUTH_PAGE_REGEX.test(window.location.href)) {
+    return { error: "auth_required" };
+  }
 
-    for (let page = 0; page < maxPages && url; page++) {
-      const resp = await fetch(url, { credentials: "include" });
-      if (!resp.ok) {
-        return { error: `Fetch failed: ${resp.status} ${resp.statusText}` };
-      }
-      const html = await resp.text();
-      const doc = new DOMParser().parseFromString(html, "text/html");
+  const allTransactions: RawTransaction[] = [];
 
-      // Check if we landed on a login page
-      if (AUTH_PAGE_REGEX.test(resp.url)) {
-        return { error: "auth_required" };
-      }
-
-      const parsed = parseTransactionsFromDocument(doc);
-      allTransactions.push(...parsed);
-
-      // Look for a next-page button to determine the next URL
-      url = findNextPageUrl(doc);
+  for (let page = 0; page < maxPages; page++) {
+    const parsed = parseTransactionsFromDocument(document);
+    if (parsed.length === 0 && page === 0) {
+      return { transactions: [] };
     }
 
-    return { transactions: allTransactions };
-  } catch (e) {
-    return { error: e instanceof Error ? e.message : "Failed to scrape transactions" };
+    allTransactions.push(...parsed);
+
+    const hasNext = await loadNextPage();
+    if (!hasNext) break;
   }
+
+  return { transactions: allTransactions };
 }
 
-/**
- * Find the next-page form action URL from the transactions page.
- * Amazon's pagination uses a form with a submit button; extract the form action.
- */
-function findNextPageUrl(doc: Document): string | null {
-  const nextButton = doc.querySelector(SELECTORS.nextPageButton);
-  if (!nextButton) return null;
+async function loadNextPage(): Promise<boolean> {
+  const buttons = document.querySelectorAll<HTMLInputElement>(
+    SELECTORS.nextPageButton,
+  );
+  const nextButton = buttons[buttons.length - 1];
+  if (!nextButton) return false;
 
-  const form = nextButton.closest("form");
-  if (!form) return null;
+  const labelId = nextButton.getAttribute("aria-labelledby") ?? "";
+  const labelEl = labelId ? document.getElementById(labelId) : null;
+  if (labelEl?.textContent?.trim() !== "Next Page") return false;
 
-  const action = form.getAttribute("action");
-  if (!action) return null;
-
-  // Build the full URL from the form action + hidden inputs
-  const formData = new URLSearchParams();
-  form.querySelectorAll<HTMLInputElement>("input[name]").forEach((input) => {
-    formData.set(input.name, input.value);
-  });
-
-  try {
-    const base = new URL(action, TRANSACTIONS_URL);
-    base.search = formData.toString();
-    return base.toString();
-  } catch {
-    return null;
-  }
+  nextButton.click();
+  await waitForSettled();
+  return true;
 }
 
-// ---------------------------------------------------------------------------
-// SCRAPE_ITEMS — fetch a single order detail page
-// ---------------------------------------------------------------------------
-
-async function scrapeItems(
-  orderId: string,
-): Promise<{ items: RawItem[] } | { error: string }> {
-  try {
-    const url = orderDetailUrl(orderId);
-    const resp = await fetch(url, { credentials: "include" });
-    if (!resp.ok) {
-      return { error: `Fetch failed: ${resp.status} ${resp.statusText}` };
-    }
-    const html = await resp.text();
-
-    if (AUTH_PAGE_REGEX.test(resp.url)) {
-      return { error: "auth_required" };
-    }
-
-    const doc = new DOMParser().parseFromString(html, "text/html");
-    const items = parseItemsFromDocument(doc);
-    return { items };
-  } catch (e) {
-    return { error: e instanceof Error ? e.message : "Failed to scrape items" };
+async function scrapeItems(): Promise<{ items: RawItem[] } | { error: string }> {
+  if (AUTH_PAGE_REGEX.test(window.location.href)) {
+    return { error: "auth_required" };
   }
+
+  const items = parseItemsFromDocument(document);
+  return { items };
 }
