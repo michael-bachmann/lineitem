@@ -3,16 +3,18 @@ import { browser } from "wxt/browser";
 import Onboarding from "@/components/Onboarding";
 import Settings from "@/components/Settings";
 import QueueView from "@/components/QueueView";
+import DetailView from "@/components/DetailView";
 import { isFullyClassified } from "@/lib/queue";
-import type { QueueEntry, Category } from "@/lib/types";
+import type { QueueEntry, Category, ApprovalItem } from "@/lib/types";
 
-type View = "loading" | "onboarding" | "queue" | "settings";
+type View = "loading" | "onboarding" | "queue" | "settings" | "detail";
 
 export default function App() {
   const [view, setView] = useState<View>("loading");
   const [planName, setPlanName] = useState("");
   const [queue, setQueue] = useState<QueueEntry[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
+  const [selectedEntry, setSelectedEntry] = useState<QueueEntry | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [approving, setApproving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -111,6 +113,31 @@ export default function App() {
     }
   };
 
+  // Detail view
+  if (view === "detail" && selectedEntry !== null) {
+    const handleApprove = async (ynabTransactionId: string, items: ApprovalItem[]) => {
+      const result = await browser.runtime.sendMessage({
+        type: "APPROVE_TRANSACTION",
+        ynabTransactionId,
+        items,
+      });
+      if (result?.error) throw new Error(result.error);
+      setQueue((prev) => prev.filter((e) => e.ynabTransaction.id !== ynabTransactionId));
+    };
+
+    return (
+      <DetailView
+        entry={selectedEntry}
+        categories={categories}
+        onBack={() => {
+          setSelectedEntry(null);
+          setView("queue");
+        }}
+        onApprove={handleApprove}
+      />
+    );
+  }
+
   // Queue view
   return (
     <QueueView
@@ -122,7 +149,8 @@ export default function App() {
       onSync={handleSync}
       onApproveAll={handleApproveAll}
       onSelectEntry={(entry) => {
-        console.log("Selected entry:", entry);
+        setSelectedEntry(entry);
+        setView("detail");
       }}
       onSettings={() => setView("settings")}
     />

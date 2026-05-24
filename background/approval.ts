@@ -2,30 +2,12 @@ import { getSettings } from "@/lib/settings";
 import { updateTransaction } from "@/lib/ynab";
 import { getOrderByYnabTransactionId, getProductCategory, putProductCategory } from "@/lib/db";
 import { classifyItems } from "@/lib/classifier";
+import { distributeRemainder } from "@/lib/money";
 import type { Order, ApprovalItem } from "@/lib/types";
 
 /** Check whether all items share the same category. */
 function isSingleCategory(items: ApprovalItem[]): boolean {
   return items.every((item) => item.categoryId === items[0].categoryId);
-}
-
-/**
- * Distribute a remainder (taxes/shipping) proportionally across item amounts.
- * Assigns rounding error to the last item so the total is exact.
- */
-function distributeRemainder(itemAmounts: number[], remainder: number): number[] {
-  const total = itemAmounts.reduce((sum, a) => sum + a, 0);
-  if (total === 0) return itemAmounts.map(() => 0);
-
-  const shares = itemAmounts.map((amount) =>
-    Math.round((amount / total) * remainder),
-  );
-
-  // Absorb rounding error into the last item
-  const distributed = shares.reduce((sum, s) => sum + s, 0);
-  shares[shares.length - 1] += remainder - distributed;
-
-  return shares;
 }
 
 /**
