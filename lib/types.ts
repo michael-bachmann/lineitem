@@ -150,6 +150,7 @@ export type MessageRequest =
   | { type: "SAVE_SETTINGS"; token: string; planId: string; planName: string }
   | { type: "GET_PLANS"; token: string }
   | { type: "REFRESH_CATEGORIES" }
+  | { type: "GET_CATEGORIES" }
   | { type: "CLEAR_SETTINGS" };
 
 export interface ApprovalItem {

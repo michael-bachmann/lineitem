@@ -1,6 +1,6 @@
 import { getSettings, saveSettings, clearSettings } from "@/lib/settings";
 import { getPlans, getCategories } from "@/lib/ynab";
-import { putCategories } from "@/lib/db";
+import { putCategories, getAllCategories } from "@/lib/db";
 import { performSync } from "@/background/sync";
 import { approveTransaction, approveBatch } from "@/background/approval";
 import type { MessageRequest } from "@/lib/types";
@@ -61,6 +61,15 @@ async function handleMessage(message: MessageRequest): Promise<unknown> {
         return { ok: true };
       } catch (e) {
         return { error: e instanceof Error ? e.message : "Failed to refresh categories" };
+      }
+    }
+
+    case "GET_CATEGORIES": {
+      try {
+        const categories = await getAllCategories();
+        return { categories };
+      } catch (e) {
+        return { error: e instanceof Error ? e.message : "Failed to load categories" };
       }
     }
 
