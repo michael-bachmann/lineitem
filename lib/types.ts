@@ -9,7 +9,7 @@
 // ---------------------------------------------------------------------------
 
 /**
- * A single product within an Order. Nested in Order.items —
+ * A single product within an ItemizedTransaction. Nested in items —
  * not stored as a separate IndexedDB record.
  */
 export interface LineItem {
@@ -26,14 +26,13 @@ export interface LineItem {
 }
 
 /**
- * A retailer order matched to a YNAB transaction. Contains the line items
- * for categorization. Only written to IndexedDB once fully matched and
- * scraped (items populated, ynabTransactionId set).
- *
- * Stored in the `orders` IndexedDB store, keyed by orderKey.
- * Secondary index on ynabTransactionId for fast lookups during sync.
+ * A YNAB transaction matched to a retailer order with scraped line items.
+ * Stored in the `itemizedTransactions` IDB store, keyed by ynabTransactionId.
+ * Non-unique secondary index on orderKey for future "stop at cached order" optimization.
  */
-export interface Order {
+export interface ItemizedTransaction {
+  /** YNAB transaction UUID — primary key. */
+  ynabTransactionId: string;
   /** Format: "{retailer}:{orderId}" e.g. "amazon:112-1234567-1234567" */
   orderKey: string;
   /** Retailer identifier, e.g. "amazon". */
@@ -48,8 +47,6 @@ export interface Order {
   isRefund: boolean;
   /** Line items included in this order. */
   items: LineItem[];
-  /** YNAB transaction UUID this order is matched to. */
-  ynabTransactionId: string;
   /** ISO datetime — when this order was scraped from the retailer. */
   scrapedAt: string;
 }
@@ -174,7 +171,7 @@ export type SyncStatus = "idle" | "syncing" | "done" | "error";
 
 export type OrderMatchStatus =
   | { status: "loading" }
-  | { status: "matched"; order: Order; classifiedItems: ClassifiedItem[] }
+  | { status: "matched"; order: ItemizedTransaction; classifiedItems: ClassifiedItem[] }
   | { status: "no_match" }
   | { status: "auth_required" }
   | { status: "error"; message: string };

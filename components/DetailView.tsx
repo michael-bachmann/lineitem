@@ -11,7 +11,7 @@ interface DetailViewProps {
   onApprove: (ynabTransactionId: string, items: ApprovalItem[]) => Promise<void>;
 }
 
-// Parse the order ID from an orderKey like "amazon:112-1234567-1234567" → "112-1234567-1234567"
+// Parse the order ID from an orderKey like "amazon:112-1234567-1234567"
 function parseOrderId(orderKey: string): string {
   const colonIndex = orderKey.indexOf(":");
   return colonIndex >= 0 ? orderKey.slice(colonIndex + 1) : orderKey;

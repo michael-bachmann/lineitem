@@ -1,9 +1,9 @@
 import { getSettings } from "@/lib/settings";
 import { updateTransaction } from "@/lib/ynab";
-import { getOrderByYnabTransactionId, getProductCategory, putProductCategory } from "@/lib/db";
+import { getItemizedTransaction, getProductCategory, putProductCategory } from "@/lib/db";
 import { classifyItems } from "@/lib/classifier";
 import { distributeRemainder } from "@/lib/money";
-import type { Order, ApprovalItem } from "@/lib/types";
+import type { ItemizedTransaction, ApprovalItem } from "@/lib/types";
 
 /** Check whether all items share the same category. */
 function isSingleCategory(items: ApprovalItem[]): boolean {
@@ -16,15 +16,15 @@ function isSingleCategory(items: ApprovalItem[]): boolean {
  * transaction amount since we matched on exact amount during sync.
  */
 function buildSubtransactions(
-  order: Order,
+  tx: ItemizedTransaction,
   items: ApprovalItem[],
 ): Array<{ amount: number; category_id: string | null; memo: string | null }> {
   // Refunds are positive (inflow), purchases negative (outflow)
-  const sign = order.isRefund ? 10 : -10;
+  const sign = tx.isRefund ? 10 : -10;
   const toMilliunits = (cents: number) => cents * sign;
 
   const itemAmounts = items.map((item) => toMilliunits(item.price * item.quantity));
-  const ynabAmount = toMilliunits(order.amountCents);
+  const ynabAmount = toMilliunits(tx.amountCents);
   const itemsTotal = itemAmounts.reduce((sum, a) => sum + a, 0);
   const remainder = ynabAmount - itemsTotal;
 
@@ -65,20 +65,18 @@ export async function approveTransaction(
       return { error: "Not connected to YNAB" };
     }
 
-    const order = await getOrderByYnabTransactionId(ynabTransactionId);
-    if (!order) {
-      return { error: "Order not found — try syncing again" };
+    const itemizedTx = await getItemizedTransaction(ynabTransactionId);
+    if (!itemizedTx) {
+      return { error: "Transaction not found — try syncing again" };
     }
 
-    // Single category: set it on the parent transaction directly (no split needed)
-    // Multiple categories: create subtransactions with taxes/shipping distributed proportionally
     const update = isSingleCategory(items)
       ? { category_id: items[0].categoryId, approved: true }
-      : { subtransactions: buildSubtransactions(order, items), approved: true };
+      : { subtransactions: buildSubtransactions(itemizedTx, items), approved: true };
 
     await updateTransaction(settings.ynabToken, settings.planId, ynabTransactionId, update);
 
-    await learnFromApproval(order.retailer, items);
+    await learnFromApproval(itemizedTx.retailer, items);
 
     return { ok: true };
   } catch (e) {
@@ -92,13 +90,13 @@ export async function approveBatch(
   const errors: string[] = [];
 
   for (const ynabTxId of ynabTransactionIds) {
-    const order = await getOrderByYnabTransactionId(ynabTxId);
-    if (!order) {
-      errors.push(`${ynabTxId}: order not found`);
+    const itemizedTx = await getItemizedTransaction(ynabTxId);
+    if (!itemizedTx) {
+      errors.push(`${ynabTxId}: transaction not found`);
       continue;
     }
 
-    const classifiedItems = await classifyItems(order.items, order.retailer);
+    const classifiedItems = await classifyItems(itemizedTx.items, itemizedTx.retailer);
 
     // Skip if any item is uncategorized — partial approval would inflate categorized amounts
     const allCategorized = classifiedItems.every((ci) => ci.suggestedCategoryId !== null);

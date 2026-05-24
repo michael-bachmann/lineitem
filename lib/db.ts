@@ -1,4 +1,4 @@
-import type { Order, ProductCategory, Category } from "./types";
+import type { ItemizedTransaction, ProductCategory, Category } from "./types";
 
 const DB_NAME = "itemize";
 const DB_VERSION = 1;
@@ -12,8 +12,8 @@ function openDB(): Promise<IDBDatabase> {
     request.onupgradeneeded = () => {
       const db = request.result;
 
-      const ordersStore = db.createObjectStore("orders", { keyPath: "orderKey" });
-      ordersStore.createIndex("ynabTransactionId", "ynabTransactionId", { unique: true });
+      const txStore = db.createObjectStore("itemizedTransactions", { keyPath: "ynabTransactionId" });
+      txStore.createIndex("orderKey", "orderKey", { unique: false });
 
       db.createObjectStore("productCategories", { keyPath: "id" });
       db.createObjectStore("categories", { keyPath: "id" });
@@ -42,24 +42,18 @@ function requestToPromise<T>(request: IDBRequest<T>): Promise<T> {
   });
 }
 
-// --- Orders (primary key: orderKey, secondary index: ynabTransactionId) ---
+// --- Itemized Transactions (primary key: ynabTransactionId, secondary index: orderKey) ---
 
-export async function getOrder(orderKey: string): Promise<Order | undefined> {
-  const store = await getStore("orders");
-  return requestToPromise(store.get(orderKey));
-}
-
-export async function getOrderByYnabTransactionId(
+export async function getItemizedTransaction(
   ynabTransactionId: string,
-): Promise<Order | undefined> {
-  const store = await getStore("orders");
-  const index = store.index("ynabTransactionId");
-  return requestToPromise(index.get(ynabTransactionId));
+): Promise<ItemizedTransaction | undefined> {
+  const store = await getStore("itemizedTransactions");
+  return requestToPromise(store.get(ynabTransactionId));
 }
 
-export async function putOrder(order: Order): Promise<void> {
-  const store = await getStore("orders", "readwrite");
-  await requestToPromise(store.put(order));
+export async function putItemizedTransaction(tx: ItemizedTransaction): Promise<void> {
+  const store = await getStore("itemizedTransactions", "readwrite");
+  await requestToPromise(store.put(tx));
 }
 
 // --- Product Categories (learned from user approvals) ---

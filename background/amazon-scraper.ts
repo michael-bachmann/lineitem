@@ -1,5 +1,6 @@
 import { classifyItems } from "@/lib/classifier";
-import { putOrder } from "@/lib/db";
+import { putItemizedTransaction } from "@/lib/db";
+import { findItemSubset } from "@/lib/money";
 import { tryMatchEntries, cutoffDateFor } from "@/lib/matcher";
 import { retailerStartUrls } from "@/lib/registry";
 import { openRetailerTab, waitForTabLoad } from "./tabs";
@@ -7,20 +8,20 @@ import { orderDetailUrl } from "@/retailers/amazon/selectors";
 import type { RawTransaction, RawItem } from "@/retailers/amazon/scraper";
 import type {
   YnabTransaction,
-  Order,
+  ItemizedTransaction,
   OrderMatchStatus,
   QueueEntry,
   LineItem,
 } from "@/lib/types";
 
-/** Build an Order record from a raw scraped transaction and its items. */
-function buildOrder(
+function buildItemizedTransaction(
   retailer: string,
   raw: RawTransaction,
   items: LineItem[],
   ynabTransactionId: string,
-): Order {
+): ItemizedTransaction {
   return {
+    ynabTransactionId,
     orderKey: `${retailer}:${raw.orderId}`,
     retailer,
     date: raw.date,
@@ -28,7 +29,6 @@ function buildOrder(
     cardLastFour: raw.cardLastFour,
     isRefund: raw.isRefund,
     items,
-    ynabTransactionId,
     scrapedAt: new Date().toISOString(),
   };
 }
@@ -149,26 +149,76 @@ async function scrapeItemsForMatches(
   retailer: string,
   matched: [YnabTransaction, RawTransaction][],
 ): Promise<QueueEntry[]> {
+  // Group by order ID so we scrape each order page only once
+  const byOrder = matched.reduce<Map<string, [YnabTransaction, RawTransaction][]>>(
+    (acc, pair) => {
+      const orderId = pair[1].orderId!;
+      acc.set(orderId, [...(acc.get(orderId) ?? []), pair]);
+      return acc;
+    },
+    new Map(),
+  );
+
   const results: QueueEntry[] = [];
 
-  for (const [ynabTx, raw] of matched) {
-    const { items, error } = await scrapeOrderItems(tabId, raw.orderId!);
+  for (const [orderId, pairs] of byOrder) {
+    const { items: allItems, error } = await scrapeOrderItems(tabId, orderId);
 
-    // Don't persist orders with no items — would create a stuck state on re-sync
-    if (items.length === 0) {
-      results.push({
-        ynabTransaction: ynabTx,
-        retailer,
-        matchStatus: { status: "error", message: error ?? "Failed to scrape order items" },
-      });
+    if (allItems.length === 0) {
+      for (const [ynabTx] of pairs) {
+        results.push({
+          ynabTransaction: ynabTx,
+          retailer,
+          matchStatus: { status: "error", message: error ?? "Failed to scrape order items" },
+        });
+      }
       continue;
     }
 
-    const order = buildOrder(retailer, raw, items, ynabTx.id);
-    await putOrder(order);
+    // Single charge for this order — use all items
+    if (pairs.length === 1) {
+      const [ynabTx, raw] = pairs[0];
+      const itemizedTx = buildItemizedTransaction(retailer, raw, allItems, ynabTx.id);
+      await putItemizedTransaction(itemizedTx);
+      const classifiedItems = await classifyItems(allItems, retailer);
+      results.push({ ynabTransaction: ynabTx, retailer, matchStatus: { status: "matched", order: itemizedTx, classifiedItems } });
+      continue;
+    }
 
-    const classifiedItems = await classifyItems(items, retailer);
-    results.push({ ynabTransaction: ynabTx, retailer, matchStatus: { status: "matched", order, classifiedItems } });
+    // Multiple charges for the same order — subset-sum on items.
+    // Process charges largest-first so the smaller remainder is easier to match.
+    const orderTotalCents = pairs.reduce((sum, [, raw]) => sum + raw.amountCents, 0);
+    const itemsSubtotalCents = allItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
+    const sortedPairs = [...pairs].sort(([, a], [, b]) => b.amountCents - a.amountCents);
+    let remainingIndices = allItems.map((_, i) => i);
+
+    for (const [ynabTx, raw] of sortedPairs) {
+      const remainingSubtotals = remainingIndices.map((i) => allItems[i].price * allItems[i].quantity);
+      const matchedPositions = findItemSubset(
+        remainingSubtotals,
+        raw.amountCents,
+        orderTotalCents,
+        itemsSubtotalCents,
+      );
+
+      if (!matchedPositions) {
+        results.push({
+          ynabTransaction: ynabTx,
+          retailer,
+          matchStatus: { status: "error", message: "Could not match items to charge amount" },
+        });
+        continue;
+      }
+
+      const matchedOriginalIndices = matchedPositions.map((p) => remainingIndices[p]);
+      const items = matchedOriginalIndices.map((i) => allItems[i]);
+      remainingIndices = remainingIndices.filter((i) => !matchedOriginalIndices.includes(i));
+
+      const itemizedTx = buildItemizedTransaction(retailer, raw, items, ynabTx.id);
+      await putItemizedTransaction(itemizedTx);
+      const classifiedItems = await classifyItems(items, retailer);
+      results.push({ ynabTransaction: ynabTx, retailer, matchStatus: { status: "matched", order: itemizedTx, classifiedItems } });
+    }
   }
 
   return results;

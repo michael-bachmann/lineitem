@@ -1,18 +1,18 @@
 import { getSettings } from "@/lib/settings";
 import { getUnapprovedTransactions } from "@/lib/ynab";
-import { getOrderByYnabTransactionId } from "@/lib/db";
+import { getItemizedTransaction } from "@/lib/db";
 import { getRetailerForPayee } from "@/lib/registry";
 import { classifyItems } from "@/lib/classifier";
 import { groupBy } from "@/lib/utils";
 import { scrapeAndMatch } from "./amazon-scraper";
 import type { YnabTransaction, QueueEntry } from "@/lib/types";
 
-/** Fast path: resolve a YNAB transaction from the orders cache. */
+/** Fast path: resolve a YNAB transaction from the IDB cache. */
 async function resolveFromCache(
   tx: YnabTransaction,
   retailer: string,
 ): Promise<QueueEntry | null> {
-  const existing = await getOrderByYnabTransactionId(tx.id);
+  const existing = await getItemizedTransaction(tx.id);
   if (!existing) return null;
   const classifiedItems = await classifyItems(existing.items, retailer);
   return {
