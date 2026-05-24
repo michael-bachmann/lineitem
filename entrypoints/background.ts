@@ -7,6 +7,8 @@ import type { MessageRequest } from "@/lib/types";
 
 /** Service worker entry point — routes messages from the side panel to domain handlers. */
 export default defineBackground(() => {
+  chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
+
   browser.runtime.onMessage.addListener(
     (message: MessageRequest, _sender, sendResponse) => {
       handleMessage(message).then(sendResponse);
