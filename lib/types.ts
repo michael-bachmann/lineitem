@@ -4,12 +4,12 @@
 // All monetary values are integer cents (positive). Conversion to YNAB
 // milliunits (cents × −10 for outflows) happens at the API boundary only.
 //
-// ID formats use a "{retailer}:{...}" prefix so records from different
+// Key formats use a "{retailer}:{...}" prefix so records from different
 // retailers never collide in the same IndexedDB store.
 // ---------------------------------------------------------------------------
 
 /**
- * A single product within a Transaction. Nested in Transaction.items —
+ * A single product within an Order. Nested in Order.items —
  * not stored as a separate IndexedDB record.
  */
 export interface LineItem {
@@ -26,35 +26,31 @@ export interface LineItem {
 }
 
 /**
- * A retailer-side transaction matched to a YNAB transaction by exact amount
- * + date proximity (±3 days). Contains the line items for categorization.
+ * A retailer order matched to a YNAB transaction. Contains the line items
+ * for categorization. Only written to IndexedDB once fully matched and
+ * scraped (items populated, ynabTransactionId set).
  *
- * For Amazon, this is a card-level charge (one per shipment). A single charge
- * may span multiple orders (e.g. Amazon Day deliveries), and one order may be
- * split across multiple charges (split shipments).
- *
- * Other retailers may produce one Transaction per order instead.
- *
- * Stored in the `transactions` IndexedDB store, keyed by id.
+ * Stored in the `orders` IndexedDB store, keyed by orderKey.
+ * Secondary index on ynabTransactionId for fast lookups during sync.
  */
-export interface Transaction {
-  /** Format: "{retailer}:{date}-{amountCents}" e.g. "amazon:2026-05-17-8743" */
-  id: string;
+export interface Order {
+  /** Format: "{retailer}:{orderId}" e.g. "amazon:112-1234567-1234567" */
+  orderKey: string;
   /** Retailer identifier, e.g. "amazon". */
   retailer: string;
   /** ISO date (YYYY-MM-DD) — when the charge posted or order was placed. */
   date: string;
   /** Amount in cents (always positive, even for refunds). */
   amountCents: number;
-  /** Retailer order IDs associated with this transaction. */
-  orderIds: string[];
   /** Last four digits of the card charged, if available. */
   cardLastFour: string | null;
   /** Whether this is a refund rather than a purchase. */
   isRefund: boolean;
-  /** Line items included in this transaction. */
+  /** Line items included in this order. */
   items: LineItem[];
-  /** ISO datetime — when this transaction was scraped from the retailer. */
+  /** YNAB transaction UUID this order is matched to. */
+  ynabTransactionId: string;
+  /** ISO datetime — when this order was scraped from the retailer. */
   scrapedAt: string;
 }
 
@@ -62,9 +58,9 @@ export interface Transaction {
  * Maps a product to a YNAB category. Learned from user approvals so that
  * repeat purchases are auto-classified on future syncs.
  *
- * Stored in the `productCache` IndexedDB store, keyed by id.
+ * Stored in the `productCategories` IndexedDB store, keyed by id.
  */
-export interface ProductCacheEntry {
+export interface ProductCategory {
   /** Format: "{retailer}:{productId}" e.g. "amazon:B0XXXXXXXX" */
   id: string;
   /** YNAB category UUID. */
@@ -134,7 +130,7 @@ export interface YnabSubtransaction {
 export type PayeeStrategy = "scrape" | "skip";
 
 export interface PayeeMapping {
-  /** Regex to match against YNAB payee_name, e.g. /amazon\.com/i. */
+  /** Regex to match against YNAB payee_name, e.g. /amazon/i. */
   pattern: RegExp;
   /** Retailer identifier, e.g. "amazon". */
   retailer: string;
@@ -148,8 +144,8 @@ export interface PayeeMapping {
 
 export type MessageRequest =
   | { type: "SYNC" }
-  | { type: "APPROVE_TRANSACTION"; transactionId: string; items: ApprovalItem[] }
-  | { type: "APPROVE_BATCH"; transactionIds: string[] }
+  | { type: "APPROVE_TRANSACTION"; ynabTransactionId: string; items: ApprovalItem[] }
+  | { type: "APPROVE_BATCH"; ynabTransactionIds: string[] }
   | { type: "GET_SETTINGS" }
   | { type: "SAVE_SETTINGS"; token: string; planId: string; planName: string }
   | { type: "GET_PLANS"; token: string }
@@ -175,9 +171,9 @@ export type SyncStatus = "idle" | "syncing" | "done" | "error";
 // Queue & classification — used by the side panel to display results.
 // ---------------------------------------------------------------------------
 
-export type TransactionMatchStatus =
+export type OrderMatchStatus =
   | { status: "loading" }
-  | { status: "matched"; transaction: Transaction; classifiedItems: ClassifiedItem[] }
+  | { status: "matched"; order: Order; classifiedItems: ClassifiedItem[] }
   | { status: "no_match" }
   | { status: "auth_required" }
   | { status: "error"; message: string };
@@ -187,15 +183,15 @@ export interface ClassifiedItem extends LineItem {
   /** YNAB category UUID suggested by the classifier, or null if uncategorized. */
   suggestedCategoryId: string | null;
   /** Which classifier tier produced the suggestion, or null if uncategorized. */
-  classificationSource: "product_cache" | "keyword_rule" | null;
+  classificationSource: "product_cache" | null;
 }
 
 /** A YNAB transaction paired with its retailer match status for display in the queue. */
-export interface QueueTransaction {
+export interface QueueEntry {
   /** The original YNAB transaction. */
   ynabTransaction: YnabTransaction;
   /** Which retailer this transaction was matched to, e.g. "amazon". */
   retailer: string;
   /** Current state of matching this transaction to a retailer order. */
-  matchStatus: TransactionMatchStatus;
+  matchStatus: OrderMatchStatus;
 }

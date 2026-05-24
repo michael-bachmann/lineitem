@@ -1,12 +1,16 @@
-import { getSettings, saveSettings, clearSettings } from "@/core/settings";
-import { getPlans, getCategories } from "@/core/ynab";
-import { putCategories } from "@/core/db";
-import type { MessageRequest } from "@/core/types";
+import { getSettings, saveSettings, clearSettings } from "@/lib/settings";
+import { getPlans, getCategories } from "@/lib/ynab";
+import { putCategories } from "@/lib/db";
+import { performSync } from "@/background/sync";
+import { approveTransaction, approveBatch } from "@/background/approval";
+import type { MessageRequest } from "@/lib/types";
 
+/** Service worker entry point — routes messages from the side panel to domain handlers. */
 export default defineBackground(() => {
   browser.runtime.onMessage.addListener(
     (message: MessageRequest, _sender, sendResponse) => {
       handleMessage(message).then(sendResponse);
+      // Return true to keep the message channel open for the async response
       return true;
     },
   );
@@ -68,6 +72,15 @@ async function handleMessage(message: MessageRequest): Promise<unknown> {
         return { error: e instanceof Error ? e.message : "Failed to clear settings" };
       }
     }
+
+    case "SYNC":
+      return performSync();
+
+    case "APPROVE_TRANSACTION":
+      return approveTransaction(message.ynabTransactionId, message.items);
+
+    case "APPROVE_BATCH":
+      return approveBatch(message.ynabTransactionIds);
 
     default:
       return { error: `Unknown message type: ${(message as { type: string }).type}` };
