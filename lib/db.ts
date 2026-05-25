@@ -1,4 +1,4 @@
-import type { ItemizedTransaction, ProductCategory, Category } from "./types";
+import type { AllocatedTransaction, ProductCategory, Category } from "./types";
 
 const DB_NAME = "itemize";
 const DB_VERSION = 1;
@@ -12,7 +12,8 @@ function openDB(): Promise<IDBDatabase> {
     request.onupgradeneeded = () => {
       const db = request.result;
 
-      const txStore = db.createObjectStore("itemizedTransactions", { keyPath: "ynabTransactionId" });
+      // allocatedTransactions: primary key = ynabTransactionId, secondary index = orderKey
+      const txStore = db.createObjectStore("allocatedTransactions", { keyPath: "ynabTransactionId" });
       txStore.createIndex("orderKey", "orderKey", { unique: false });
 
       db.createObjectStore("productCategories", { keyPath: "id" });
@@ -42,18 +43,30 @@ function requestToPromise<T>(request: IDBRequest<T>): Promise<T> {
   });
 }
 
-// --- Itemized Transactions (primary key: ynabTransactionId, secondary index: orderKey) ---
+// --- Allocated Transactions (primary key: ynabTransactionId) ---
 
-export async function getItemizedTransaction(
+export async function getAllocatedTransaction(
   ynabTransactionId: string,
-): Promise<ItemizedTransaction | undefined> {
-  const store = await getStore("itemizedTransactions");
+): Promise<AllocatedTransaction | undefined> {
+  const store = await getStore("allocatedTransactions");
   return requestToPromise(store.get(ynabTransactionId));
 }
 
-export async function putItemizedTransaction(tx: ItemizedTransaction): Promise<void> {
-  const store = await getStore("itemizedTransactions", "readwrite");
-  await requestToPromise(store.put(tx));
+/** Atomic batch put — all-or-nothing for an entire sync's allocated transactions. */
+export async function putAllocatedTransactions(
+  transactions: AllocatedTransaction[],
+): Promise<void> {
+  if (transactions.length === 0) return;
+  const db = await openDB();
+  const tx = db.transaction("allocatedTransactions", "readwrite");
+  const store = tx.objectStore("allocatedTransactions");
+  for (const at of transactions) {
+    store.put(at);
+  }
+  return new Promise((resolve, reject) => {
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
 }
 
 // --- Product Categories (learned from user approvals) ---
@@ -65,9 +78,7 @@ export async function getProductCategory(
   return requestToPromise(store.get(id));
 }
 
-export async function putProductCategory(
-  entry: ProductCategory,
-): Promise<void> {
+export async function putProductCategory(entry: ProductCategory): Promise<void> {
   const store = await getStore("productCategories", "readwrite");
   await requestToPromise(store.put(entry));
 }
@@ -79,7 +90,7 @@ export async function getAllCategories(): Promise<Category[]> {
   return requestToPromise(store.getAll());
 }
 
-/** Replace all categories atomically — clear + puts are in one IDB transaction. */
+/** Replace all categories atomically. */
 export async function putCategories(categories: Category[]): Promise<void> {
   const db = await openDB();
   const tx = db.transaction("categories", "readwrite");
