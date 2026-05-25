@@ -67,6 +67,9 @@ async function performSyncInner(): Promise<{ queue: QueueEntry[] } | { error: st
       }
     }
 
+    // Lookup by ynabTransactionId for back-references later in the pipeline.
+    const entryById = new Map(needsScraping.map((e) => [e.tx.id, e]));
+
     const chargesByRetailer = groupBy(needsScraping, (e) => e.retailer);
 
     const allAllocated: AllocatedTransaction[] = [];
@@ -90,7 +93,7 @@ async function performSyncInner(): Promise<{ queue: QueueEntry[] } | { error: st
         );
         for (const charge of charges) {
           if (!allocatedIds.has(charge.ynabTransactionId)) {
-            const tx = retailerEntries.find((e) => e.charge.ynabTransactionId === charge.ynabTransactionId)!.tx;
+            const tx = entryById.get(charge.ynabTransactionId)!.tx;
             errorEntries.push({
               ynabTransaction: tx,
               retailer: retailerId,
@@ -107,7 +110,7 @@ async function performSyncInner(): Promise<{ queue: QueueEntry[] } | { error: st
 
       // Map unmatched charges to no_match QueueEntries
       for (const { charge, reason } of unmatched) {
-        const tx = retailerEntries.find((e) => e.charge.ynabTransactionId === charge.ynabTransactionId)?.tx;
+        const tx = entryById.get(charge.ynabTransactionId)?.tx;
         if (!tx) continue;
         errorEntries.push({
           ynabTransaction: tx,
@@ -125,7 +128,7 @@ async function performSyncInner(): Promise<{ queue: QueueEntry[] } | { error: st
     // 5. CLASSIFY (post-persist; failures degrade to "no suggestion", not data loss)
     const matchedEntries: QueueEntry[] = [];
     for (const at of allAllocated) {
-      const entry = needsScraping.find((e) => e.charge.ynabTransactionId === at.ynabTransactionId);
+      const entry = entryById.get(at.ynabTransactionId);
       if (!entry) continue;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const classifiedItems = await classifyItems(at.items as any, entry.retailer);
