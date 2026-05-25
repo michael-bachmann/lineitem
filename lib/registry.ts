@@ -1,11 +1,7 @@
-import type { PayeeMapping } from "./types";
+import { adapters } from "@/retailers/registry";
 
-/** Ordered by specificity — more specific patterns (e.g. "amazon prime") must come before broad ones. */
-export const payeeMappings: PayeeMapping[] = [
-  { pattern: /amazon prime/i, retailer: "amazon", strategy: "skip" },
-  { pattern: /amazon tips/i, retailer: "amazon", strategy: "skip" },
-  { pattern: /amazon|amzn mktp/i, retailer: "amazon", strategy: "scrape" },
-];
+/** All payee mappings derived from the registered retailer adapters. */
+export const payeeMappings = adapters.flatMap((adapter) => adapter.payees);
 
 /** Match a YNAB payee name to a retailer. Returns the first matching pattern. */
 export function getRetailerForPayee(
@@ -18,8 +14,3 @@ export function getRetailerForPayee(
   }
   return null;
 }
-
-/** The transactions page URL for each supported retailer. */
-export const retailerStartUrls: Record<string, string> = {
-  amazon: "https://www.amazon.com/cpe/yourpayments/transactions",
-};
