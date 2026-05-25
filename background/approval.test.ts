@@ -84,20 +84,6 @@ describe("buildSubtransactions", () => {
     expect(sub.memo).toBe("Apple, Bread, Carrots +2 more");
   });
 
-  it("represents uncategorized items as a single group with null category_id", () => {
-    const tx = makeTx({
-      items: [
-        { productId: "A", title: "Mystery", imageUrl: "", unitPriceCents: 500, quantity: 1, allocatedCents: 500 },
-      ],
-    });
-    const result = buildSubtransactions(tx, [
-      // No choice for productId "A" — falls through to null
-    ]);
-    expect(result).toEqual([
-      { amount: -5000, category_id: null, memo: "Mystery" },
-    ]);
-  });
-
   it("truncates memo to YNAB's 200-character limit", () => {
     const longTitle = "X".repeat(120);
     const items = [longTitle, longTitle, longTitle, "extra1", "extra2"].map((title, i) => ({

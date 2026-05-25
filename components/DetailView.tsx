@@ -11,9 +11,9 @@ interface DetailViewProps {
   onApprove: (ynabTransactionId: string, items: ApprovalItem[]) => Promise<void>;
 }
 
-// Show the bulk-apply row when the order has more items than this (grocery
-// orders comfortably exceed it; typical Amazon orders do not).
-const BULK_PICKER_THRESHOLD = 8;
+// Show the bulk-apply row whenever there are at least two items, so even
+// small multi-item orders benefit from a single-tap "all same category" pick.
+const BULK_PICKER_THRESHOLD = 1;
 
 // Parse the order ID from an orderKey like "amazon:112-1234567-1234567"
 function parseOrderId(orderKey: string): string {
