@@ -202,8 +202,10 @@ export interface QueueEntry {
 /** A YNAB charge normalized for the pipeline. Always positive cents. */
 export interface YnabCharge {
   ynabTransactionId: string;
-  date: string;              // ISO date (YYYY-MM-DD)
-  amountCents: number;       // positive cents, regardless of refund vs purchase
+  /** ISO date (YYYY-MM-DD). */
+  date: string;
+  /** Positive cents, regardless of refund vs purchase. */
+  amountCents: number;
   payeeName: string;
   isRefund: boolean;
   cardLastFour: string | null;
@@ -212,41 +214,51 @@ export interface YnabCharge {
 /** An order as returned by a RetailerAdapter. */
 export interface ScrapedOrder {
   retailer: string;
-  orderId: string;           // adapter's notion of "same order"
+  /** Adapter's notion of "same order". */
+  orderId: string;
   items: ScrapedItem[];
-  scrapedAt: string;         // ISO datetime
+  /** ISO datetime. */
+  scrapedAt: string;
 }
 
 /** A line item as scraped — raw per-unit price, no allocation yet. */
 export interface ScrapedItem {
   productId: string;
   title: string;
+  /** Product thumbnail URL from the retailer. */
   imageUrl: string;
-  unitPriceCents: number;    // raw per-unit price
+  /** Raw per-unit price in cents. */
+  unitPriceCents: number;
   quantity: number;
 }
 
 /** A persisted transaction with allocations. Replaces ItemizedTransaction. */
 export interface AllocatedTransaction {
-  ynabTransactionId: string; // primary key
-  orderKey: string;          // "{retailer}:{orderId}"
+  /** Primary key. */
+  ynabTransactionId: string;
+  /** Format: "{retailer}:{orderId}". */
+  orderKey: string;
   retailer: string;
   date: string;
-  amountCents: number;       // YNAB charge total
+  /** YNAB charge total in cents. */
+  amountCents: number;
   cardLastFour: string | null;
   isRefund: boolean;
-  items: AllocatedItem[];    // sum(item.allocatedCents) === amountCents exactly
+  /** Sum of item.allocatedCents equals amountCents exactly. */
+  items: AllocatedItem[];
   scrapedAt: string;
 }
 
 /** A scraped item plus its share of the YNAB charge. */
 export interface AllocatedItem extends ScrapedItem {
-  allocatedCents: number;    // this item's share of the YNAB charge (cents)
+  /** This item's share of the YNAB charge in cents. */
+  allocatedCents: number;
 }
 
 /** An adapter for scraping a retailer's order data. */
 export interface RetailerAdapter {
-  id: string;                // e.g. "amazon"
+  /** Retailer identifier, e.g. "amazon". */
+  id: string;
   payees: PayeeMapping[];
 
   /**
