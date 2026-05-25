@@ -1,7 +1,8 @@
 import { SELECTORS, ASIN_REGEX } from "./selectors";
 
 // ---------------------------------------------------------------------------
-// Raw types — internal to the scraper, mapped to Transaction/LineItem later
+// Raw types — internal to the content-script scraper. The adapter maps these
+// into ScrapedOrder / ScrapedItem for the pipeline.
 // ---------------------------------------------------------------------------
 
 export interface RawTransaction {

@@ -186,7 +186,7 @@ export interface ScrapedItem {
   quantity: number;
 }
 
-/** A persisted transaction with allocations. Replaces ItemizedTransaction. */
+/** A persisted transaction with per-item allocated amounts. */
 export interface AllocatedTransaction {
   /** Primary key. */
   ynabTransactionId: string;
