@@ -185,3 +185,54 @@ export function parseItemsFromDocument(doc: Document): RawItem[] {
     return item ? [...acc, item] : acc;
   }, []);
 }
+
+// ---------------------------------------------------------------------------
+// Grocery / itemmod parsing
+// ---------------------------------------------------------------------------
+
+/**
+ * True when the current document is the order summary for a grocery order
+ * (Whole Foods Market, Amazon Fresh). Used to route the adapter to the
+ * separate itemmod URL where the items actually live.
+ */
+export function isGroceryOrder(doc: Document): boolean {
+  return doc.querySelector(SELECTORS.groceryProgressTracker) !== null;
+}
+
+function parseItemmodElement(item: Element): RawItem | null {
+  const productLinks = item.querySelectorAll(SELECTORS.productLink);
+  let titleEl: Element | null = null;
+  let title = "";
+  for (const link of productLinks) {
+    const text = link.textContent?.trim() ?? "";
+    if (text) {
+      titleEl = link;
+      title = text;
+      break;
+    }
+  }
+  if (!title) return null;
+
+  const href = titleEl?.getAttribute("href") ?? "";
+  const asinMatch = href.match(ASIN_REGEX);
+  if (!asinMatch) return null;
+  const productId = asinMatch[1];
+
+  const imgEl = item.querySelector("img");
+  const imageUrl = imgEl?.getAttribute("src") ?? "";
+
+  // Itemmod shows the line total directly, not per-unit price.
+  const lineTotalEl = item.querySelector(SELECTORS.itemmodLineTotal);
+  const priceCents = parseCents(lineTotalEl?.textContent ?? "0");
+  if (priceCents === 0) return null;
+
+  return { productId, title, priceCents, quantity: 1, imageUrl };
+}
+
+export function parseItemmodFromDocument(doc: Document): RawItem[] {
+  const itemElements = doc.querySelectorAll(SELECTORS.itemmodItemRow);
+  return Array.from(itemElements).reduce<RawItem[]>((acc, el) => {
+    const item = parseItemmodElement(el);
+    return item ? [...acc, item] : acc;
+  }, []);
+}

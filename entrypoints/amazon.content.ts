@@ -1,6 +1,8 @@
 import {
   parseTransactionsFromDocument,
   parseItemsFromDocument,
+  parseItemmodFromDocument,
+  isGroceryOrder,
   type RawTransaction,
   type RawItem,
 } from "@/retailers/amazon/scraper";
@@ -63,9 +65,18 @@ function scrapeTransactions(): { transactions: RawTransaction[] } | { error: str
   return { transactions: parseTransactionsFromDocument(document) };
 }
 
-function scrapeItems(): { items: RawItem[] } | { error: string } {
+function scrapeItems():
+  | { items: RawItem[] }
+  | { requiresItemmod: true }
+  | { error: string } {
   if (AUTH_PAGE_REGEX.test(window.location.href)) {
     return { error: "auth_required" };
+  }
+  if (window.location.search.includes("page=itemmod")) {
+    return { items: parseItemmodFromDocument(document) };
+  }
+  if (isGroceryOrder(document)) {
+    return { requiresItemmod: true };
   }
   return { items: parseItemsFromDocument(document) };
 }

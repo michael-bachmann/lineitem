@@ -7,7 +7,7 @@ import type {
 } from "@/lib/types";
 import { matchByAmountAndDate, cutoffDateFor } from "@/lib/matcher";
 import { openRetailerTab, waitForTabLoad } from "@/background/tabs";
-import { orderDetailUrl } from "@/retailers/amazon/selectors";
+import { orderDetailUrl, itemmodUrl } from "@/retailers/amazon/selectors";
 import type { RawTransaction, RawItem } from "@/retailers/amazon/scraper";
 import { groupBy } from "remeda";
 
@@ -182,9 +182,17 @@ async function scrapeOrderItems(
   await browser.tabs.update(tabId, { url: orderDetailUrl(orderId) });
   await waitForTabLoad(tabId);
 
-  const response = (await browser.tabs.sendMessage(tabId, {
+  let response = (await browser.tabs.sendMessage(tabId, {
     type: "SCRAPE_ITEMS",
-  })) as { items: RawItem[] } | { error: string };
+  })) as { items: RawItem[] } | { requiresItemmod: true } | { error: string };
+
+  if ("requiresItemmod" in response) {
+    await browser.tabs.update(tabId, { url: itemmodUrl(orderId) });
+    await waitForTabLoad(tabId);
+    response = (await browser.tabs.sendMessage(tabId, {
+      type: "SCRAPE_ITEMS",
+    })) as { items: RawItem[] } | { error: string };
+  }
 
   if ("error" in response) return { items: [], error: response.error };
 
