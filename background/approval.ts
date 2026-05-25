@@ -11,7 +11,6 @@ function isSingleCategory(items: ApprovalItem[]): boolean {
 }
 
 const MEMO_MAX = 200;
-const UNCATEGORIZED_KEY = "__uncategorized__";
 
 function truncate(s: string, max: number): string {
   if (s.length <= max) return s;
@@ -35,25 +34,28 @@ function buildMemo(titles: string[]): string {
  * each YNAB subline corresponds to one category (not one item). Amounts
  * are summed per group; memos list the items in the group.
  *
+ * Callers (UI Approve button + approveBatch) gate against incomplete
+ * choices, so every item is guaranteed to have a category id here.
+ *
  * Per-item amounts come from item.allocatedCents — no recomputation here.
  */
 export function buildSubtransactions(
   tx: AllocatedTransaction,
   choices: ApprovalItem[],
-): Array<{ amount: number; category_id: string | null; memo: string | null }> {
+): Array<{ amount: number; category_id: string; memo: string | null }> {
   const sign = tx.isRefund ? 10 : -10; // YNAB milliunits; outflows negative
   const choiceById = new Map(choices.map((c) => [c.productId, c.categoryId]));
 
   const joined = tx.items.map((item) => ({
     item,
-    categoryId: choiceById.get(item.productId) ?? null,
+    categoryId: choiceById.get(item.productId)!,
   }));
 
-  const byCategory = groupBy(joined, (j) => j.categoryId ?? UNCATEGORIZED_KEY);
+  const byCategory = groupBy(joined, (j) => j.categoryId);
 
-  return Object.entries(byCategory).map(([key, members]) => ({
+  return Object.entries(byCategory).map(([categoryId, members]) => ({
     amount: members.reduce((acc, { item }) => acc + item.allocatedCents * sign, 0),
-    category_id: key === UNCATEGORIZED_KEY ? null : key,
+    category_id: categoryId,
     memo: buildMemo(members.map(({ item }) => item.title)),
   }));
 }
