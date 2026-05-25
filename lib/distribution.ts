@@ -1,4 +1,10 @@
 import { sum } from "remeda";
+import type {
+  ScrapedOrder,
+  YnabCharge,
+  AllocatedTransaction,
+  AllocatedItem,
+} from "./types";
 
 /**
  * Distribute totalCents across items proportionally by their subtotals.
@@ -159,4 +165,67 @@ function enumerateSubsets(
     search(i + 1, included, [...excluded, items[i]]);
   }
   search(0, [], []);
+}
+
+/**
+ * The full distribution algorithm: take a scraped order and its YNAB
+ * charges, return one AllocatedTransaction per charge with items
+ * partitioned across charges and per-item allocated amounts that sum
+ * exactly to each charge's amountCents.
+ *
+ * Returns an empty array if the partition cannot be computed (no items,
+ * M > n, or n exceeds the cap). Callers should treat that as an error
+ * for the affected charges.
+ */
+export function distributeOrder(
+  order: ScrapedOrder,
+  charges: YnabCharge[],
+): AllocatedTransaction[] {
+  if (order.items.length === 0) return [];
+
+  const itemSubtotals = order.items.map((item) => item.unitPriceCents * item.quantity);
+  const chargeAmounts = charges.map((c) => c.amountCents);
+  const orderTotal = sum(chargeAmounts);
+  const itemsSubtotal = sum(itemSubtotals);
+
+  const partition = assignItemsToCharges(
+    itemSubtotals,
+    chargeAmounts,
+    orderTotal,
+    itemsSubtotal,
+  );
+  if (partition === null) return [];
+
+  // Log per-charge distance for debugging — not persisted.
+  const totalDist = sum(partition.distanceCentsPerCharge);
+  if (totalDist > 0) {
+    console.debug(
+      `[distributeOrder] order=${order.orderId} total_distance_cents=${totalDist} ` +
+        `per_charge=${partition.distanceCentsPerCharge.join(",")}`,
+    );
+  }
+
+  return charges.map((charge, chargeIdx) => {
+    const itemIndices = partition.indicesPerCharge[chargeIdx];
+    const subsetItems = itemIndices.map((i) => order.items[i]);
+    const subsetSubtotals = itemIndices.map((i) => itemSubtotals[i]);
+    const allocatedAmounts = allocateProportional(subsetSubtotals, charge.amountCents);
+
+    const items: AllocatedItem[] = subsetItems.map((item, i) => ({
+      ...item,
+      allocatedCents: allocatedAmounts[i],
+    }));
+
+    return {
+      ynabTransactionId: charge.ynabTransactionId,
+      orderKey: `${order.retailer}:${order.orderId}`,
+      retailer: order.retailer,
+      date: charge.date,
+      amountCents: charge.amountCents,
+      cardLastFour: charge.cardLastFour,
+      isRefund: charge.isRefund,
+      items,
+      scrapedAt: order.scrapedAt,
+    };
+  });
 }

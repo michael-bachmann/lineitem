@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { sum } from "remeda";
-import { allocateProportional, assignItemsToCharges } from "./distribution";
+import { allocateProportional, assignItemsToCharges, distributeOrder } from "./distribution";
+import type { ScrapedOrder, YnabCharge } from "./types";
 
 describe("allocateProportional", () => {
   it("distributes total proportionally by item subtotal", () => {
@@ -117,5 +118,136 @@ describe("assignItemsToCharges", () => {
     const allIndices = result!.indicesPerCharge.flat();
     const expectedIndices = items.map((_, i) => i);
     expect(allIndices.sort()).toEqual(expectedIndices);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// distributeOrder scenario tests
+// ---------------------------------------------------------------------------
+
+const mkItem = (productId: string, unitPriceCents: number, quantity = 1) => ({
+  productId,
+  title: `Product ${productId}`,
+  imageUrl: "",
+  unitPriceCents,
+  quantity,
+});
+
+const mkCharge = (
+  ynabTransactionId: string,
+  amountCents: number,
+  overrides: Partial<YnabCharge> = {},
+): YnabCharge => ({
+  ynabTransactionId,
+  date: "2026-05-24",
+  amountCents,
+  payeeName: "AMAZON",
+  isRefund: false,
+  cardLastFour: null,
+  ...overrides,
+});
+
+const mkOrder = (orderId: string, items: ScrapedOrder["items"]): ScrapedOrder => ({
+  retailer: "amazon",
+  orderId,
+  items,
+  scrapedAt: "2026-05-24T00:00:00Z",
+});
+
+describe("distributeOrder", () => {
+  it("single charge: all items go to the one charge; allocations sum to chargeAmount", () => {
+    const order = mkOrder("o1", [mkItem("A", 5000), mkItem("B", 3000)]);
+    const charges = [mkCharge("tx1", 8800)]; // includes $8 tax
+    const result = distributeOrder(order, charges);
+    expect(result).toHaveLength(1);
+    expect(result[0].ynabTransactionId).toBe("tx1");
+    expect(result[0].amountCents).toBe(8800);
+    expect(sum(result[0].items.map((i) => i.allocatedCents))).toBe(8800);
+    expect(result[0].items.map((i) => i.productId).sort()).toEqual(["A", "B"]);
+  });
+
+  it("split shipment (HEADLINE): partitions items, one AllocatedTransaction per charge", () => {
+    const order = mkOrder("o1", [mkItem("H", 5000), mkItem("C", 3000)]);
+    const charges = [mkCharge("tx1", 5500), mkCharge("tx2", 3000)];
+    const result = distributeOrder(order, charges);
+    expect(result).toHaveLength(2);
+    const tx1 = result.find((r) => r.ynabTransactionId === "tx1")!;
+    const tx2 = result.find((r) => r.ynabTransactionId === "tx2")!;
+    expect(tx1.items.map((i) => i.productId)).toEqual(["H"]);
+    expect(tx1.items[0].allocatedCents).toBe(5500);
+    expect(tx2.items.map((i) => i.productId)).toEqual(["C"]);
+    expect(tx2.items[0].allocatedCents).toBe(3000);
+  });
+
+  it("invariant: every charge's allocations sum to exactly amountCents", () => {
+    const order = mkOrder("o1", [
+      mkItem("A", 1234),
+      mkItem("B", 5678),
+      mkItem("C", 999),
+    ]);
+    const charges = [mkCharge("tx1", 5000), mkCharge("tx2", 3000)];
+    const result = distributeOrder(order, charges);
+    for (const at of result) {
+      expect(sum(at.items.map((i) => i.allocatedCents))).toBe(at.amountCents);
+    }
+  });
+
+  it("invariant: every item appears in exactly one AllocatedTransaction", () => {
+    const order = mkOrder("o1", [mkItem("A", 1000), mkItem("B", 2000), mkItem("C", 3000)]);
+    const charges = [mkCharge("tx1", 1500), mkCharge("tx2", 4500)];
+    const result = distributeOrder(order, charges);
+    const seenIds = result.flatMap((at) => at.items.map((i) => i.productId));
+    expect(seenIds.sort()).toEqual(["A", "B", "C"]);
+  });
+
+  it("item quantity > 1: subtotal scales by quantity", () => {
+    // $20 × 3 = $60 line; alone in a $66 charge (10% tax)
+    const order = mkOrder("o1", [mkItem("A", 2000, 3)]);
+    const charges = [mkCharge("tx1", 6600)];
+    const result = distributeOrder(order, charges);
+    expect(result[0].items[0].allocatedCents).toBe(6600);
+    expect(result[0].items[0].quantity).toBe(3);
+    expect(result[0].items[0].unitPriceCents).toBe(2000); // raw price preserved
+  });
+
+  it("refund: isRefund flag carried through; amountCents stays positive", () => {
+    const order = mkOrder("o1", [mkItem("A", 5000)]);
+    const charges = [mkCharge("tx1", 5000, { isRefund: true })];
+    const result = distributeOrder(order, charges);
+    expect(result[0].isRefund).toBe(true);
+    expect(result[0].amountCents).toBe(5000);
+  });
+
+  it("multi-charge proportional tax: clean partition, exact totals", () => {
+    // Items $40, $60 = $100; Order total = $110 (10% tax); two charges sum $110
+    // Charges: $44, $66
+    const order = mkOrder("o1", [mkItem("A", 4000), mkItem("B", 6000)]);
+    const charges = [mkCharge("tx1", 4400), mkCharge("tx2", 6600)];
+    const result = distributeOrder(order, charges);
+    expect(sum(result.find((r) => r.ynabTransactionId === "tx1")!.items.map((i) => i.allocatedCents))).toBe(4400);
+    expect(sum(result.find((r) => r.ynabTransactionId === "tx2")!.items.map((i) => i.allocatedCents))).toBe(6600);
+  });
+
+  it("metadata propagation: orderKey, retailer, date, cardLastFour all set", () => {
+    const order = mkOrder("114-XYZ", [mkItem("A", 1000)]);
+    const charges = [mkCharge("tx1", 1000, { date: "2026-05-20", cardLastFour: "1234" })];
+    const result = distributeOrder(order, charges);
+    expect(result[0].orderKey).toBe("amazon:114-XYZ");
+    expect(result[0].retailer).toBe("amazon");
+    expect(result[0].date).toBe("2026-05-20");
+    expect(result[0].cardLastFour).toBe("1234");
+    expect(result[0].scrapedAt).toBe("2026-05-24T00:00:00Z");
+  });
+
+  it("returns empty array when order has no items", () => {
+    const order = mkOrder("o1", []);
+    const charges = [mkCharge("tx1", 1000)];
+    expect(distributeOrder(order, charges)).toEqual([]);
+  });
+
+  it("returns empty array when assignment fails (M > n)", () => {
+    const order = mkOrder("o1", [mkItem("A", 1000)]);
+    const charges = [mkCharge("tx1", 500), mkCharge("tx2", 500)];
+    expect(distributeOrder(order, charges)).toEqual([]);
   });
 });
