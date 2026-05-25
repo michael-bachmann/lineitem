@@ -1,5 +1,3 @@
-import type { YnabTransaction } from "./types";
-
 const THREE_DAYS_MS = 3 * 24 * 60 * 60 * 1000;
 
 /**
@@ -24,12 +22,12 @@ export function matchByAmountAndDate<T extends { date: string; amountCents: numb
   return null;
 }
 
-/** Earliest YNAB date in the set, minus 3 days. Used to stop paginating. */
-export function cutoffDateFor(ynabTxs: YnabTransaction[]): string {
-  if (ynabTxs.length === 0) return "1970-01-01";
-  const earliest = ynabTxs.reduce(
-    (min, tx) => (tx.date < min ? tx.date : min),
-    ynabTxs[0].date,
+/** Earliest date in the set, minus 3 days. Used to stop paginating. */
+export function cutoffDateFor(items: { date: string }[]): string {
+  if (items.length === 0) return "1970-01-01";
+  const earliest = items.reduce(
+    (min, item) => (item.date < min ? item.date : min),
+    items[0].date,
   );
   const cutoff = new Date(earliest);
   cutoff.setDate(cutoff.getDate() - 3);

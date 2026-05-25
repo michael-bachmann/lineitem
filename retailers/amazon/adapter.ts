@@ -119,9 +119,7 @@ async function paginateAndMatch(
   tabId: number,
   charges: YnabCharge[],
 ): Promise<PaginateResult> {
-  // Build a synthetic YnabTransaction-shaped object for cutoffDateFor.
-  // cutoffDateFor uses .date only, so this is safe.
-  const cutoffIso = cutoffDateFor(charges.map((c) => ({ date: c.date }) as any));
+  const cutoffIso = cutoffDateFor(charges);
   let candidates: RawTransaction[] = [];
   let remaining = [...charges];
   let allMatched: [YnabCharge, RawTransaction][] = [];
