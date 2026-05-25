@@ -9,52 +9,6 @@
 // ---------------------------------------------------------------------------
 
 /**
- * A single product within an Order. Nested in Order.items —
- * not stored as a separate IndexedDB record.
- */
-export interface LineItem {
-  /** Retailer's product identifier (e.g. ASIN for Amazon). */
-  productId: string;
-  /** Product title as displayed on the retailer's site. */
-  title: string;
-  /** Product thumbnail URL from the retailer. */
-  imageUrl: string;
-  /** Per-unit price in cents. */
-  price: number;
-  /** Number of this item purchased. */
-  quantity: number;
-}
-
-/**
- * A retailer order matched to a YNAB transaction. Contains the line items
- * for categorization. Only written to IndexedDB once fully matched and
- * scraped (items populated, ynabTransactionId set).
- *
- * Stored in the `orders` IndexedDB store, keyed by orderKey.
- * Secondary index on ynabTransactionId for fast lookups during sync.
- */
-export interface Order {
-  /** Format: "{retailer}:{orderId}" e.g. "amazon:112-1234567-1234567" */
-  orderKey: string;
-  /** Retailer identifier, e.g. "amazon". */
-  retailer: string;
-  /** ISO date (YYYY-MM-DD) — when the charge posted or order was placed. */
-  date: string;
-  /** Amount in cents (always positive, even for refunds). */
-  amountCents: number;
-  /** Last four digits of the card charged, if available. */
-  cardLastFour: string | null;
-  /** Whether this is a refund rather than a purchase. */
-  isRefund: boolean;
-  /** Line items included in this order. */
-  items: LineItem[];
-  /** YNAB transaction UUID this order is matched to. */
-  ynabTransactionId: string;
-  /** ISO datetime — when this order was scraped from the retailer. */
-  scrapedAt: string;
-}
-
-/**
  * Maps a product to a YNAB category. Learned from user approvals so that
  * repeat purchases are auto-classified on future syncs.
  *
@@ -153,16 +107,13 @@ export type MessageRequest =
   | { type: "GET_CATEGORIES" }
   | { type: "CLEAR_SETTINGS" };
 
+/**
+ * The user's category choice for one item in a transaction. Slimmer than
+ * the scraped item: price, quantity, title, and allocatedCents all come
+ * from the persisted AllocatedTransaction (joined by productId server-side).
+ */
 export interface ApprovalItem {
-  /** Retailer's product identifier (e.g. ASIN). */
   productId: string;
-  /** Product title — used as the subtransaction memo. */
-  title: string;
-  /** Per-unit price in cents. */
-  price: number;
-  /** Number of this item purchased. */
-  quantity: number;
-  /** YNAB category UUID chosen by the user. */
   categoryId: string;
 }
 
@@ -174,13 +125,13 @@ export type SyncStatus = "idle" | "syncing" | "done" | "error";
 
 export type OrderMatchStatus =
   | { status: "loading" }
-  | { status: "matched"; order: Order; classifiedItems: ClassifiedItem[] }
+  | { status: "matched"; order: AllocatedTransaction; classifiedItems: ClassifiedItem[] }
   | { status: "no_match" }
   | { status: "auth_required" }
   | { status: "error"; message: string };
 
-/** A LineItem enriched with the classifier's suggestion. */
-export interface ClassifiedItem extends LineItem {
+/** An AllocatedItem enriched with the classifier's suggestion. */
+export interface ClassifiedItem extends AllocatedItem {
   /** YNAB category UUID suggested by the classifier, or null if uncategorized. */
   suggestedCategoryId: string | null;
   /** Which classifier tier produced the suggestion, or null if uncategorized. */
@@ -195,4 +146,88 @@ export interface QueueEntry {
   retailer: string;
   /** Current state of matching this transaction to a retailer order. */
   matchStatus: OrderMatchStatus;
+}
+
+// ---------------------------------------------------------------------------
+// Distribution pipeline types — added for the new sync flow.
+// All monetary values are non-negative integer cents.
+// ---------------------------------------------------------------------------
+
+/** A YNAB charge normalized for the pipeline. Always positive cents. */
+export interface YnabCharge {
+  ynabTransactionId: string;
+  /** ISO date (YYYY-MM-DD). */
+  date: string;
+  /** Positive cents, regardless of refund vs purchase. */
+  amountCents: number;
+  payeeName: string;
+  isRefund: boolean;
+  cardLastFour: string | null;
+}
+
+/** An order as returned by a RetailerAdapter. */
+export interface ScrapedOrder {
+  retailer: string;
+  /** Adapter's notion of "same order". */
+  orderId: string;
+  items: ScrapedItem[];
+  /** ISO datetime. */
+  scrapedAt: string;
+}
+
+/** A line item as scraped — raw per-unit price, no allocation yet. */
+export interface ScrapedItem {
+  productId: string;
+  title: string;
+  /** Product thumbnail URL from the retailer. */
+  imageUrl: string;
+  /** Raw per-unit price in cents. */
+  unitPriceCents: number;
+  quantity: number;
+}
+
+/** A persisted transaction with per-item allocated amounts. */
+export interface AllocatedTransaction {
+  /** Primary key. */
+  ynabTransactionId: string;
+  /** Format: "{retailer}:{orderId}". */
+  orderKey: string;
+  retailer: string;
+  date: string;
+  /** YNAB charge total in cents. */
+  amountCents: number;
+  cardLastFour: string | null;
+  isRefund: boolean;
+  /** Sum of item.allocatedCents equals amountCents exactly. */
+  items: AllocatedItem[];
+  scrapedAt: string;
+}
+
+/** A scraped item plus its share of the YNAB charge. */
+export interface AllocatedItem extends ScrapedItem {
+  /** This item's share of the YNAB charge in cents. */
+  allocatedCents: number;
+}
+
+/** An adapter for scraping a retailer's order data. */
+export interface RetailerAdapter {
+  /** Retailer identifier, e.g. "amazon". */
+  id: string;
+  payees: PayeeMapping[];
+
+  /**
+   * Scrape the retailer for orders covering the given YNAB charges, and
+   * return the charge → order grouping the adapter discovered.
+   *
+   * The adapter owns its full lifecycle, including tab opening/closing
+   * and cleanup on success and failure paths. The pipeline calls this
+   * once per retailer per sync.
+   *
+   * Returns matched orders with the charges they cover, plus unmatched
+   * charges with a reason. No persistence, no classification.
+   */
+  scrapeMatchedOrders(charges: YnabCharge[]): Promise<{
+    matched: { order: ScrapedOrder; charges: YnabCharge[] }[];
+    unmatched: { charge: YnabCharge; reason: string }[];
+  }>;
 }

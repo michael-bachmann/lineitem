@@ -11,7 +11,7 @@ interface DetailViewProps {
   onApprove: (ynabTransactionId: string, items: ApprovalItem[]) => Promise<void>;
 }
 
-// Parse the order ID from an orderKey like "amazon:112-1234567-1234567" → "112-1234567-1234567"
+// Parse the order ID from an orderKey like "amazon:112-1234567-1234567"
 function parseOrderId(orderKey: string): string {
   const colonIndex = orderKey.indexOf(":");
   return colonIndex >= 0 ? orderKey.slice(colonIndex + 1) : orderKey;
@@ -77,9 +77,6 @@ export default function DetailView({ entry, categories, onBack, onApprove }: Det
     if (!allCategorized || approving) return;
     const items: ApprovalItem[] = classifiedItems.map((item, i) => ({
       productId: item.productId,
-      title: item.title,
-      price: item.price,
-      quantity: item.quantity,
       // allCategorized guarantees every index is present
       categoryId: selectedCategories.get(i)!,
     }));
@@ -96,9 +93,8 @@ export default function DetailView({ entry, categories, onBack, onApprove }: Det
   const orderId = parseOrderId(order.orderKey);
 
   // Build SplitBreakdown items from current selections
-  const splitItems = classifiedItems.map((item, i) => ({
-    price: item.price,
-    quantity: item.quantity,
+  const splitItems = order.items.map((item, i) => ({
+    allocatedCents: item.allocatedCents,
     categoryId: selectedCategories.get(i) ?? null,
   }));
 
@@ -134,7 +130,7 @@ export default function DetailView({ entry, categories, onBack, onApprove }: Det
             key={item.productId}
             title={item.title}
             imageUrl={item.imageUrl}
-            price={item.price}
+            price={item.unitPriceCents}
             quantity={item.quantity}
             selectedCategoryId={selectedCategories.get(i) ?? null}
             categories={categories}

@@ -14,20 +14,3 @@ export function parseDollarsToCents(dollars: string): number {
   if (isNaN(value)) return 0;
   return Math.abs(Math.round(value * 100));
 }
-
-/**
- * Distribute a remainder (taxes/shipping) proportionally across item amounts.
- * Assigns rounding error to the last item so the total is exact.
- */
-export function distributeRemainder(itemAmounts: number[], remainder: number): number[] {
-  const total = itemAmounts.reduce((sum, a) => sum + a, 0);
-  if (total === 0) return itemAmounts.map(() => 0);
-
-  const shares = itemAmounts.map((amount) =>
-    Math.round((amount / total) * remainder),
-  );
-
-  // Absorb rounding error into the last item
-  const correction = remainder - shares.reduce((sum, s) => sum + s, 0);
-  return shares.map((s, i) => i === shares.length - 1 ? s + correction : s);
-}
