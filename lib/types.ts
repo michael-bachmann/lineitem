@@ -150,16 +150,13 @@ export type MessageRequest =
   | { type: "GET_CATEGORIES" }
   | { type: "CLEAR_SETTINGS" };
 
+/**
+ * The user's category choice for one item in a transaction. Slimmer than
+ * the scraped item: price, quantity, title, and allocatedCents all come
+ * from the persisted AllocatedTransaction (joined by productId server-side).
+ */
 export interface ApprovalItem {
-  /** Retailer's product identifier (e.g. ASIN). */
   productId: string;
-  /** Product title — used as the subtransaction memo. */
-  title: string;
-  /** Per-unit price in cents. */
-  price: number;
-  /** Number of this item purchased. */
-  quantity: number;
-  /** YNAB category UUID chosen by the user. */
   categoryId: string;
 }
 

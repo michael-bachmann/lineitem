@@ -77,9 +77,6 @@ export default function DetailView({ entry, categories, onBack, onApprove }: Det
     if (!allCategorized || approving) return;
     const items: ApprovalItem[] = classifiedItems.map((item, i) => ({
       productId: item.productId,
-      title: item.title,
-      price: item.price,
-      quantity: item.quantity,
       // allCategorized guarantees every index is present
       categoryId: selectedCategories.get(i)!,
     }));
