@@ -193,3 +193,75 @@ export interface QueueEntry {
   /** Current state of matching this transaction to a retailer order. */
   matchStatus: OrderMatchStatus;
 }
+
+// ---------------------------------------------------------------------------
+// Distribution pipeline types — added for the new sync flow.
+// All monetary values are non-negative integer cents.
+// ---------------------------------------------------------------------------
+
+/** A YNAB charge normalized for the pipeline. Always positive cents. */
+export interface YnabCharge {
+  ynabTransactionId: string;
+  date: string;              // ISO date (YYYY-MM-DD)
+  amountCents: number;       // positive cents, regardless of refund vs purchase
+  payeeName: string;
+  isRefund: boolean;
+  cardLastFour: string | null;
+}
+
+/** An order as returned by a RetailerAdapter. */
+export interface ScrapedOrder {
+  retailer: string;
+  orderId: string;           // adapter's notion of "same order"
+  items: ScrapedItem[];
+  scrapedAt: string;         // ISO datetime
+}
+
+/** A line item as scraped — raw per-unit price, no allocation yet. */
+export interface ScrapedItem {
+  productId: string;
+  title: string;
+  imageUrl: string;
+  unitPriceCents: number;    // raw per-unit price
+  quantity: number;
+}
+
+/** A persisted transaction with allocations. Replaces ItemizedTransaction. */
+export interface AllocatedTransaction {
+  ynabTransactionId: string; // primary key
+  orderKey: string;          // "{retailer}:{orderId}"
+  retailer: string;
+  date: string;
+  amountCents: number;       // YNAB charge total
+  cardLastFour: string | null;
+  isRefund: boolean;
+  items: AllocatedItem[];    // sum(item.allocatedCents) === amountCents exactly
+  scrapedAt: string;
+}
+
+/** A scraped item plus its share of the YNAB charge. */
+export interface AllocatedItem extends ScrapedItem {
+  allocatedCents: number;    // this item's share of the YNAB charge (cents)
+}
+
+/** An adapter for scraping a retailer's order data. */
+export interface RetailerAdapter {
+  id: string;                // e.g. "amazon"
+  payees: PayeeMapping[];
+
+  /**
+   * Scrape the retailer for orders covering the given YNAB charges, and
+   * return the charge → order grouping the adapter discovered.
+   *
+   * The adapter owns its full lifecycle, including tab opening/closing
+   * and cleanup on success and failure paths. The pipeline calls this
+   * once per retailer per sync.
+   *
+   * Returns matched orders with the charges they cover, plus unmatched
+   * charges with a reason. No persistence, no classification.
+   */
+  scrapeMatchedOrders(charges: YnabCharge[]): Promise<{
+    matched: { order: ScrapedOrder; charges: YnabCharge[] }[];
+    unmatched: { charge: YnabCharge; reason: string }[];
+  }>;
+}
