@@ -9,49 +9,6 @@
 // ---------------------------------------------------------------------------
 
 /**
- * A single product within an ItemizedTransaction. Nested in items —
- * not stored as a separate IndexedDB record.
- */
-export interface LineItem {
-  /** Retailer's product identifier (e.g. ASIN for Amazon). */
-  productId: string;
-  /** Product title as displayed on the retailer's site. */
-  title: string;
-  /** Product thumbnail URL from the retailer. */
-  imageUrl: string;
-  /** Per-unit price in cents. */
-  price: number;
-  /** Number of this item purchased. */
-  quantity: number;
-}
-
-/**
- * A YNAB transaction matched to a retailer order with scraped line items.
- * Stored in the `itemizedTransactions` IDB store, keyed by ynabTransactionId.
- * Non-unique secondary index on orderKey for future "stop at cached order" optimization.
- */
-export interface ItemizedTransaction {
-  /** YNAB transaction UUID — primary key. */
-  ynabTransactionId: string;
-  /** Format: "{retailer}:{orderId}" e.g. "amazon:112-1234567-1234567" */
-  orderKey: string;
-  /** Retailer identifier, e.g. "amazon". */
-  retailer: string;
-  /** ISO date (YYYY-MM-DD) — when the charge posted or order was placed. */
-  date: string;
-  /** Amount in cents (always positive, even for refunds). */
-  amountCents: number;
-  /** Last four digits of the card charged, if available. */
-  cardLastFour: string | null;
-  /** Whether this is a refund rather than a purchase. */
-  isRefund: boolean;
-  /** Line items included in this order. */
-  items: LineItem[];
-  /** ISO datetime — when this order was scraped from the retailer. */
-  scrapedAt: string;
-}
-
-/**
  * Maps a product to a YNAB category. Learned from user approvals so that
  * repeat purchases are auto-classified on future syncs.
  *

@@ -1,5 +1,4 @@
 import type { YnabTransaction } from "./types";
-import { millunitsToCents } from "./money";
 
 const THREE_DAYS_MS = 3 * 24 * 60 * 60 * 1000;
 
@@ -23,40 +22,6 @@ export function matchByAmountAndDate<T extends { date: string; amountCents: numb
 
   if (matches.length === 1) return matches[0];
   return null;
-}
-
-/**
- * Pure matching step: partitions YNAB transactions into matched/unmatched
- * against scraped candidates. Matched candidates are removed from the pool
- * so one scraped order can't match two YNAB transactions.
- */
-export function tryMatchEntries<T extends { date: string; amountCents: number; orderId: string | null }>(
-  ynabTxs: YnabTransaction[],
-  candidates: T[],
-): {
-  matched: [YnabTransaction, T][];
-  unmatched: YnabTransaction[];
-  remainingCandidates: T[];
-} {
-  return ynabTxs.reduce<{
-    matched: [YnabTransaction, T][];
-    unmatched: YnabTransaction[];
-    remainingCandidates: T[];
-  }>(
-    (acc, tx) => {
-      const amountCents = millunitsToCents(tx.amount);
-      const match = matchByAmountAndDate(amountCents, tx.date, acc.remainingCandidates);
-      if (match?.orderId) {
-        return {
-          matched: [...acc.matched, [tx, match]],
-          unmatched: acc.unmatched,
-          remainingCandidates: acc.remainingCandidates.filter((c) => c !== match),
-        };
-      }
-      return { ...acc, unmatched: [...acc.unmatched, tx] };
-    },
-    { matched: [], unmatched: [], remainingCandidates: candidates },
-  );
 }
 
 /** Earliest YNAB date in the set, minus 3 days. Used to stop paginating. */
