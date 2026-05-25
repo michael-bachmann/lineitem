@@ -11,10 +11,24 @@ interface DetailViewProps {
   onApprove: (ynabTransactionId: string, items: ApprovalItem[]) => Promise<void>;
 }
 
+// Show the bulk-apply row when the order has more items than this (grocery
+// orders comfortably exceed it; typical Amazon orders do not).
+const BULK_PICKER_THRESHOLD = 8;
+
 // Parse the order ID from an orderKey like "amazon:112-1234567-1234567"
 function parseOrderId(orderKey: string): string {
   const colonIndex = orderKey.indexOf(":");
   return colonIndex >= 0 ? orderKey.slice(colonIndex + 1) : orderKey;
+}
+
+function categoryOptions(categories: Category[]) {
+  const groups = categories.reduce<Map<string, Category[]>>((acc, cat) => {
+    const group = acc.get(cat.groupName) ?? [];
+    group.push(cat);
+    acc.set(cat.groupName, group);
+    return acc;
+  }, new Map());
+  return [...groups.entries()];
 }
 
 export default function DetailView({ entry, categories, onBack, onApprove }: DetailViewProps) {
@@ -70,8 +84,21 @@ export default function DetailView({ entry, categories, onBack, onApprove }: Det
     });
   };
 
+  const handleBulkApply = (categoryId: string) => {
+    if (!categoryId) return;
+    setSelectedCategories((prev) => {
+      const next = new Map(prev);
+      classifiedItems.forEach((_, i) => {
+        if (!next.has(i)) next.set(i, categoryId);
+      });
+      return next;
+    });
+  };
+
   const uncategorizedCount = classifiedItems.filter((_, i) => !selectedCategories.has(i)).length;
   const allCategorized = uncategorizedCount === 0;
+  const showBulkPicker =
+    classifiedItems.length > BULK_PICKER_THRESHOLD && uncategorizedCount > 0;
 
   const handleApprove = async () => {
     if (!allCategorized || approving) return;
@@ -97,6 +124,8 @@ export default function DetailView({ entry, categories, onBack, onApprove }: Det
     allocatedCents: item.allocatedCents,
     categoryId: selectedCategories.get(i) ?? null,
   }));
+
+  const optionGroups = categoryOptions(categories);
 
   return (
     <div className="min-h-screen bg-gray-950 text-gray-100 p-4 flex flex-col gap-4">
@@ -125,6 +154,34 @@ export default function DetailView({ entry, categories, onBack, onApprove }: Det
       {/* Items section */}
       <div className="flex flex-col gap-2">
         <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">Items</p>
+
+        {showBulkPicker && (
+          <div className="flex flex-col gap-1.5 px-3 py-2 rounded-md bg-gray-900 border border-gray-700">
+            <span className="text-xs text-gray-400">
+              Apply to uncategorized ({uncategorizedCount}):
+            </span>
+            <select
+              aria-label="Apply category to uncategorized items"
+              value=""
+              onChange={(e) => {
+                handleBulkApply(e.target.value);
+              }}
+              className="w-full rounded bg-gray-950 border border-gray-600 px-2 py-1 text-xs text-gray-200 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            >
+              <option value="" disabled>— Select category —</option>
+              {optionGroups.map(([groupName, groupCategories]) => (
+                <optgroup key={groupName} label={groupName}>
+                  {groupCategories.map((cat) => (
+                    <option key={cat.id} value={cat.id}>
+                      {cat.name}
+                    </option>
+                  ))}
+                </optgroup>
+              ))}
+            </select>
+          </div>
+        )}
+
         {classifiedItems.map((item, i) => (
           <ItemCard
             key={item.productId}

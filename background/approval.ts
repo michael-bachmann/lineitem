@@ -3,28 +3,58 @@ import { updateTransaction } from "@/lib/ynab";
 import { getAllocatedTransaction, getProductCategory, putProductCategory } from "@/lib/db";
 import { classifyItems } from "@/lib/classifier";
 import type { AllocatedTransaction, ApprovalItem } from "@/lib/types";
+import { groupBy } from "remeda";
 
 /** Check whether all items share the same category. */
 function isSingleCategory(items: ApprovalItem[]): boolean {
   return items.length > 0 && items.every((item) => item.categoryId === items[0].categoryId);
 }
 
+const MEMO_MAX = 200;
+const UNCATEGORIZED_KEY = "__uncategorized__";
+
+function truncate(s: string, max: number): string {
+  if (s.length <= max) return s;
+  return s.slice(0, Math.max(0, max - 1)) + "…";
+}
+
+function buildMemo(titles: string[]): string {
+  if (titles.length === 0) return "";
+  if (titles.length <= 3) {
+    return truncate(titles.join(", "), MEMO_MAX);
+  }
+  const remainder = titles.length - 3;
+  const suffix = ` +${remainder} more`;
+  const head = truncate(titles.slice(0, 3).join(", "), MEMO_MAX - suffix.length);
+  return head + suffix;
+}
+
 /**
  * Build YNAB subtransactions by joining the user's category choices to the
- * persisted AllocatedTransaction. Per-item amounts come from item.allocatedCents
- * — no recomputation here.
+ * persisted AllocatedTransaction, then grouping items by category so that
+ * each YNAB subline corresponds to one category (not one item). Amounts
+ * are summed per group; memos list the items in the group.
+ *
+ * Per-item amounts come from item.allocatedCents — no recomputation here.
  */
-function buildSubtransactions(
+export function buildSubtransactions(
   tx: AllocatedTransaction,
   choices: ApprovalItem[],
 ): Array<{ amount: number; category_id: string | null; memo: string | null }> {
   const sign = tx.isRefund ? 10 : -10; // YNAB milliunits; outflows negative
   const choiceById = new Map(choices.map((c) => [c.productId, c.categoryId]));
 
-  return tx.items.map((item) => ({
-    amount: item.allocatedCents * sign,
-    category_id: choiceById.get(item.productId) ?? null,
-    memo: item.title,
+  const joined = tx.items.map((item) => ({
+    item,
+    categoryId: choiceById.get(item.productId) ?? null,
+  }));
+
+  const byCategory = groupBy(joined, (j) => j.categoryId ?? UNCATEGORIZED_KEY);
+
+  return Object.entries(byCategory).map(([key, members]) => ({
+    amount: members.reduce((acc, { item }) => acc + item.allocatedCents * sign, 0),
+    category_id: key === UNCATEGORIZED_KEY ? null : key,
+    memo: buildMemo(members.map(({ item }) => item.title)),
   }));
 }
 
