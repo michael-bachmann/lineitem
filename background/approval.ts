@@ -2,7 +2,7 @@ import { getSettings } from "@/lib/settings";
 import { updateTransaction } from "@/lib/ynab";
 import { getAllocatedTransaction, getProductCategory, putProductCategory } from "@/lib/db";
 import { classifyItems } from "@/lib/classifier";
-import type { AllocatedTransaction, ApprovalItem, LineItem } from "@/lib/types";
+import type { AllocatedTransaction, ApprovalItem } from "@/lib/types";
 
 /** Check whether all items share the same category. */
 function isSingleCategory(items: ApprovalItem[]): boolean {
@@ -84,8 +84,7 @@ export async function approveBatch(
       continue;
     }
 
-    // classifyItems only uses productId from each item; cast until Task 12 updates the signature.
-    const classifiedItems = await classifyItems(tx.items as unknown as LineItem[], tx.retailer);
+    const classifiedItems = await classifyItems(tx.items, tx.retailer);
 
     // Skip if any item is uncategorized — partial approval would inflate categorized amounts
     const allCategorized = classifiedItems.every((ci) => ci.suggestedCategoryId !== null);

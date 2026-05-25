@@ -130,7 +130,7 @@ export default function DetailView({ entry, categories, onBack, onApprove }: Det
             key={item.productId}
             title={item.title}
             imageUrl={item.imageUrl}
-            price={item.price}
+            price={item.unitPriceCents}
             quantity={item.quantity}
             selectedCategoryId={selectedCategories.get(i) ?? null}
             categories={categories}

@@ -168,13 +168,13 @@ export type SyncStatus = "idle" | "syncing" | "done" | "error";
 
 export type OrderMatchStatus =
   | { status: "loading" }
-  | { status: "matched"; order: ItemizedTransaction; classifiedItems: ClassifiedItem[] }
+  | { status: "matched"; order: AllocatedTransaction; classifiedItems: ClassifiedItem[] }
   | { status: "no_match" }
   | { status: "auth_required" }
   | { status: "error"; message: string };
 
-/** A LineItem enriched with the classifier's suggestion. */
-export interface ClassifiedItem extends LineItem {
+/** An AllocatedItem enriched with the classifier's suggestion. */
+export interface ClassifiedItem extends AllocatedItem {
   /** YNAB category UUID suggested by the classifier, or null if uncategorized. */
   suggestedCategoryId: string | null;
   /** Which classifier tier produced the suggestion, or null if uncategorized. */

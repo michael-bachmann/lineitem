@@ -54,13 +54,11 @@ async function performSyncInner(): Promise<{ queue: QueueEntry[] } | { error: st
     for (const entry of taggedCharges) {
       const cached = await getAllocatedTransaction(entry.tx.id);
       if (cached) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const classifiedItems = await classifyItems(cached.items as any, entry.retailer);
+        const classifiedItems = await classifyItems(cached.items, entry.retailer);
         fastPath.push({
           ynabTransaction: entry.tx,
           retailer: entry.retailer,
-          // order type updated in Task 13 when OrderMatchStatus references AllocatedTransaction
-          matchStatus: { status: "matched", order: cached as any, classifiedItems },
+          matchStatus: { status: "matched", order: cached, classifiedItems },
         });
       } else {
         needsScraping.push(entry);
@@ -130,13 +128,11 @@ async function performSyncInner(): Promise<{ queue: QueueEntry[] } | { error: st
     for (const at of allAllocated) {
       const entry = entryById.get(at.ynabTransactionId);
       if (!entry) continue;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const classifiedItems = await classifyItems(at.items as any, entry.retailer);
+      const classifiedItems = await classifyItems(at.items, entry.retailer);
       matchedEntries.push({
         ynabTransaction: entry.tx,
         retailer: entry.retailer,
-        // order type updated in Task 13 when OrderMatchStatus references AllocatedTransaction
-        matchStatus: { status: "matched", order: at as any, classifiedItems },
+        matchStatus: { status: "matched", order: at, classifiedItems },
       });
     }
 

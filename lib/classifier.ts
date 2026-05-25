@@ -1,4 +1,4 @@
-import type { LineItem, ClassifiedItem } from "./types";
+import type { ClassifiedItem } from "./types";
 import { getProductCategory } from "./db";
 
 /**
@@ -7,7 +7,7 @@ import { getProductCategory } from "./db";
  * before, otherwise returns null (user must assign manually).
  */
 export async function classifyItem(
-  item: LineItem,
+  item: { productId: string },
   retailer: string,
 ): Promise<{ categoryId: string | null; source: ClassifiedItem["classificationSource"] }> {
   const key = `${retailer}:${item.productId}`;
@@ -19,8 +19,11 @@ export async function classifyItem(
   return { categoryId: null, source: null };
 }
 
-/** Classify all line items in parallel. */
-export function classifyItems(items: LineItem[], retailer: string): Promise<ClassifiedItem[]> {
+/** Classify all items in parallel. The classifier only reads productId. */
+export function classifyItems<T extends { productId: string }>(
+  items: T[],
+  retailer: string,
+): Promise<(T & Pick<ClassifiedItem, "suggestedCategoryId" | "classificationSource">)[]> {
   return Promise.all(
     items.map(async (item) => {
       const { categoryId, source } = await classifyItem(item, retailer);
