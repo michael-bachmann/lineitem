@@ -93,9 +93,8 @@ export default function DetailView({ entry, categories, onBack, onApprove }: Det
   const orderId = parseOrderId(order.orderKey);
 
   // Build SplitBreakdown items from current selections
-  const splitItems = classifiedItems.map((item, i) => ({
-    price: item.price,
-    quantity: item.quantity,
+  const splitItems = order.items.map((item, i) => ({
+    allocatedCents: item.allocatedCents,
     categoryId: selectedCategories.get(i) ?? null,
   }));
 

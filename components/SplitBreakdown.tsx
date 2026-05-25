@@ -1,9 +1,9 @@
 import type { Category } from "@/lib/types";
-import { formatCents, distributeRemainder } from "@/lib/money";
+import { formatCents } from "@/lib/money";
+import { sum } from "remeda";
 
 interface SplitItem {
-  price: number; // cents per unit
-  quantity: number;
+  allocatedCents: number;
   categoryId: string | null;
 }
 
@@ -14,27 +14,13 @@ interface SplitBreakdownProps {
 }
 
 export default function SplitBreakdown({ items, totalAmountCents, categories }: SplitBreakdownProps) {
-  // Step 1: compute per-item amounts
-  const itemAmounts = items.map((item) => item.price * item.quantity);
-
-  // Step 2: sum item amounts and compute remainder (taxes/shipping/discounts)
-  const itemsTotal = itemAmounts.reduce((sum, a) => sum + a, 0);
-  const remainder = totalAmountCents - itemsTotal;
-
-  // Step 3: distribute remainder proportionally across items
-  const adjustments = distributeRemainder(itemAmounts, remainder);
-
-  // Step 4: build a categoryId → name lookup
+  // Aggregate allocated cents by category
   const categoryById = new Map(categories.map((c) => [c.id, c.name]));
-
-  // Step 5: aggregate totals by category (null → "Uncategorized")
-  const categoryTotals = items.reduce<Map<string, number>>((acc, item, i) => {
+  const categoryTotals = items.reduce<Map<string, number>>((acc, item) => {
     const key = item.categoryId ?? "__uncategorized__";
-    acc.set(key, (acc.get(key) ?? 0) + itemAmounts[i] + adjustments[i]);
-    return acc;
+    return new Map(acc).set(key, (acc.get(key) ?? 0) + item.allocatedCents);
   }, new Map());
 
-  // Render rows: named categories first, then uncategorized if present
   const rows = [...categoryTotals.entries()].map(([key, amount]) => ({
     key,
     label: key === "__uncategorized__" ? "Uncategorized" : (categoryById.get(key) ?? key),
@@ -42,14 +28,17 @@ export default function SplitBreakdown({ items, totalAmountCents, categories }: 
     isUncategorized: key === "__uncategorized__",
   }));
 
+  // Sanity check: sum of allocations should equal the total. If not, something
+  // upstream is wrong — show a small marker but don't crash.
+  const allocatedSum = sum(items.map((i) => i.allocatedCents));
+  const matchesTotal = allocatedSum === totalAmountCents;
+
   return (
     <div className="rounded-md bg-gray-900 border border-gray-700 px-3 py-2.5">
-      {/* Section header */}
       <p className="text-xs font-semibold uppercase tracking-wider text-gray-500 mb-2">
         Split Breakdown
       </p>
 
-      {/* Category rows */}
       <div className="space-y-1">
         {rows.map((row) => (
           <div key={row.key} className="flex items-center justify-between gap-2">
@@ -63,13 +52,13 @@ export default function SplitBreakdown({ items, totalAmountCents, categories }: 
         ))}
       </div>
 
-      {/* Divider */}
       <div className="my-2 border-t border-gray-700" />
 
-      {/* Footer row */}
       <div className="flex items-center justify-between gap-2">
-        {remainder !== 0 ? (
-          <span className="text-xs text-gray-500">Tax/shipping distributed proportionally</span>
+        {!matchesTotal ? (
+          <span className="text-xs text-amber-500" title="Allocation mismatch — re-sync recommended">
+            ⚠ Allocations don't match total
+          </span>
         ) : (
           <span />
         )}
