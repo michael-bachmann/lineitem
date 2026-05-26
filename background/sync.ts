@@ -5,8 +5,9 @@ import { getRetailerForPayee } from "@/lib/registry";
 import { getAdapter } from "@/retailers/registry";
 import { classifyItems } from "@/lib/classifier";
 import { distributeOrder } from "@/lib/distribution";
+import { verifyScrape } from "@/lib/verify-scrape";
 import { millunitsToCents } from "@/lib/money";
-import { groupBy } from "remeda";
+import { groupBy, partition } from "remeda";
 import type {
   YnabTransaction,
   YnabCharge,
@@ -80,29 +81,50 @@ async function performSyncInner(): Promise<{ queue: QueueEntry[] } | { error: st
       // 2. SCRAPE + MATCH (adapter owns tab lifecycle and cleanup)
       const { matched, unmatched } = await adapter.scrapeMatchedOrders(retailerCharges);
 
+      // 2.5 GUARD: drop orders whose scraped items don't reconcile to the
+      // retailer's displayed Item(s) Subtotal. Surfaces as error queue
+      // entries so the user sees the failure rather than a confidently-
+      // wrong attribution.
+      const verified = matched.map((m) => ({ ...m, verification: verifyScrape(m.order) }));
+      const [verifiedOk, verifiedFailed] = partition(verified, (v) => v.verification.ok);
+      const validMatched = verifiedOk.map(({ order, charges }) => ({ order, charges }));
+
+      errorEntries.push(
+        ...verifiedFailed.flatMap(({ charges, verification }) =>
+          charges.map((charge) => ({
+            ynabTransaction: entryById.get(charge.ynabTransactionId)!.tx,
+            retailer: retailerId,
+            matchStatus: {
+              status: "error" as const,
+              message: verification.ok ? "" : verification.message,
+            },
+          })),
+        ),
+      );
+
       // 3. DISTRIBUTE
-      const allocated = matched.flatMap(({ order, charges }) => distributeOrder(order, charges));
+      const allocated = validMatched.flatMap(({ order, charges }) => distributeOrder(order, charges));
 
       // Map distribution failures (empty result) to error entries
-      for (const { order, charges } of matched) {
-        const allocatedIds = new Set(
-          allocated.filter((a) => a.orderKey === `${order.retailer}:${order.orderId}`)
-            .map((a) => a.ynabTransactionId),
-        );
-        for (const charge of charges) {
-          if (!allocatedIds.has(charge.ynabTransactionId)) {
-            const tx = entryById.get(charge.ynabTransactionId)!.tx;
-            errorEntries.push({
-              ynabTransaction: tx,
+      errorEntries.push(
+        ...validMatched.flatMap(({ order, charges }) => {
+          const allocatedIds = new Set(
+            allocated
+              .filter((a) => a.orderKey === `${order.retailer}:${order.orderId}`)
+              .map((a) => a.ynabTransactionId),
+          );
+          return charges
+            .filter((charge) => !allocatedIds.has(charge.ynabTransactionId))
+            .map((charge) => ({
+              ynabTransaction: entryById.get(charge.ynabTransactionId)!.tx,
               retailer: retailerId,
               matchStatus: {
-                status: "error",
+                status: "error" as const,
                 message: "Could not partition items across charges (too many items or charges > items)",
               },
-            });
-          }
-        }
-      }
+            }));
+        }),
+      );
 
       allAllocated.push(...allocated);
 

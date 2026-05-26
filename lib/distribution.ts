@@ -49,8 +49,10 @@ const MAX_ITEMS = 20;
  * the best total found so far.
  *
  * Returns indices per charge in input charge order, plus the per-charge
- * distance contributed by that bucket. Returns null when n > MAX_ITEMS
- * (search-space cap) or M > n (structurally impossible).
+ * distance contributed by that bucket. Returns null when M > n
+ * (structurally impossible), or when M > 1 and n > MAX_ITEMS — the cap
+ * only applies to the multi-charge path because the single-charge case
+ * short-circuits to the base case without subset enumeration.
  */
 export function assignItemsToCharges(
   itemSubtotalsCents: number[],
@@ -61,9 +63,10 @@ export function assignItemsToCharges(
   const n = itemSubtotalsCents.length;
   const m = chargeAmountsCents.length;
 
-  if (n === 0 || n > MAX_ITEMS) return null;
-  if (m > n) return null;
+  if (n === 0) return null;
   if (m === 0) return null;
+  if (m > n) return null;
+  if (m > 1 && n > MAX_ITEMS) return null;
 
   const ratio = itemsSubtotalCents > 0 ? orderTotalCents / itemsSubtotalCents : 1;
 

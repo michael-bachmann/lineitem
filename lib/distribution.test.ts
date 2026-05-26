@@ -102,9 +102,18 @@ describe("assignItemsToCharges", () => {
     expect(sum(result!.distanceCentsPerCharge)).toBe(0);
   });
 
-  it("n > 20 returns null (search-space cap)", () => {
+  it("multi-charge: n > MAX_ITEMS returns null (subset-enumeration cap)", () => {
     const items = Array(21).fill(100);
-    expect(assignItemsToCharges(items, [2100], 2100, 2100)).toBeNull();
+    expect(assignItemsToCharges(items, [1050, 1050], 2100, 2100)).toBeNull();
+  });
+
+  it("single-charge: n > MAX_ITEMS still succeeds (no enumeration needed)", () => {
+    const items = Array(25).fill(100);
+    const result = assignItemsToCharges(items, [2500], 2500, 2500);
+    expect(result).not.toBeNull();
+    expect(result!.indicesPerCharge).toHaveLength(1);
+    expect(result!.indicesPerCharge[0]).toHaveLength(25);
+    expect(result!.distanceCentsPerCharge).toEqual([0]);
   });
 
   it("M > n returns null (cannot give every charge an item)", () => {
@@ -152,6 +161,7 @@ const mkOrder = (orderId: string, items: ScrapedOrder["items"]): ScrapedOrder =>
   orderId,
   items,
   scrapedAt: "2026-05-24T00:00:00Z",
+  displayedItemsSubtotalCents: items.reduce((s, it) => s + it.unitPriceCents * it.quantity, 0),
 });
 
 describe("distributeOrder", () => {

@@ -173,6 +173,14 @@ export interface ScrapedOrder {
   items: ScrapedItem[];
   /** ISO datetime. */
   scrapedAt: string;
+  /**
+   * Amazon's displayed "Item(s) Subtotal" for this order, in cents.
+   * Used by the scrape-completeness guard to verify that sum(items)
+   * matches what the retailer says the items add up to. Required —
+   * if an adapter cannot extract this, it must fail the scrape
+   * rather than fabricate a value.
+   */
+  displayedItemsSubtotalCents: number;
 }
 
 /** A line item as scraped — raw per-unit price, no allocation yet. */
