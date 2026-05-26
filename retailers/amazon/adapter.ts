@@ -64,14 +64,12 @@ export const amazonAdapter: RetailerAdapter = {
       const detailFailures: { charge: YnabCharge; reason: string }[] = [];
 
       for (const [orderId, pairs] of Object.entries(byOrderId)) {
-        const { items, error: scrapeError } = await scrapeOrderItems(tabId, orderId);
+        const result = await scrapeOrderItems(tabId, orderId);
 
-        if (items.length === 0) {
+        if ("error" in result || result.items.length === 0) {
+          const reason = "error" in result ? result.error : "Failed to scrape order items";
           for (const [charge] of pairs) {
-            detailFailures.push({
-              charge,
-              reason: scrapeError ?? "Failed to scrape order items",
-            });
+            detailFailures.push({ charge, reason });
           }
           continue;
         }
@@ -79,7 +77,8 @@ export const amazonAdapter: RetailerAdapter = {
         const order: ScrapedOrder = {
           retailer: "amazon",
           orderId,
-          items,
+          items: result.items,
+          displayedItemsSubtotalCents: result.subtotalCents,
           scrapedAt: new Date().toISOString(),
         };
         const orderCharges = pairs.map(([charge]) => charge);
@@ -175,29 +174,57 @@ async function paginateAndMatch(
 // Internal: detail-page item scrape
 // ----------------------------------------------------------------------------
 
+type SummaryResponse =
+  | { items: RawItem[]; subtotalCents: number }
+  | { requiresItemmod: true; subtotalCents: number }
+  | { error: string };
+
+type ItemmodResponse =
+  | { items: RawItem[] }
+  | { error: string };
+
+async function fetchItems(
+  tabId: number,
+  orderId: string,
+  summaryResp:
+    | { items: RawItem[]; subtotalCents: number }
+    | { requiresItemmod: true; subtotalCents: number },
+): Promise<{ items: RawItem[] } | { error: string }> {
+  if (!("requiresItemmod" in summaryResp)) return { items: summaryResp.items };
+
+  await browser.tabs.update(tabId, { url: itemmodUrl(orderId) });
+  await waitForTabLoad(tabId);
+  const itemmodResp = (await browser.tabs.sendMessage(tabId, {
+    type: "SCRAPE_ITEMS",
+  })) as ItemmodResponse;
+  return "error" in itemmodResp
+    ? { error: amazonErrorMessage(itemmodResp.error) }
+    : { items: itemmodResp.items };
+}
+
 async function scrapeOrderItems(
   tabId: number,
   orderId: string,
-): Promise<{ items: ScrapedItem[]; error?: string }> {
+): Promise<
+  | { items: ScrapedItem[]; subtotalCents: number }
+  | { error: string }
+> {
   await browser.tabs.update(tabId, { url: orderDetailUrl(orderId) });
   await waitForTabLoad(tabId);
 
-  let response = (await browser.tabs.sendMessage(tabId, {
+  const summaryResp = (await browser.tabs.sendMessage(tabId, {
     type: "SCRAPE_ITEMS",
-  })) as { items: RawItem[] } | { requiresItemmod: true } | { error: string };
+  })) as SummaryResponse;
 
-  if ("requiresItemmod" in response) {
-    await browser.tabs.update(tabId, { url: itemmodUrl(orderId) });
-    await waitForTabLoad(tabId);
-    response = (await browser.tabs.sendMessage(tabId, {
-      type: "SCRAPE_ITEMS",
-    })) as { items: RawItem[] } | { error: string };
+  if ("error" in summaryResp) {
+    return { error: amazonErrorMessage(summaryResp.error) };
   }
 
-  if ("error" in response) return { items: [], error: response.error };
+  const itemsResp = await fetchItems(tabId, orderId, summaryResp);
+  if ("error" in itemsResp) return itemsResp;
 
   return {
-    items: response.items.map(
+    items: itemsResp.items.map(
       (raw): ScrapedItem => ({
         productId: raw.productId,
         title: raw.title,
@@ -206,5 +233,22 @@ async function scrapeOrderItems(
         quantity: raw.quantity,
       }),
     ),
+    subtotalCents: summaryResp.subtotalCents,
   };
+}
+
+/**
+ * Map content-script error tokens to user-readable messages. The content
+ * script returns short stable tokens; the user-facing copy lives here
+ * alongside the retailer that produces them.
+ */
+function amazonErrorMessage(token: string): string {
+  switch (token) {
+    case "missing_subtotal":
+      return "Couldn't find Amazon's items subtotal on the page — the page layout may have changed. Try resyncing, or categorize manually in YNAB.";
+    case "auth_required":
+      return "Amazon auth required";
+    default:
+      return token;
+  }
 }

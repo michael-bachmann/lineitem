@@ -200,6 +200,12 @@ export function isGroceryOrder(doc: Document): boolean {
 }
 
 function parseItemmodElement(item: Element): RawItem | null {
+  // Skip out-of-stock items. The row still shows a line price but Amazon
+  // includes a matching negative credit in the same container, so the
+  // customer wasn't charged and Item(s) Subtotal excludes it. Counting it
+  // would inflate our sum past Amazon's and trip verify-scrape.
+  if (/Out of stock/i.test(item.textContent ?? "")) return null;
+
   const productLinks = item.querySelectorAll(SELECTORS.productLink);
   let titleEl: Element | null = null;
   let title = "";
@@ -235,4 +241,35 @@ export function parseItemmodFromDocument(doc: Document): RawItem[] {
     const item = parseItemmodElement(el);
     return item ? [...acc, item] : acc;
   }, []);
+}
+
+// ---------------------------------------------------------------------------
+// Order-summary subtotal extraction (for scrape completeness guard)
+// ---------------------------------------------------------------------------
+
+const SUBTOTAL_LABEL_REGEX = /^Item\(s\)\s+Subtotal:?$/i;
+const DOLLAR_VALUE_REGEX = /\$([0-9,]+\.[0-9]{2})/;
+
+/**
+ * Extract Amazon's displayed "Item(s) Subtotal" value from the order
+ * summary page, returned as integer cents.
+ *
+ * Strategy: find the element whose trimmed text is the subtotal label,
+ * then walk up to its enclosing `.a-row` (Amazon's UI-library row class,
+ * present on every order-summary line — Whole Foods and regular Amazon
+ * alike). The row's textContent contains the matching `$X.XX` value.
+ *
+ * Returns null if the label, the row, or the dollar value cannot be
+ * located.
+ */
+export function extractItemsSubtotal(doc: Document): number | null {
+  const labelEl = Array.from(doc.querySelectorAll("span, dt, label"))
+    .find((el) => SUBTOTAL_LABEL_REGEX.test((el.textContent ?? "").trim()));
+  if (!labelEl) return null;
+
+  const row = labelEl.closest(".a-row");
+  if (!row) return null;
+
+  const match = (row.textContent ?? "").match(DOLLAR_VALUE_REGEX);
+  return match ? parseCents(match[0]) : null;
 }

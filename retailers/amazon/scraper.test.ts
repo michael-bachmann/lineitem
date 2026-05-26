@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, expect, it, beforeEach } from "vitest";
-import { isGroceryOrder, parseItemmodFromDocument } from "./scraper";
+import { isGroceryOrder, parseItemmodFromDocument, extractItemsSubtotal } from "./scraper";
 
 beforeEach(() => {
   document.body.innerHTML = "";
@@ -105,5 +105,94 @@ describe("parseItemmodFromDocument", () => {
       </div>
     `;
     expect(parseItemmodFromDocument(document)).toEqual([]);
+  });
+
+  it("skips out-of-stock items (status row carries a matching credit, line nets to zero)", () => {
+    document.body.innerHTML = `
+      <div id="B01N1T6F3P-item-grid-row" role="row">
+        <div class="a-column a-span11 a-span-last">
+          <div class="a-row">
+            <div class="a-column a-span6">
+              <a href="/gp/product/B01N1T6F3P?ref_=uff_od_product"><span>Frozen Dessert Bars</span></a>
+            </div>
+            <div class="a-column a-span2 a-text-left a-span-last">
+              <span id="B01N1T6F3P-item-total-price"> $15.78 </span>
+            </div>
+          </div>
+          <div class="a-row">
+            <div class="a-box ufpo-item-status">
+              <div class="a-box-inner">
+                <div class="a-row">
+                  <span class="a-size-small a-text-bold">Out of stock (2)</span>
+                  <span class="a-size-small a-text-bold">-$15.78</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+    expect(parseItemmodFromDocument(document)).toEqual([]);
+  });
+});
+
+describe("extractItemsSubtotal", () => {
+  it("extracts subtotal from grocery (Whole Foods) layout", () => {
+    document.body.innerHTML = `
+      <div class="a-row">
+        <div class="a-column a-span8 a-text-left">
+          <dt class="a-list-item"><span> Item(s) Subtotal: </span></dt>
+        </div>
+        <div class="a-column a-span4 a-text-right a-span-last">
+          <dd class="a-list-item"><span> $183.23 </span></dd>
+        </div>
+      </div>
+    `;
+    expect(extractItemsSubtotal(document)).toBe(18323);
+  });
+
+  it("extracts subtotal from non-grocery (regular order) layout", () => {
+    document.body.innerHTML = `
+      <ul class="a-unordered-list a-nostyle a-vertical">
+        <li>
+          <span class="a-list-item">
+            <div class="a-row od-line-item-row">
+              <div class="a-column a-span7 od-line-item-row-label">
+                <span class="a-size-base"><span>Item(s) Subtotal: </span></span>
+              </div>
+              <div class="a-column a-span5 od-line-item-row-content a-span-last">
+                <span class="a-size-base a-color-base">$97.99</span>
+              </div>
+            </div>
+          </span>
+        </li>
+      </ul>
+    `;
+    expect(extractItemsSubtotal(document)).toBe(9799);
+  });
+
+  it("returns null when the label is not present", () => {
+    document.body.innerHTML = `<div>nothing here</div>`;
+    expect(extractItemsSubtotal(document)).toBeNull();
+  });
+
+  it("returns null when label is present but no dollar amount is found nearby", () => {
+    document.body.innerHTML = `
+      <div>
+        <span>Item(s) Subtotal:</span>
+        <span>missing amount</span>
+      </div>
+    `;
+    expect(extractItemsSubtotal(document)).toBeNull();
+  });
+
+  it("ignores whitespace around the label text", () => {
+    document.body.innerHTML = `
+      <div class="a-row">
+        <span>   Item(s) Subtotal:   </span>
+        <span>$12.34</span>
+      </div>
+    `;
+    expect(extractItemsSubtotal(document)).toBe(1234);
   });
 });
