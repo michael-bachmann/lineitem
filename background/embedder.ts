@@ -40,30 +40,24 @@ export async function ensureModelLoaded(): Promise<void> {
   await getExtractor();
 }
 
-/**
- * Slice a flat (batchSize × EMBEDDING_DIMS) tensor into per-row vectors.
- * Rows are already L2-normalized by the model's `normalize: true` option.
- */
-function unpackBatch(data: Float32Array, batchSize: number): Float32Array[] {
-  return Array.from({ length: batchSize }, (_, i) =>
-    data.slice(i * EMBEDDING_DIMS, (i + 1) * EMBEDDING_DIMS),
-  );
-}
-
 export async function embed(text: string): Promise<Float32Array> {
-  const extractor = await getExtractor();
-  // Mean pooling averages per-token vectors into one fixed-size vector per
-  // input (bge's recommended pooling). `normalize: true` makes cosine ≡ dot.
-  const result = await extractor(text, { pooling: "mean", normalize: true });
-  // Tensor.data is typed as the union DataArray; for this model + opts it's Float32Array.
-  return (result.data as Float32Array).slice(0, EMBEDDING_DIMS);
+  const [vec] = await embedBatch([text]);
+  return vec;
 }
 
 export async function embedBatch(texts: string[]): Promise<Float32Array[]> {
   if (texts.length === 0) return [];
   const extractor = await getExtractor();
+  // Mean pooling averages per-token vectors into one fixed-size vector per
+  // input (bge's recommended pooling). `normalize: true` makes cosine ≡ dot.
   const result = await extractor(texts, { pooling: "mean", normalize: true });
-  return unpackBatch(result.data as Float32Array, texts.length);
+  // The model returns a Tensor with shape [N, EMBEDDING_DIMS] backed by a
+  // single flat Float32Array. Slice into N copies — each slice() detaches
+  // from the Tensor's underlying buffer so we can safely persist the result.
+  const data = result.data as Float32Array;
+  return Array.from({ length: texts.length }, (_, i) =>
+    data.slice(i * EMBEDDING_DIMS, (i + 1) * EMBEDDING_DIMS),
+  );
 }
 
 /** @internal — for tests only. */
