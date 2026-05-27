@@ -2,7 +2,6 @@ import { getSettings } from "@/lib/settings";
 import { updateTransaction } from "@/lib/ynab";
 import {
   getAllocatedTransaction,
-  getProductCategory,
   putProductCategory,
   getAllProductCategories,
   deleteProductCategory,
@@ -10,7 +9,7 @@ import {
 import { classifyItems } from "@/lib/classifier";
 import { embedBatch } from "./embedder";
 import { planEviction, PER_CATEGORY_CAP } from "./embedding-eviction";
-import type { AllocatedTransaction, ApprovalItem } from "@/lib/types";
+import type { AllocatedTransaction, ApprovalItem, ProductCategory } from "@/lib/types";
 import { groupBy } from "remeda";
 
 /** Check whether all items share the same category. */
@@ -73,56 +72,97 @@ interface LearnInput {
   itemsByProductId: Map<string, { title: string; categoryId: string }>;
 }
 
+interface LearnEntry {
+  id: string;
+  title: string;
+  categoryId: string;
+  embedding: Float32Array | null;
+}
+
+interface ApprovalPlan {
+  rowsToWrite: readonly ProductCategory[];
+  idsToEvict: readonly string[];
+}
+
+/** Embed all titles in one batch; on failure, fall back to null per entry. */
+async function safeEmbedBatch(titles: string[]): Promise<(Float32Array | null)[]> {
+  try {
+    return await embedBatch(titles);
+  } catch (err) {
+    console.warn("learnFromApproval: embedBatch failed; writing rows without vectors", err);
+    return titles.map(() => null);
+  }
+}
+
+/** Build one ProductCategory row from a LearnEntry, threading existing timesSeen. */
+function buildRow(entry: LearnEntry, existing: ProductCategory | undefined, now: string): ProductCategory {
+  return {
+    id: entry.id,
+    categoryId: entry.categoryId,
+    confirmedByUser: true,
+    timesSeen: (existing?.timesSeen ?? 0) + 1,
+    lastSeen: now,
+    title: entry.title,
+    ...(entry.embedding ? { embedding: entry.embedding, embeddedAt: now } : {}),
+  };
+}
+
+/**
+ * Plan all writes + evictions in one pure pass. Threads a "snapshot" through
+ * each entry so consecutive eviction decisions reflect prior writes in the
+ * same batch (without mutating any input).
+ */
+function planApprovalWrites(
+  entries: readonly LearnEntry[],
+  existing: readonly ProductCategory[],
+  now: string,
+): ApprovalPlan {
+  const existingById = new Map(existing.map((r) => [r.id, r] as const));
+
+  const final = entries.reduce<{ rows: readonly ProductCategory[]; evictions: readonly string[]; snapshot: readonly ProductCategory[] }>(
+    (acc, entry) => {
+      const { toDelete } = planEviction(acc.snapshot as ProductCategory[], entry.categoryId, entry.id, PER_CATEGORY_CAP);
+      const row = buildRow(entry, existingById.get(entry.id), now);
+      const evictedIds = new Set(toDelete);
+      return {
+        rows: [...acc.rows, row],
+        evictions: [...acc.evictions, ...toDelete],
+        snapshot: [
+          ...acc.snapshot.filter((r) => r.id !== entry.id && !evictedIds.has(r.id)),
+          row,
+        ],
+      };
+    },
+    { rows: [], evictions: [], snapshot: existing },
+  );
+
+  return {
+    rowsToWrite: final.rows,
+    // Dedupe evictions while preserving order.
+    idsToEvict: [...new Set(final.evictions)],
+  };
+}
+
 /** Learn from this approval — save product→category mappings with embeddings for future classification. */
 async function learnFromApproval(input: LearnInput): Promise<void> {
   const entries = [...input.itemsByProductId.entries()];
   if (entries.length === 0) return;
 
   const titles = entries.map(([, v]) => v.title);
+  const embeddings = await safeEmbedBatch(titles);
+  const existing = await getAllProductCategories();
 
-  let embeddings: (Float32Array | null)[];
-  try {
-    embeddings = await embedBatch(titles);
-  } catch (err) {
-    console.warn("learnFromApproval: embedBatch failed; writing rows without vectors", err);
-    embeddings = entries.map(() => null);
-  }
+  const learnEntries: LearnEntry[] = entries.map(([productId, { title, categoryId }], i) => ({
+    id: `${input.retailer}:${productId}`,
+    title,
+    categoryId,
+    embedding: embeddings[i],
+  }));
 
-  const allExisting = await getAllProductCategories();
-  const evictionsToRun = new Set<string>();
-  // Track in-memory state across this batch so consecutive evictions don't double-count.
-  let snapshot = allExisting;
+  const plan = planApprovalWrites(learnEntries, existing, new Date().toISOString());
 
-  for (let i = 0; i < entries.length; i++) {
-    const [productId, { title, categoryId }] = entries[i];
-    const id = `${input.retailer}:${productId}`;
-    const existing = await getProductCategory(id);
-    const plan = planEviction(snapshot, categoryId, id, PER_CATEGORY_CAP);
-    for (const evictId of plan.toDelete) {
-      evictionsToRun.add(evictId);
-      snapshot = snapshot.filter((r) => r.id !== evictId);
-    }
-
-    const now = new Date().toISOString();
-    const row = {
-      id,
-      categoryId,
-      confirmedByUser: true,
-      timesSeen: (existing?.timesSeen ?? 0) + 1,
-      lastSeen: now,
-      title,
-      ...(embeddings[i]
-        ? { embedding: embeddings[i]!, embeddedAt: now }
-        : {}),
-    };
-    await putProductCategory(row);
-    // Update snapshot so subsequent eviction decisions see this write.
-    snapshot = [...snapshot.filter((r) => r.id !== id), row];
-  }
-
-  for (const id of evictionsToRun) {
-    await deleteProductCategory(id);
-  }
+  await Promise.all(plan.rowsToWrite.map(putProductCategory));
+  await Promise.all(plan.idsToEvict.map(deleteProductCategory));
 }
 
 export async function approveTransaction(

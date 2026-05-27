@@ -1,8 +1,20 @@
+import { chunk } from "remeda";
 import { embedBatch, getCurrentModelVersion } from "./embedder";
 import { getAllProductCategories, putProductCategory } from "@/lib/db";
 import { getSettings, saveSettings } from "@/lib/settings";
+import type { ProductCategory } from "@/lib/types";
 
 const BATCH_SIZE = 16;
+
+/** Re-embed a single batch of rows from their stored titles. */
+async function reembedBatch(batch: readonly ProductCategory[], now: string): Promise<void> {
+  const vecs = await embedBatch(batch.map((r) => r.title!));
+  await Promise.all(
+    batch.map((row, j) =>
+      putProductCategory({ ...row, embedding: vecs[j], embeddedAt: now }),
+    ),
+  );
+}
 
 /**
  * If the stored vector model version differs from the active one, re-embed
@@ -18,20 +30,16 @@ export async function migrateEmbeddingsIfNeeded(): Promise<void> {
 
   const allRows = await getAllProductCategories();
   const rowsWithTitle = allRows.filter(
-    (r) => typeof r.title === "string" && r.title.length > 0,
+    (r): r is ProductCategory & { title: string } =>
+      typeof r.title === "string" && r.title.length > 0,
   );
+  const batches = chunk(rowsWithTitle, BATCH_SIZE);
+  const now = new Date().toISOString();
 
-  for (let i = 0; i < rowsWithTitle.length; i += BATCH_SIZE) {
-    const batch = rowsWithTitle.slice(i, i + BATCH_SIZE);
-    const vecs = await embedBatch(batch.map((r) => r.title!));
-    const now = new Date().toISOString();
-    for (let j = 0; j < batch.length; j++) {
-      await putProductCategory({
-        ...batch[j],
-        embedding: vecs[j],
-        embeddedAt: now,
-      });
-    }
+  // Batches run sequentially: each `embedBatch` call queues on the WASM
+  // pipeline, and launching them concurrently would just serialize there.
+  for (const batch of batches) {
+    await reembedBatch(batch, now);
   }
 
   await saveSettings({ vectorModelVersion: current });
