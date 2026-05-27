@@ -40,12 +40,15 @@ The embedding tier:
 
 The product_cache tier is unchanged. If it hits, embedding work doesn't run.
 
+**Cross-retailer generalization comes for free.** Stored rows are keyed by `{retailer}:{productId}`, so `amazon:B07XYZ` and `wholefoods:ABC123` are separate rows even for the same physical product. But the embedding tier scores incoming titles against *all* stored vectors regardless of which retailer's prefix is on the key — the prefix only scopes the exact-match cache. So if a user approves Amazon Charmin into Household and later buys Charmin at Whole Foods, the cascade falls through to the embedding tier, finds the Amazon Charmin vector via title similarity, and suggests Household. No additional mechanism needed.
+
 ## Model
 
 `bge-small-en-v1.5`, quantized ONNX, loaded via `transformers.js`. 384-dim outputs, mean-pooled and L2-normalized so cosine similarity reduces to dot product.
 
 - Trained with contrastive retrieval objective, which matches our query/corpus pattern (query: new item title; corpus: past titles).
-- ~30 MB on disk, cached by transformers.js via the standard Cache API after first download.
+- ~30 MB on disk, cached by transformers.js via the browser Cache API after first download. The Cache API is persistent disk storage — survives service-worker death, browser restart, and machine reboot. Model weights live in WASM-runtime memory only while a sync is in flight; re-loading from cached disk takes 1–2s.
+- One-time download from the Hugging Face CDN. **Triggered proactively on extension install** (with a "preparing classifier (one-time)" status) so the first sync isn't slowed by an in-band 30 MB fetch. Not bundled with the extension package — keeps install size small and avoids paying the download cost for users who never sync.
 - Inference cost on WASM: tens of ms per title, batchable.
 
 Model is exposed via a `CURRENT_MODEL_VERSION` constant (`"bge-small-en-v1.5-q8"`). Changing this constant is what triggers a re-embed (see Versioning).
@@ -111,7 +114,7 @@ matchedSource?: { title: string; cosine: number };  // only when source === "emb
 
 Signature change: `classifyItem` currently takes `{ productId }`. It needs `title` too. Call site (`background/sync.ts:150-159`) already has the full `AllocatedItem`, so this is a localized change.
 
-Per-sync cost (rough estimate, typical user with ~50 uncategorized items per sync and ~900 stored vectors): titles are embedded as batches via `embedBatch` rather than one-at-a-time. A batch of ~16 amortizes the per-call overhead and lets WASM vectorize across the batch dimension, typically a 3–5× speedup over sequential. So ~50 titles in ~3 batched calls = roughly **300–500 ms**, plus ~50 × 900 = ~45k cosine ops (well under 100ms). Negligible next to the existing scrape cost, which dominates sync wall time (each retailer order requires opening a tab, waiting for the page to load, parsing the DOM, and closing — typically 5–12 seconds per order). Cache-hit items skip embedding entirely.
+Per-sync cost (rough estimate, typical user with ~50 uncategorized items per sync and ~1500 stored vectors): titles are embedded as batches via `embedBatch` rather than one-at-a-time. A batch of ~16 amortizes the per-call overhead and lets WASM vectorize across the batch dimension, typically a 3–5× speedup over sequential. So ~50 titles in ~3 batched calls = roughly **300–500 ms**, plus ~50 × 1500 = ~75k cosine ops (well under 100ms). Negligible next to the existing scrape cost, which dominates sync wall time (each retailer order requires opening a tab, waiting for the page to load, parsing the DOM, and closing — typically 5–12 seconds per order). Cache-hit items skip embedding entirely.
 
 Batching is across items within a sync; we don't parallelize across separate `embed` calls (the model runs on a single WASM instance and concurrent awaited calls would serialize on it).
 
@@ -133,16 +136,18 @@ Approval-time embedding is best-effort: if the embedder isn't ready when `learnF
 
 ## Per-category cap and eviction
 
-Each YNAB category's vector pool is capped at **30 most-recent past titles** (by `lastSeen` on the row).
+Each YNAB category's vector pool is capped at **50 most-recent past titles** (by `lastSeen` on the row).
 
 When `learnFromApproval` writes a new row and the destination category is at cap:
 
 - If the (retailer, productId) already exists, overwrite — no eviction needed.
 - Otherwise, find the oldest row in that category by `lastSeen` and delete it.
 
-The cap is a ceiling, not a floor. Categories with fewer than 30 past items keep what they have. Categories that never see retailer purchases (rent, salary, etc.) stay empty and are never suggested by the embedding tier — which is correct: they're unreachable from item titles.
+The cap is a ceiling, not a floor. Categories with fewer than 50 past items keep what they have. Categories that never see retailer purchases (rent, salary, etc.) stay empty and are never suggested by the embedding tier — which is correct: they're unreachable from item titles.
 
-Implementation note: finding the oldest row in a category currently requires enumerating `productCategories` and filtering by `categoryId`. For ~1000 rows this is fine (single-digit ms). If the table grows materially beyond that or the eviction starts showing up in profiles, add a secondary index on `categoryId` to the `productCategories` store.
+Recency-bias still exists at any hard cap — a future version could do diversity-based pruning if quality lags — but 50 gives meaningfully more room before recency-only eviction starts dropping useful variety in high-variety categories like Household.
+
+(Implementation aside: eviction scans `productCategories` and filters by `categoryId` since there's no index on that field; fine for ≤10k rows. Add a secondary index if it ever starts showing up in profiles.)
 
 ## Threshold
 
@@ -206,7 +211,7 @@ On classifier startup (first time a sync triggers it):
 3. proceed
 ```
 
-For ~900 vectors (heavy user) at batched ~5ms each, migration completes in a few seconds. If interrupted (browser closed mid-migration), the next startup just re-runs from scratch — the read-and-re-write is idempotent.
+For ~2500 vectors (heavy user, 50 categories × 50 past titles) at batched ~5ms each, migration completes in well under a minute and feels near-instant in typical cases. If interrupted (browser closed mid-migration), the next startup just re-runs from scratch — the read-and-re-write is idempotent.
 
 Why one global stamp, not per-vector: the only realistic invalidation we need is "active model differs from stored vectors." Per-vector versioning would only matter for resume-where-you-left-off mid-migration or for running two models simultaneously. Neither is a thing we need.
 
@@ -261,9 +266,9 @@ The principle: embedding-tier failures degrade to "no suggestion," never to "wro
 | Model file (bge-small-en-v1.5-q8 ONNX), cached by transformers.js | ~30 MB |
 | Per vector (384 floats + metadata + IndexedDB overhead) | ~3 KB |
 | Vectors at typical user (30 categories × 20 past titles) | ~1.8 MB |
-| Vectors at heavy user (50 categories × 30 past titles) | ~4.5 MB |
+| Vectors at heavy user (50 categories × 50 past titles) | ~7.5 MB |
 
-All-in: ~32–35 MB. The model file dominates. IndexedDB has no hard per-origin quota; effective limit is browser overall storage (GBs). We're nowhere near.
+All-in: ~32–38 MB. The model file dominates. IndexedDB has no hard per-origin quota; effective limit is browser overall storage (GBs). We're nowhere near.
 
 ## Testing
 
@@ -303,4 +308,4 @@ Manual:
 - **Threshold calibration.** 0.65 is a guess. The "Calibrating the threshold" section above covers the mitigation: log every classification (including suppressed ones), join with user approvals, sweep the threshold from real data. The risk is that initial precision is bad enough to erode trust before we have data to recalibrate; mitigated somewhat by the explicit UI source indicator letting users see "this is a guess" at a glance.
 - **Backfill rate-limiting.** Walking many past orders in a tight loop risks Amazon flagging the session. The 2s per-order delay is conservative; if Amazon's tolerance is unclear, we err slower. The backfill is opt-in so the user is choosing to spend the time.
 - **Scoring bias.** Max scoring has no pool-size bias by construction, but it's also more sensitive to a single weird past title than KNN would be. If we see "one bad apple per category" failures, the pivot to KNN is a localized change.
-- **Storage growth from non-capped paths.** The 30-per-category cap controls steady-state size, but if a backfill writes ahead of any caching logic, we could briefly overshoot during the run. Backfill writes go through the same eviction path as `learnFromApproval` to keep this in check.
+- **Storage growth from non-capped paths.** The 50-per-category cap controls steady-state size, but if a backfill writes ahead of any caching logic, we could briefly overshoot during the run. Backfill writes go through the same eviction path as `learnFromApproval` to keep this in check.
