@@ -1,7 +1,15 @@
 import { getSettings } from "@/lib/settings";
 import { updateTransaction } from "@/lib/ynab";
-import { getAllocatedTransaction, getProductCategory, putProductCategory } from "@/lib/db";
+import {
+  getAllocatedTransaction,
+  getProductCategory,
+  putProductCategory,
+  getAllProductCategories,
+  deleteProductCategory,
+} from "@/lib/db";
 import { classifyItems } from "@/lib/classifier";
+import { embedBatch } from "./embedder";
+import { planEviction, PER_CATEGORY_CAP } from "./embedding-eviction";
 import type { AllocatedTransaction, ApprovalItem } from "@/lib/types";
 import { groupBy } from "remeda";
 
@@ -60,18 +68,60 @@ export function buildSubtransactions(
   }));
 }
 
-/** Learn from this approval — save product→category mappings for future classification. */
-async function learnFromApproval(retailer: string, choices: ApprovalItem[]): Promise<void> {
-  for (const choice of choices) {
-    const key = `${retailer}:${choice.productId}`;
-    const existing = await getProductCategory(key);
-    await putProductCategory({
-      id: key,
-      categoryId: choice.categoryId,
+interface LearnInput {
+  retailer: string;
+  itemsByProductId: Map<string, { title: string; categoryId: string }>;
+}
+
+/** Learn from this approval — save product→category mappings with embeddings for future classification. */
+async function learnFromApproval(input: LearnInput): Promise<void> {
+  const entries = [...input.itemsByProductId.entries()];
+  if (entries.length === 0) return;
+
+  const titles = entries.map(([, v]) => v.title);
+
+  let embeddings: (Float32Array | null)[];
+  try {
+    embeddings = await embedBatch(titles);
+  } catch (err) {
+    console.warn("learnFromApproval: embedBatch failed; writing rows without vectors", err);
+    embeddings = entries.map(() => null);
+  }
+
+  const allExisting = await getAllProductCategories();
+  const evictionsToRun = new Set<string>();
+  // Track in-memory state across this batch so consecutive evictions don't double-count.
+  let snapshot = allExisting;
+
+  for (let i = 0; i < entries.length; i++) {
+    const [productId, { title, categoryId }] = entries[i];
+    const id = `${input.retailer}:${productId}`;
+    const existing = await getProductCategory(id);
+    const plan = planEviction(snapshot, categoryId, id, PER_CATEGORY_CAP);
+    for (const evictId of plan.toDelete) {
+      evictionsToRun.add(evictId);
+      snapshot = snapshot.filter((r) => r.id !== evictId);
+    }
+
+    const now = new Date().toISOString();
+    const row = {
+      id,
+      categoryId,
       confirmedByUser: true,
       timesSeen: (existing?.timesSeen ?? 0) + 1,
-      lastSeen: new Date().toISOString(),
-    });
+      lastSeen: now,
+      title,
+      ...(embeddings[i]
+        ? { embedding: embeddings[i]!, embeddedAt: now }
+        : {}),
+    };
+    await putProductCategory(row);
+    // Update snapshot so subsequent eviction decisions see this write.
+    snapshot = [...snapshot.filter((r) => r.id !== id), row];
+  }
+
+  for (const id of evictionsToRun) {
+    await deleteProductCategory(id);
   }
 }
 
@@ -96,7 +146,17 @@ export async function approveTransaction(
 
     await updateTransaction(settings.ynabToken, settings.planId, ynabTransactionId, update);
 
-    await learnFromApproval(tx.retailer, items);
+    const titleByProductId = new Map(tx.items.map((it) => [it.productId, it.title]));
+    const itemsByProductId = new Map(
+      items.map((c) => [
+        c.productId,
+        {
+          title: titleByProductId.get(c.productId) ?? "",
+          categoryId: c.categoryId,
+        },
+      ]),
+    );
+    await learnFromApproval({ retailer: tx.retailer, itemsByProductId });
 
     return { ok: true };
   } catch (e) {
