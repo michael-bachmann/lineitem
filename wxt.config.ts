@@ -10,6 +10,8 @@ export default defineConfig({
     host_permissions: [
       "https://*.amazon.com/*",
       "https://api.ynab.com/*",
+      "https://huggingface.co/*",       // model metadata
+      "https://*.huggingface.co/*",     // model file CDN (cdn-lfs.huggingface.co)
     ],
   },
   vite: () => ({

@@ -3,11 +3,18 @@ import { getPlans, getCategories } from "@/lib/ynab";
 import { putCategories, getAllCategories } from "@/lib/db";
 import { performSync } from "@/background/sync";
 import { approveTransaction, approveBatch } from "@/background/approval";
+import { ensureModelLoaded } from "@/background/embedder";
 import type { MessageRequest } from "@/lib/types";
 
 /** Service worker entry point — routes messages from the side panel to domain handlers. */
 export default defineBackground(() => {
   chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
+
+  // Pre-warm the embedder model cache on every SW startup so the first sync
+  // doesn't pay a download tax. Fire-and-forget; errors are non-fatal.
+  ensureModelLoaded().catch((err) => {
+    console.warn("Initial embedder load failed; will retry on first use", err);
+  });
 
   browser.runtime.onMessage.addListener(
     (message: MessageRequest, _sender, sendResponse) => {
