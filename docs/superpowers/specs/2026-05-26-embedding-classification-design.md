@@ -111,7 +111,7 @@ matchedSource?: { title: string; cosine: number };  // only when source === "emb
 
 Signature change: `classifyItem` currently takes `{ productId }`. It needs `title` too. Call site (`background/sync.ts:150-159`) already has the full `AllocatedItem`, so this is a localized change.
 
-Per-sync cost (rough estimate, typical user with ~50 uncategorized items per sync and ~900 stored vectors): ~50 embed calls × ~30ms = ~1.5s, plus ~50 × 900 = ~45k cosine ops (well under 100ms). About two seconds added to total sync time, which is well within the existing budget. Cache-hit items skip embedding entirely.
+Per-sync cost (rough estimate, typical user with ~50 uncategorized items per sync and ~900 stored vectors): ~50 embed calls × ~30ms = ~1.5s, plus ~50 × 900 = ~45k cosine ops (well under 100ms). Negligible next to the existing scrape cost, which dominates sync wall time (each retailer order requires opening a tab, waiting for the page to load, parsing the DOM, and closing — typically 5–12 seconds per order). Embedding adds maybe 2–5% to total sync time. Cache-hit items skip embedding entirely.
 
 **`learnFromApproval`** (`background/approval.ts`):
 
