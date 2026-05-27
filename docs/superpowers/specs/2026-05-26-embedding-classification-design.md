@@ -72,16 +72,16 @@ export interface ProductCategory {
 
 `title` is the source text the embedding was derived from. Retaining it is what makes versioning safe — any model bump can re-derive without needing to wait for the user to re-approve.
 
-A new IndexedDB store holds the global model version stamp:
+The global model version stamp lives in `browser.storage.local`, alongside existing settings (`ynabToken`, `planId`, `planName`):
 
 ```ts
-// store: "meta", keyPath: "id"
-{ id: "vectorModelVersion", value: "bge-small-en-v1.5-q8" }
+// key: "vectorModelVersion"
+"bge-small-en-v1.5-q8"
 ```
 
-One row. Compared to `CURRENT_MODEL_VERSION` on startup; mismatch triggers the migration.
+Compared to `CURRENT_MODEL_VERSION` on startup; mismatch triggers the migration. A separate IndexedDB object store would be overkill for a single string.
 
-Adding this store requires bumping `DB_VERSION` in `lib/db.ts` from 1 to 2; the `onupgradeneeded` handler creates the new store. Existing stores (`allocatedTransactions`, `productCategories`, `categories`) are not touched by the bump — their schemas are not enforced by IndexedDB, so adding fields to `ProductCategory` needs no migration on the store itself.
+No `DB_VERSION` bump is required. Adding optional fields to `ProductCategory` doesn't need a schema migration — IndexedDB doesn't enforce row shape.
 
 `ClassifiedItem["classificationSource"]` extends to:
 
@@ -111,13 +111,17 @@ matchedSource?: { title: string; cosine: number };  // only when source === "emb
 
 Signature change: `classifyItem` currently takes `{ productId }`. It needs `title` too. Call site (`background/sync.ts:150-159`) already has the full `AllocatedItem`, so this is a localized change.
 
+Per-sync cost (rough estimate, typical user with ~50 uncategorized items per sync and ~900 stored vectors): ~50 embed calls × ~30ms = ~1.5s, plus ~50 × 900 = ~45k cosine ops (well under 100ms). About two seconds added to total sync time, which is well within the existing budget. Cache-hit items skip embedding entirely.
+
 **`learnFromApproval`** (`background/approval.ts`):
 
 After writing the product_cache row, embed the title and write the embedding fields onto the same row. One IndexedDB transaction.
 
 **Backfill** (new module, e.g. `background/backfill.ts`):
 
-Triggered by an opt-in user action ("Backfill from past orders"). For each historical YNAB transaction whose payee maps to a supported retailer (Amazon, Whole Foods, Amazon Fresh) and which already has a categoryId, run the existing scrape pipeline, embed each scraped item's title, and write `ProductCategory` rows tagged with the transaction's existing categoryId. Sequential, with a per-order delay to avoid rate-limiting; progress reflected in UI.
+Triggered by an opt-in user action ("Backfill from past orders"). For each historical YNAB transaction whose payee maps to a supported retailer (Amazon, Whole Foods, Amazon Fresh) and which already has a categoryId, run the existing scrape pipeline, embed each scraped item's title, and write `ProductCategory` rows tagged with the transaction's existing categoryId (with `confirmedByUser = true`, `timesSeen = 1`). Sequential, with a per-order delay to avoid rate-limiting; progress reflected in UI.
+
+Default scope: the last **12 months** of YNAB transactions. The confirmation step exposes the range and lets the user widen it ("all time") or narrow it ("last 6 months"). 12 months is a starting guess — it should cover enough variety to populate most categories without making the run prohibitively long, but we should be willing to revisit if real-world runs are too slow or too sparse.
 
 **Model loader** (new module, e.g. `background/embedder.ts`):
 
@@ -136,6 +140,8 @@ When `learnFromApproval` writes a new row and the destination category is at cap
 
 The cap is a ceiling, not a floor. Categories with fewer than 30 past items keep what they have. Categories that never see retailer purchases (rent, salary, etc.) stay empty and are never suggested by the embedding tier — which is correct: they're unreachable from item titles.
 
+Implementation note: finding the oldest row in a category currently requires enumerating `productCategories` and filtering by `categoryId`. For ~1000 rows this is fine (single-digit ms). If the table grows materially beyond that or the eviction starts showing up in profiles, add a secondary index on `categoryId` to the `productCategories` store.
+
 ## Threshold
 
 Initial value: **0.65** cosine similarity (where 1.0 = identical direction, 0.0 = orthogonal).
@@ -144,19 +150,57 @@ This is below the ticket's 0.85 suggestion. On a properly normalized bge-small m
 
 If best max cosine < threshold → `classificationSource = null`, no suggestion shown. The cascade has effectively fallen through.
 
+## Calibrating the threshold
+
+0.65 is a guess. We don't know where bge-small's cosines actually land on this corpus, so the spec includes an empirical calibration path that lets us tune from real data rather than hand-wave a number.
+
+**Always compute, only sometimes surface.** Even when the embedding tier doesn't suggest (best cosine below threshold), we still ran the scoring. The result is a per-classification record:
+
+```ts
+interface ClassificationLogEntry {
+  title: string;
+  topCategoryId: string;
+  topCosine: number;
+  secondCategoryId: string | null;  // runner-up, for close-call analysis
+  secondCosine: number | null;
+  threshold: number;
+  decision: "suggested" | "below_threshold" | "no_vectors";
+  // filled in later by learnFromApproval / approveTransaction:
+  userApprovedCategoryId?: string;
+  approvedAt?: string;
+}
+```
+
+These are stored as a rolling log (~last 500 entries) in `browser.storage.local`, keyed by item id. When the user approves a transaction, we patch each item's log entry with the approved categoryId.
+
+**Two diagnostic signals come out of this:**
+
+- **Precision at threshold:** of the `suggested` entries, what fraction had `topCategoryId === userApprovedCategoryId`? Plotted as precision vs threshold — sweep from 0.5 to 0.85 and find the lowest threshold that maintains precision ≥ some bar (~0.85).
+- **Missed recall:** of the `below_threshold` entries, how often was `topCategoryId === userApprovedCategoryId` (i.e., we had the right answer but suppressed it)? If this is high in the 0.55–0.65 band, the threshold is too strict.
+
+**Surfacing the calibration tool.** A dev-only view in the side panel reads the log and renders:
+
+- Histogram of `topCosine` for correct vs incorrect suggestions.
+- Precision/recall curves over a threshold sweep.
+- Recommendation: optimal threshold given current data.
+
+Not production UX. Gated behind a debug toggle or a separate dev-build flag. The user looks at it occasionally; the constant in code gets adjusted in a single-line change.
+
+**Why this design over fixed-from-the-start tuning:** we can't pre-calibrate without the corpus, and the corpus only exists after the embedding tier ships. Logging structures the chicken-and-egg into "ship at 0.65, log everything, recalibrate from live data within a few weeks."
+
 ## Versioning
 
-A single global row in the `meta` store: `vectorModelVersion`.
+A single key in `browser.storage.local`: `vectorModelVersion`.
 
 On classifier startup (first time a sync triggers it):
 
 ```
-1. read meta.vectorModelVersion (or null on first run)
+1. read storage.vectorModelVersion (or null on first run)
 2. if it does not equal CURRENT_MODEL_VERSION:
    - read all ProductCategory rows
    - for each, re-compute embedding from row.title via the active model
    - write the new embedding back
-   - update meta.vectorModelVersion = CURRENT_MODEL_VERSION
+   - write storage.vectorModelVersion = CURRENT_MODEL_VERSION
 3. proceed
 ```
 
@@ -227,7 +271,8 @@ Unit:
 - Scoring function: max-per-category over a synthetic vector set returns the expected category.
 - Threshold gate: best-cosine just below threshold → `null`; just above → suggestion.
 - Eviction: writing past cap evicts oldest-by-lastSeen; overwrite of existing (retailer, productId) does not evict.
-- Versioning: stored `vectorModelVersion` mismatch triggers re-embed; matching version is a no-op.
+- Versioning: `vectorModelVersion` mismatch in `browser.storage.local` triggers re-embed; matching value is a no-op.
+- Classification log: every classify call writes a log entry; approval patches the entry with `userApprovedCategoryId`; log is bounded at ~500 entries (oldest evicted).
 
 Integration:
 - Full sync flow with a seeded `ProductCategory` set: novel item with a clearly-similar past title gets the expected suggestion.
@@ -236,7 +281,7 @@ Integration:
 
 Manual:
 - Approve an item → verify `ProductCategory` row has embedding fields populated.
-- Bump `CURRENT_MODEL_VERSION` locally → relaunch extension → verify all rows re-embedded and the meta row updated.
+- Bump `CURRENT_MODEL_VERSION` locally → relaunch extension → verify all rows re-embedded and `storage.vectorModelVersion` updated.
 - Backfill against a real test YNAB account → spot-check suggestions on subsequent syncs.
 
 ## Out of scope (future work)
@@ -253,7 +298,7 @@ Manual:
 ## Risks
 
 - **Model load reliability in MV3 service workers.** transformers.js v3 supports MV3 service workers with WASM, but the load path involves Cache API and dynamic import. If we hit unexpected MV3 restrictions, the documented fallback is an offscreen document. Worth validating with a small spike before deep integration.
-- **Threshold calibration.** 0.65 is a guess. If it turns out to be too lenient (bad suggestions erode trust) or too strict (suggestion never fires), we adjust. Worth instrumenting per-classification cosine in a debug build so we can study the distribution on real data.
+- **Threshold calibration.** 0.65 is a guess. The "Calibrating the threshold" section above covers the mitigation: log every classification (including suppressed ones), join with user approvals, sweep the threshold from real data. The risk is that initial precision is bad enough to erode trust before we have data to recalibrate; mitigated somewhat by the explicit UI source indicator letting users see "this is a guess" at a glance.
 - **Backfill rate-limiting.** Walking many past orders in a tight loop risks Amazon flagging the session. The 2s per-order delay is conservative; if Amazon's tolerance is unclear, we err slower. The backfill is opt-in so the user is choosing to spend the time.
 - **Scoring bias.** Max scoring has no pool-size bias by construction, but it's also more sensitive to a single weird past title than KNN would be. If we see "one bad apple per category" failures, the pivot to KNN is a localized change.
 - **Storage growth from non-capped paths.** The 30-per-category cap controls steady-state size, but if a backfill writes ahead of any caching logic, we could briefly overshoot during the run. Backfill writes go through the same eviction path as `learnFromApproval` to keep this in check.
