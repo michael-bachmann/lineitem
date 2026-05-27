@@ -1,4 +1,4 @@
-import { pipeline } from "@huggingface/transformers";
+import { pipeline, type FeatureExtractionPipeline } from "@huggingface/transformers";
 
 /**
  * Hugging Face model used for item-title embeddings. bge-small-en-v1.5 is a
@@ -13,28 +13,20 @@ const MODEL_VERSION = "bge-small-en-v1.5-q8";
 const EMBEDDING_DIMS = 384;
 
 /**
- * The shape returned by `pipeline("feature-extraction", ...)`. Accepts a
- * string or batch of strings; returns a flat Float32Array (rows
- * concatenated) plus the (batch_size, hidden_dim) shape.
- */
-type FeatureExtractor = (
-  texts: string | string[],
-  opts: { pooling: "mean"; normalize: boolean },
-) => Promise<{ data: Float32Array; dims: number[] }>;
-
-/**
  * Module-scope singleton. The model is expensive to instantiate (~30MB
  * download on first ever load, then WASM init from disk cache), so we keep
  * one instance per service-worker lifetime. MV3 kills the SW on idle; on
  * the next message the file loads from cache in ~1s.
  */
-let extractorPromise: Promise<FeatureExtractor> | null = null;
+let extractorPromise: Promise<FeatureExtractionPipeline> | null = null;
 
-function getExtractor(): Promise<FeatureExtractor> {
+function getExtractor(): Promise<FeatureExtractionPipeline> {
   if (!extractorPromise) {
+    // `pipeline()`'s overloaded generic over every task expands to a union
+    // TS can't resolve in one shot; the cast narrows to the task we asked for.
     extractorPromise = pipeline("feature-extraction", MODEL_ID, {
       dtype: "q8",
-    }) as unknown as Promise<FeatureExtractor>;
+    }) as unknown as Promise<FeatureExtractionPipeline>;
   }
   return extractorPromise;
 }
@@ -63,14 +55,15 @@ export async function embed(text: string): Promise<Float32Array> {
   // Mean pooling averages per-token vectors into one fixed-size vector per
   // input (bge's recommended pooling). `normalize: true` makes cosine ≡ dot.
   const result = await extractor(text, { pooling: "mean", normalize: true });
-  return result.data.slice(0, EMBEDDING_DIMS);
+  // Tensor.data is typed as the union DataArray; for this model + opts it's Float32Array.
+  return (result.data as Float32Array).slice(0, EMBEDDING_DIMS);
 }
 
 export async function embedBatch(texts: string[]): Promise<Float32Array[]> {
   if (texts.length === 0) return [];
   const extractor = await getExtractor();
   const result = await extractor(texts, { pooling: "mean", normalize: true });
-  return unpackBatch(result.data, texts.length);
+  return unpackBatch(result.data as Float32Array, texts.length);
 }
 
 /** @internal — for tests only. */
