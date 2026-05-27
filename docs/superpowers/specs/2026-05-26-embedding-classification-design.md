@@ -111,7 +111,9 @@ matchedSource?: { title: string; cosine: number };  // only when source === "emb
 
 Signature change: `classifyItem` currently takes `{ productId }`. It needs `title` too. Call site (`background/sync.ts:150-159`) already has the full `AllocatedItem`, so this is a localized change.
 
-Per-sync cost (rough estimate, typical user with ~50 uncategorized items per sync and ~900 stored vectors): ~50 embed calls × ~30ms = ~1.5s, plus ~50 × 900 = ~45k cosine ops (well under 100ms). Negligible next to the existing scrape cost, which dominates sync wall time (each retailer order requires opening a tab, waiting for the page to load, parsing the DOM, and closing — typically 5–12 seconds per order). Embedding adds maybe 2–5% to total sync time. Cache-hit items skip embedding entirely.
+Per-sync cost (rough estimate, typical user with ~50 uncategorized items per sync and ~900 stored vectors): titles are embedded as batches via `embedBatch` rather than one-at-a-time. A batch of ~16 amortizes the per-call overhead and lets WASM vectorize across the batch dimension, typically a 3–5× speedup over sequential. So ~50 titles in ~3 batched calls = roughly **300–500 ms**, plus ~50 × 900 = ~45k cosine ops (well under 100ms). Negligible next to the existing scrape cost, which dominates sync wall time (each retailer order requires opening a tab, waiting for the page to load, parsing the DOM, and closing — typically 5–12 seconds per order). Cache-hit items skip embedding entirely.
+
+Batching is across items within a sync; we don't parallelize across separate `embed` calls (the model runs on a single WASM instance and concurrent awaited calls would serialize on it).
 
 **`learnFromApproval`** (`background/approval.ts`):
 
