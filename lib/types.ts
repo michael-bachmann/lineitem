@@ -25,6 +25,14 @@ export interface ProductCategory {
   timesSeen: number;
   /** ISO datetime — last time this product was seen in a transaction. */
   lastSeen: string;
+  /** Source text the embedding was derived from. Retained so we can re-embed
+   *  if the model is upgraded without waiting for re-approval. */
+  title?: string;
+  /** 384-dim L2-normalized embedding vector. Absent if the embedder wasn't
+   *  ready at write time; backfilled on next opportunity. */
+  embedding?: Float32Array;
+  /** ISO timestamp when this embedding was computed. Absent iff embedding is absent. */
+  embeddedAt?: string;
 }
 
 /**
