@@ -83,6 +83,16 @@ export async function putProductCategory(entry: ProductCategory): Promise<void> 
   await requestToPromise(store.put(entry));
 }
 
+export async function getAllProductCategories(): Promise<ProductCategory[]> {
+  const store = await getStore("productCategories");
+  return requestToPromise(store.getAll());
+}
+
+export async function deleteProductCategory(id: string): Promise<void> {
+  const store = await getStore("productCategories", "readwrite");
+  await requestToPromise(store.delete(id));
+}
+
 // --- Categories ---
 
 export async function getAllCategories(): Promise<Category[]> {
