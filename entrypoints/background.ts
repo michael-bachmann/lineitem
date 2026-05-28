@@ -4,20 +4,7 @@ import { putCategories, getAllCategories } from "@/lib/db";
 import { performSync } from "@/background/sync";
 import { approveTransaction, approveBatch } from "@/background/approval";
 import { ensureModelLoaded } from "@/background/embedder";
-import { migrateEmbeddingsIfNeeded } from "@/background/embedding-migration";
 import type { MessageRequest } from "@/lib/types";
-
-let migrationPromise: Promise<void> | null = null;
-export function ensureMigrated(): Promise<void> {
-  if (!migrationPromise) {
-    migrationPromise = migrateEmbeddingsIfNeeded().catch((err) => {
-      console.warn("Embedding migration failed; will retry on next worker start", err);
-      migrationPromise = null;
-      throw err;
-    });
-  }
-  return migrationPromise;
-}
 
 /** Service worker entry point — routes messages from the side panel to domain handlers. */
 export default defineBackground(() => {
@@ -29,9 +16,10 @@ export default defineBackground(() => {
     console.warn("Initial embedder load failed; will retry on first use", err);
   });
 
-  // Re-embed stored vectors if the model version has changed since last run.
-  // Fire-and-forget; errors are logged in ensureMigrated's catch handler.
-  ensureMigrated().catch(() => {}); // already logged in the wrapper
+  // Migration runs lazily — only when sync or approve actually needs vectors
+  // (each one awaits ensureMigrated() before reading or writing embeddings).
+  // Kicking it off on every SW boot would be wasted work in the steady state
+  // (the common case is "no version change since last run").
 
   browser.runtime.onMessage.addListener(
     (message: MessageRequest, _sender, sendResponse) => {

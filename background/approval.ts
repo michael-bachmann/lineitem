@@ -9,6 +9,7 @@ import {
 import { classifyItems } from "@/lib/classifier";
 import { embedBatch } from "./embedder";
 import { planEviction, PER_CATEGORY_CAP } from "./embedding-eviction";
+import { ensureMigrated } from "./migration-runner";
 import type { AllocatedTransaction, ApprovalItem, ProductCategory } from "@/lib/types";
 import { groupBy } from "remeda";
 
@@ -67,24 +68,19 @@ export function buildSubtransactions(
   }));
 }
 
-interface LearnInput {
-  retailer: string;
-  itemsByProductId: Map<string, { title: string; categoryId: string }>;
-}
-
+/**
+ * One item being learned from an approval — its productId (joined with the
+ * retailer to form the storage key inside learnFromApproval), the title we
+ * store for later re-embedding, and the user's category choice.
+ */
 interface LearnEntry {
-  id: string;
+  productId: string;
   title: string;
   categoryId: string;
-  embedding: Float32Array | null;
 }
 
-interface ApprovalPlan {
-  rowsToWrite: readonly ProductCategory[];
-  idsToEvict: readonly string[];
-}
-
-/** Embed all titles in one batch; on failure, fall back to null per entry. */
+/** Embed all titles in one batch; on failure, fall back to null per entry so
+ *  the row is still written (just without `embedding`/`embeddedAt`). */
 async function safeEmbedBatch(titles: string[]): Promise<(Float32Array | null)[]> {
   try {
     return await embedBatch(titles);
@@ -94,75 +90,42 @@ async function safeEmbedBatch(titles: string[]): Promise<(Float32Array | null)[]
   }
 }
 
-/** Build one ProductCategory row from a LearnEntry, threading existing timesSeen. */
-function buildRow(entry: LearnEntry, existing: ProductCategory | undefined, now: string): ProductCategory {
+/** Build one persisted row from a LearnEntry, threading existing timesSeen. */
+function buildProductRecord(
+  id: string,
+  entry: LearnEntry,
+  embedding: Float32Array | null,
+  existing: ProductCategory | undefined,
+  now: string,
+): ProductCategory {
   return {
-    id: entry.id,
+    id,
     categoryId: entry.categoryId,
     confirmedByUser: true,
     timesSeen: (existing?.timesSeen ?? 0) + 1,
     lastSeen: now,
     title: entry.title,
-    ...(entry.embedding ? { embedding: entry.embedding, embeddedAt: now } : {}),
-  };
-}
-
-/**
- * Plan all writes + evictions in one pure pass. Threads a "snapshot" through
- * each entry so consecutive eviction decisions reflect prior writes in the
- * same batch (without mutating any input).
- */
-function planApprovalWrites(
-  entries: readonly LearnEntry[],
-  existing: readonly ProductCategory[],
-  now: string,
-): ApprovalPlan {
-  const existingById = new Map(existing.map((r) => [r.id, r] as const));
-
-  const final = entries.reduce<{ rows: readonly ProductCategory[]; evictions: readonly string[]; snapshot: readonly ProductCategory[] }>(
-    (acc, entry) => {
-      const { toDelete } = planEviction(acc.snapshot as ProductCategory[], entry.categoryId, entry.id, PER_CATEGORY_CAP);
-      const row = buildRow(entry, existingById.get(entry.id), now);
-      const evictedIds = new Set(toDelete);
-      return {
-        rows: [...acc.rows, row],
-        evictions: [...acc.evictions, ...toDelete],
-        snapshot: [
-          ...acc.snapshot.filter((r) => r.id !== entry.id && !evictedIds.has(r.id)),
-          row,
-        ],
-      };
-    },
-    { rows: [], evictions: [], snapshot: existing },
-  );
-
-  return {
-    rowsToWrite: final.rows,
-    // Dedupe evictions while preserving order.
-    idsToEvict: [...new Set(final.evictions)],
+    ...(embedding ? { embedding, embeddedAt: now } : {}),
   };
 }
 
 /** Learn from this approval — save product→category mappings with embeddings for future classification. */
-async function learnFromApproval(input: LearnInput): Promise<void> {
-  const entries = [...input.itemsByProductId.entries()];
+async function learnFromApproval(retailer: string, entries: readonly LearnEntry[]): Promise<void> {
   if (entries.length === 0) return;
 
-  const titles = entries.map(([, v]) => v.title);
-  const embeddings = await safeEmbedBatch(titles);
+  const embeddings = await safeEmbedBatch(entries.map((e) => e.title));
   const existing = await getAllProductCategories();
+  const existingById = new Map(existing.map((r) => [r.id, r] as const));
+  const now = new Date().toISOString();
 
-  const learnEntries: LearnEntry[] = entries.map(([productId, { title, categoryId }], i) => ({
-    id: `${input.retailer}:${productId}`,
-    title,
-    categoryId,
-    embedding: embeddings[i],
-  }));
+  const rows = entries.map((entry, i) => {
+    const id = `${retailer}:${entry.productId}`;
+    return buildProductRecord(id, entry, embeddings[i], existingById.get(id), now);
+  });
+  const { toDelete } = planEviction(existing, rows, PER_CATEGORY_CAP);
 
-  const plan = planApprovalWrites(learnEntries, existing, new Date().toISOString());
-
-  await Promise.all(plan.rowsToWrite.map(putProductCategory));
-  await Promise.all(plan.idsToEvict.map(deleteProductCategory));
+  await Promise.all(rows.map(putProductCategory));
+  await Promise.all(toDelete.map(deleteProductCategory));
 }
 
 export async function approveTransaction(
@@ -180,23 +143,25 @@ export async function approveTransaction(
       return { error: "Transaction not found — try syncing again" };
     }
 
+    // Make sure stored vectors are at the current model version before we
+    // write new ones (avoids mixed-version pools). No-op in the steady state.
+    await ensureMigrated();
+
     const update = isSingleCategory(items)
       ? { category_id: items[0].categoryId, approved: true }
       : { subtransactions: buildSubtransactions(tx, items), approved: true };
 
     await updateTransaction(settings.ynabToken, settings.planId, ynabTransactionId, update);
 
-    const titleByProductId = new Map(tx.items.map((it) => [it.productId, it.title]));
-    const itemsByProductId = new Map(
-      items.map((c) => [
-        c.productId,
-        {
-          title: titleByProductId.get(c.productId) ?? "",
-          categoryId: c.categoryId,
-        },
-      ]),
-    );
-    await learnFromApproval({ retailer: tx.retailer, itemsByProductId });
+    // Join each approved item's category choice with its title from the
+    // persisted transaction. ApprovalItem only has (productId, categoryId);
+    // titles live on tx.items, which is the authoritative scrape record.
+    const categoryById = new Map(items.map((c) => [c.productId, c.categoryId]));
+    const learnEntries: LearnEntry[] = tx.items.flatMap((it) => {
+      const categoryId = categoryById.get(it.productId);
+      return categoryId ? [{ productId: it.productId, title: it.title, categoryId }] : [];
+    });
+    await learnFromApproval(tx.retailer, learnEntries);
 
     return { ok: true };
   } catch (e) {

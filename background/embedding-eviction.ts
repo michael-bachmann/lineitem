@@ -1,28 +1,45 @@
+import { sortBy, unique } from "remeda";
 import type { ProductCategory } from "@/lib/types";
 
 export interface EvictionPlan {
-  toDelete: string[];
+  toDelete: readonly string[];
 }
 
 export const PER_CATEGORY_CAP = 50;
 
 /**
- * Decide which rows to evict before writing a new entry into a category.
- * If the incoming id already exists, it overwrites in place (no eviction).
- * Otherwise, if the destination category is at cap, evict the oldest by lastSeen.
+ * Decide which existing rows to evict to keep each category at or below cap
+ * after a batch of writes lands.
+ *
+ * For each category targeted by an incoming row, count what the category will
+ * hold after the writes:
+ *   existing rows in that category, minus those being overwritten,
+ *   plus incoming rows targeting that category.
+ * If that exceeds cap, evict the oldest existing (non-overwritten) rows by
+ * `lastSeen` until it doesn't.
+ *
+ * Incoming rows themselves are never evicted — `lastSeen = now` makes them
+ * the freshest anyway.
  */
 export function planEviction(
-  existing: ProductCategory[],
-  destinationCategoryId: string,
-  incomingId: string,
+  existing: readonly ProductCategory[],
+  incoming: readonly ProductCategory[],
   cap: number,
 ): EvictionPlan {
-  const incomingExists = existing.some((r) => r.id === incomingId);
-  if (incomingExists) return { toDelete: [] };
+  const writeIds = new Set(incoming.map((r) => r.id));
+  const targetCategories = unique(incoming.map((r) => r.categoryId));
 
-  const inCategory = existing.filter((r) => r.categoryId === destinationCategoryId);
-  if (inCategory.length < cap) return { toDelete: [] };
+  const toDelete = targetCategories.flatMap((categoryId) => {
+    const existingInCat = existing.filter(
+      (r) => r.categoryId === categoryId && !writeIds.has(r.id),
+    );
+    const incomingInCat = incoming.filter((r) => r.categoryId === categoryId).length;
+    const overflow = existingInCat.length + incomingInCat - cap;
+    if (overflow <= 0) return [];
+    return sortBy(existingInCat, [(r) => r.lastSeen, "asc"])
+      .slice(0, overflow)
+      .map((r) => r.id);
+  });
 
-  const oldest = inCategory.reduce((a, b) => (a.lastSeen < b.lastSeen ? a : b));
-  return { toDelete: [oldest.id] };
+  return { toDelete };
 }
