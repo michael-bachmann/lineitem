@@ -14,7 +14,6 @@ vi.mock("@/background/embedder", () => ({
   embedBatch: embedBatchMock,
   embed: vi.fn(),
   ensureModelLoaded: vi.fn(async () => {}),
-  getCurrentModelVersion: () => "bge-small-en-v1.5-q8",
 }));
 
 // Mock the YNAB update so approveTransaction's external call is a no-op:
@@ -30,7 +29,6 @@ vi.mock("@/lib/settings", () => ({
     ynabToken: "fake-token",
     planId: "fake-plan",
     planName: null,
-    vectorModelVersion: "bge-small-en-v1.5-q8",
   })),
 }));
 
@@ -164,7 +162,7 @@ describe("buildSubtransactions", () => {
 });
 
 describe("learnFromApproval writes embeddings", () => {
-  it("writes title + embedding + embeddedAt on each approved item", async () => {
+  it("writes title + embedding on each approved item", async () => {
     const tx: AllocatedTransaction = {
       ynabTransactionId: "txn-1", orderKey: "amazon:O1", retailer: "amazon",
       date: "2026-05-20", amountCents: 5000, cardLastFour: "1234", isRefund: false,
@@ -195,7 +193,6 @@ describe("learnFromApproval writes embeddings", () => {
     });
     expect(rowA?.embedding).toBeInstanceOf(Float32Array);
     expect(rowA?.embedding?.length).toBe(384);
-    expect(rowA?.embeddedAt).toEqual(expect.any(String));
   });
 
   it("falls back to writing the row without embedding fields when embedBatch throws", async () => {
@@ -217,7 +214,6 @@ describe("learnFromApproval writes embeddings", () => {
     const row = productCategoryStore.get("amazon:X");
     expect(row).toMatchObject({ id: "amazon:X", title: "Lightbulb", categoryId: "cat-household" });
     expect(row?.embedding).toBeUndefined();
-    expect(row?.embeddedAt).toBeUndefined();
   });
 
   it("increments timesSeen on overwrite", async () => {

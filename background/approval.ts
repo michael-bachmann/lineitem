@@ -9,7 +9,6 @@ import {
 import { classifyItems } from "@/lib/classifier";
 import { embedBatch } from "./embedder";
 import { planEviction, PER_CATEGORY_CAP } from "./embedding-eviction";
-import { ensureMigrated } from "./migration-runner";
 import type { AllocatedTransaction, ApprovalItem, ProductCategory } from "@/lib/types";
 import { groupBy } from "remeda";
 
@@ -80,7 +79,7 @@ interface LearnEntry {
 }
 
 /** Embed all titles in one batch; on failure, fall back to null per entry so
- *  the row is still written (just without `embedding`/`embeddedAt`). */
+ *  the row is still written (just without `embedding`). */
 async function safeEmbedBatch(titles: string[]): Promise<(Float32Array | null)[]> {
   try {
     return await embedBatch(titles);
@@ -105,7 +104,7 @@ function buildProductRecord(
     timesSeen: (existing?.timesSeen ?? 0) + 1,
     lastSeen: now,
     title: entry.title,
-    ...(embedding ? { embedding, embeddedAt: now } : {}),
+    ...(embedding ? { embedding } : {}),
   };
 }
 
@@ -142,10 +141,6 @@ export async function approveTransaction(
     if (!tx) {
       return { error: "Transaction not found — try syncing again" };
     }
-
-    // Make sure stored vectors are at the current model version before we
-    // write new ones (avoids mixed-version pools). No-op in the steady state.
-    await ensureMigrated();
 
     const update = isSingleCategory(items)
       ? { category_id: items[0].categoryId, approved: true }

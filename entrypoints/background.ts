@@ -16,11 +16,6 @@ export default defineBackground(() => {
     console.warn("Initial embedder load failed; will retry on first use", err);
   });
 
-  // Migration runs lazily — only when sync or approve actually needs vectors
-  // (each one awaits ensureMigrated() before reading or writing embeddings).
-  // Kicking it off on every SW boot would be wasted work in the steady state
-  // (the common case is "no version change since last run").
-
   browser.runtime.onMessage.addListener(
     (message: MessageRequest, _sender, sendResponse) => {
       handleMessage(message).then(sendResponse);
