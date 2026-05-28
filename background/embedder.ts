@@ -7,9 +7,6 @@ import { pipeline, type FeatureExtractionPipeline } from "@huggingface/transform
  */
 const MODEL_ID = "Xenova/bge-small-en-v1.5";
 
-/** Version stamp used to invalidate stored vectors when the model changes. */
-const MODEL_VERSION = "bge-small-en-v1.5-q8";
-
 const EMBEDDING_DIMS = 384;
 
 /**
@@ -29,10 +26,6 @@ function getExtractor(): Promise<FeatureExtractionPipeline> {
     }) as unknown as Promise<FeatureExtractionPipeline>;
   }
   return extractorPromise;
-}
-
-export function getCurrentModelVersion(): string {
-  return MODEL_VERSION;
 }
 
 /** Pre-warm the model so the first sync doesn't pay the load cost in-band. */

@@ -1,8 +1,15 @@
 import { getSettings } from "@/lib/settings";
 import { updateTransaction } from "@/lib/ynab";
-import { getAllocatedTransaction, getProductCategory, putProductCategory } from "@/lib/db";
+import {
+  getAllocatedTransaction,
+  putProductCategory,
+  getAllProductCategories,
+  deleteProductCategory,
+} from "@/lib/db";
 import { classifyItems } from "@/lib/classifier";
-import type { AllocatedTransaction, ApprovalItem } from "@/lib/types";
+import { embedBatch } from "./embedder";
+import { planEviction, PER_CATEGORY_CAP } from "./embedding-eviction";
+import type { AllocatedTransaction, ApprovalItem, ProductCategory } from "@/lib/types";
 import { groupBy } from "remeda";
 
 /** Check whether all items share the same category. */
@@ -60,19 +67,64 @@ export function buildSubtransactions(
   }));
 }
 
-/** Learn from this approval — save product→category mappings for future classification. */
-async function learnFromApproval(retailer: string, choices: ApprovalItem[]): Promise<void> {
-  for (const choice of choices) {
-    const key = `${retailer}:${choice.productId}`;
-    const existing = await getProductCategory(key);
-    await putProductCategory({
-      id: key,
-      categoryId: choice.categoryId,
-      confirmedByUser: true,
-      timesSeen: (existing?.timesSeen ?? 0) + 1,
-      lastSeen: new Date().toISOString(),
-    });
+/**
+ * One item being learned from an approval — its productId (joined with the
+ * retailer to form the storage key inside learnFromApproval), the title we
+ * store for later re-embedding, and the user's category choice.
+ */
+interface LearnEntry {
+  productId: string;
+  title: string;
+  categoryId: string;
+}
+
+/** Embed all titles in one batch; on failure, fall back to null per entry so
+ *  the row is still written (just without `embedding`). */
+async function safeEmbedBatch(titles: string[]): Promise<(Float32Array | null)[]> {
+  try {
+    return await embedBatch(titles);
+  } catch (err) {
+    console.warn("learnFromApproval: embedBatch failed; writing rows without vectors", err);
+    return titles.map(() => null);
   }
+}
+
+/** Build one persisted row from a LearnEntry, threading existing timesSeen. */
+function buildProductRecord(
+  id: string,
+  entry: LearnEntry,
+  embedding: Float32Array | null,
+  existing: ProductCategory | undefined,
+  now: string,
+): ProductCategory {
+  return {
+    id,
+    categoryId: entry.categoryId,
+    confirmedByUser: true,
+    timesSeen: (existing?.timesSeen ?? 0) + 1,
+    lastSeen: now,
+    title: entry.title,
+    ...(embedding ? { embedding } : {}),
+  };
+}
+
+/** Learn from this approval — save product→category mappings with embeddings for future classification. */
+async function learnFromApproval(retailer: string, entries: readonly LearnEntry[]): Promise<void> {
+  if (entries.length === 0) return;
+
+  const embeddings = await safeEmbedBatch(entries.map((e) => e.title));
+  const existing = await getAllProductCategories();
+  const existingById = new Map(existing.map((r) => [r.id, r] as const));
+  const now = new Date().toISOString();
+
+  const rows = entries.map((entry, i) => {
+    const id = `${retailer}:${entry.productId}`;
+    return buildProductRecord(id, entry, embeddings[i], existingById.get(id), now);
+  });
+  const { toDelete } = planEviction(existing, rows, PER_CATEGORY_CAP);
+
+  await Promise.all(rows.map(putProductCategory));
+  await Promise.all(toDelete.map(deleteProductCategory));
 }
 
 export async function approveTransaction(
@@ -96,7 +148,15 @@ export async function approveTransaction(
 
     await updateTransaction(settings.ynabToken, settings.planId, ynabTransactionId, update);
 
-    await learnFromApproval(tx.retailer, items);
+    // Join each approved item's category choice with its title from the
+    // persisted transaction. ApprovalItem only has (productId, categoryId);
+    // titles live on tx.items, which is the authoritative scrape record.
+    const categoryById = new Map(items.map((c) => [c.productId, c.categoryId]));
+    const learnEntries: LearnEntry[] = tx.items.flatMap((it) => {
+      const categoryId = categoryById.get(it.productId);
+      return categoryId ? [{ productId: it.productId, title: it.title, categoryId }] : [];
+    });
+    await learnFromApproval(tx.retailer, learnEntries);
 
     return { ok: true };
   } catch (e) {

@@ -6,7 +6,7 @@ vi.mock("@huggingface/transformers", () => ({
   pipeline: pipelineMock,
 }));
 
-import { embed, embedBatch, getCurrentModelVersion, _resetForTest } from "./embedder";
+import { embed, embedBatch, _resetForTest } from "./embedder";
 
 function makePipelineFn() {
   return vi.fn(async (texts: string | string[], _opts: unknown) => {
@@ -28,10 +28,6 @@ afterEach(() => {
 });
 
 describe("embedder", () => {
-  it("getCurrentModelVersion returns a stable string", () => {
-    expect(getCurrentModelVersion()).toBe("bge-small-en-v1.5-q8");
-  });
-
   it("embed() returns a 384-dim normalized Float32Array", async () => {
     const v = await embed("paper towels");
     expect(v).toBeInstanceOf(Float32Array);

@@ -4,10 +4,9 @@ export interface Settings {
   ynabToken: string | null;
   planId: string | null;
   planName: string | null;
-  vectorModelVersion: string | null;
 }
 
-const SETTINGS_KEYS = ["ynabToken", "planId", "planName", "vectorModelVersion"] as const;
+const SETTINGS_KEYS = ["ynabToken", "planId", "planName"] as const;
 
 export async function getSettings(): Promise<Settings> {
   const result = await browser.storage.local.get([...SETTINGS_KEYS]);
@@ -15,7 +14,6 @@ export async function getSettings(): Promise<Settings> {
     ynabToken: (result.ynabToken ?? null) as string | null,
     planId: (result.planId ?? null) as string | null,
     planName: (result.planName ?? null) as string | null,
-    vectorModelVersion: (result.vectorModelVersion ?? null) as string | null,
   };
 }
 
