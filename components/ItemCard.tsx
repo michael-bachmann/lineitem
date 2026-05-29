@@ -1,5 +1,6 @@
-import type { Category } from "@/lib/types";
+import type { Category, ClassifiedItem } from "@/lib/types";
 import { formatCents } from "@/lib/money";
+import { ClassificationIndicator } from "@/components/ClassificationIndicator";
 
 interface ItemCardProps {
   title: string;
@@ -7,6 +8,7 @@ interface ItemCardProps {
   price: number; // cents per unit
   quantity: number;
   selectedCategoryId: string | null;
+  classificationSource: ClassifiedItem["classificationSource"];
   categories: Category[];
   onCategoryChange: (categoryId: string) => void;
 }
@@ -17,6 +19,7 @@ export default function ItemCard({
   price,
   quantity,
   selectedCategoryId,
+  classificationSource,
   categories,
   onCategoryChange,
 }: ItemCardProps) {
@@ -48,9 +51,7 @@ export default function ItemCard({
       <div className="flex flex-col gap-1.5 min-w-0 flex-1">
         {/* Title */}
         <div className="flex items-center gap-1 min-w-0">
-          {uncategorized && (
-            <span className="text-yellow-400 shrink-0" title="Needs a category">⚠</span>
-          )}
+          <ClassificationIndicator source={classificationSource} />
           <span className="text-sm font-medium text-gray-100 truncate">{title}</span>
         </div>
 
