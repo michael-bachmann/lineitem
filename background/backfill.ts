@@ -1,12 +1,17 @@
 import { groupBy, sumBy } from "remeda";
 import { getSettings } from "@/lib/settings";
 import { getTransactionsSince } from "@/lib/ynab";
-import { getAllocatedTransaction } from "@/lib/db";
+import {
+  getAllocatedTransaction,
+  getBackfilledTransaction,
+  putBackfilledTransactions,
+} from "@/lib/db";
 import { getRetailerForPayee } from "@/lib/registry";
 import { getAdapter } from "@/retailers/registry";
 import { millunitsToCents } from "@/lib/money";
 import { learnFromApproval, type LearnEntry } from "./approval";
 import type {
+  BackfilledTransaction,
   BackfillProgress,
   BackfillResult,
   ScrapedOrder,
@@ -24,6 +29,8 @@ export interface BackfillOptions {
   signal?: AbortSignal;
   onProgress?: (event: BackfillProgress) => void;
 }
+
+const now = (): string => new Date().toISOString();
 
 function toYnabCharge(tx: YnabTransaction): YnabCharge {
   return {
@@ -96,16 +103,19 @@ function backfillEligibility(tx: YnabTransaction): { retailer: string } | null {
 }
 
 /** Eligibility filter. Split into (a) a sync shape check and (b) an async
- *  dedup against AllocatedTransaction so each concern is independently
- *  readable. Per-tx IDB read keeps it simple; candidate counts are
+ *  dedup against AllocatedTransaction (sync's marker) and BackfilledTransaction
+ *  (backfill's own marker). Per-tx IDB reads — candidate counts are
  *  O(months × txs/month), fine to fan out. */
 async function filterCandidates(txs: YnabTransaction[]): Promise<TaggedTx[]> {
   const tagged = await Promise.all(
     txs.map(async (tx): Promise<TaggedTx | null> => {
       const eligibility = backfillEligibility(tx);
       if (!eligibility) return null;
-      const already = await getAllocatedTransaction(tx.id);
-      if (already) return null;
+      const [allocated, backfilled] = await Promise.all([
+        getAllocatedTransaction(tx.id),
+        getBackfilledTransaction(tx.id),
+      ]);
+      if (allocated || backfilled) return null;
       return { tx, retailer: eligibility.retailer };
     }),
   );
@@ -177,6 +187,15 @@ async function runForRetailer(
     const entries = outcomes.flatMap((o) => (o.kind === "ok" ? o.entries : []));
 
     if (entries.length > 0) await learnFromApproval(retailerId, entries);
+
+    // Mark every adapter-matched tx so re-runs skip them. Includes ambiguous
+    // multi-charge orders: re-scraping them produces the same skip; the
+    // adapter-unmatched charges are NOT marked, so a second run under a
+    // different retailer login picks them up.
+    const markers: BackfilledTransaction[] = matched.flatMap(({ charges: cs }) =>
+      cs.map((c) => ({ ynabTransactionId: c.ynabTransactionId, backfilledAt: now() })),
+    );
+    await putBackfilledTransactions(markers);
 
     return {
       matched: outcomes.filter((o) => o.kind === "ok").length,

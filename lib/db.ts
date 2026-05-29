@@ -1,5 +1,6 @@
 import type {
   AllocatedTransaction,
+  BackfilledTransaction,
   Category,
   LearnedProduct,
   ProductEmbedding,
@@ -26,6 +27,10 @@ function openDB(): Promise<IDBDatabase> {
 
       // productEmbeddings: bounded embedding pool, evicted oldest-first.
       db.createObjectStore("productEmbeddings", { keyPath: "id" });
+
+      // backfilledTransactions: idempotency markers for the past-order
+      // backfill flow. Presence means "already scraped; don't re-process."
+      db.createObjectStore("backfilledTransactions", { keyPath: "ynabTransactionId" });
 
       db.createObjectStore("categories", { keyPath: "id" });
     };
@@ -106,6 +111,30 @@ export async function putProductEmbedding(entry: ProductEmbedding): Promise<void
 export async function deleteProductEmbedding(id: string): Promise<void> {
   const store = await getStore("productEmbeddings", "readwrite");
   await requestToPromise(store.delete(id));
+}
+
+// --- Backfilled Transactions (idempotency markers) ---
+
+export async function getBackfilledTransaction(
+  ynabTransactionId: string,
+): Promise<BackfilledTransaction | undefined> {
+  const store = await getStore("backfilledTransactions");
+  return requestToPromise(store.get(ynabTransactionId));
+}
+
+/** Atomic batch put — write all markers from one backfill batch together. */
+export async function putBackfilledTransactions(
+  rows: readonly BackfilledTransaction[],
+): Promise<void> {
+  if (rows.length === 0) return;
+  const db = await openDB();
+  const tx = db.transaction("backfilledTransactions", "readwrite");
+  const store = tx.objectStore("backfilledTransactions");
+  for (const r of rows) store.put(r);
+  return new Promise((resolve, reject) => {
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
 }
 
 // --- Categories ---
