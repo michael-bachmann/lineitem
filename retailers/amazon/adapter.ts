@@ -105,7 +105,10 @@ export const amazonAdapter: RetailerAdapter = {
 // Internal: list-page pagination + matching
 // ----------------------------------------------------------------------------
 
-const MAX_PAGES = 10;
+// Upper bound on transaction-page pagination. Sync calls are naturally
+// bounded much earlier by `cutoffDateFor(charges)`; the higher cap exists
+// to let the past-order backfill walk far enough back to find old orders.
+const MAX_PAGES = 30;
 
 interface PaginateResult {
   matchedPairs: [YnabCharge, RawTransaction][];

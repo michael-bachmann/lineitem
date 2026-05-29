@@ -79,6 +79,22 @@ export async function getUnapprovedTransactions(
   return data.data.transactions;
 }
 
+/**
+ * Fetch all transactions on or after `sinceDate` (ISO YYYY-MM-DD). Used by
+ * the past-order backfill flow; returns approved and unapproved alike.
+ */
+export async function getTransactionsSince(
+  token: string,
+  planId: string,
+  sinceDate: string,
+): Promise<YnabTransaction[]> {
+  const data = await ynabFetch(
+    `/plans/${planId}/transactions?since_date=${sinceDate}`,
+    token,
+  );
+  return data.data.transactions;
+}
+
 export interface YnabTransactionUpdate {
   category_id?: string | null;
   approved?: boolean;
