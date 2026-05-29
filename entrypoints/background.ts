@@ -23,7 +23,10 @@ export default defineBackground(() => {
   });
 
   browser.runtime.onMessage.addListener(
-    (message: MessageRequest, _sender, sendResponse) => {
+    (message: MessageRequest | MessageBroadcast, _sender, sendResponse) => {
+      // Broadcasts (e.g. our own BACKFILL_PROGRESS, which fan out to every
+      // extension page including this one) don't expect a response.
+      if (message.type === "BACKFILL_PROGRESS") return false;
       handleMessage(message).then(sendResponse);
       // Return true to keep the message channel open for the async response
       return true;

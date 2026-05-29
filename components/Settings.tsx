@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { browser } from "wxt/browser";
+import BackfillCard from "./BackfillCard";
 
 interface SettingsProps {
   planName: string;
@@ -73,6 +74,8 @@ export default function Settings({ planName, onDisconnect, onBack }: SettingsPro
         >
           {refreshing ? "Refreshing..." : "Refresh Categories from YNAB"}
         </button>
+
+        <BackfillCard />
 
         <button
           onClick={handleDisconnect}
