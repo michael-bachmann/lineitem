@@ -9,28 +9,41 @@
 // ---------------------------------------------------------------------------
 
 /**
- * Maps a product to a YNAB category. Learned from user approvals so that
- * repeat purchases are auto-classified on future syncs.
+ * Forever-row mapping a product to a YNAB category, learned from a user
+ * approval. Read by classifyItem's exact-match cache tier; never deleted,
+ * only updated when the user re-approves the same product with a different
+ * category.
  *
- * Stored in the `productCategories` IndexedDB store, keyed by id.
+ * Stored in the `learnedProducts` IndexedDB store, keyed by id.
  */
-export interface ProductCategory {
+export interface LearnedProduct {
   /** Format: "{retailer}:{productId}" e.g. "amazon:B0XXXXXXXX" */
   id: string;
   /** YNAB category UUID. */
   categoryId: string;
-  /** True once the user has explicitly approved this mapping. */
-  confirmedByUser: boolean;
-  /** How many times this product has appeared across syncs. */
-  timesSeen: number;
-  /** ISO datetime — last time this product was seen in a transaction. */
+}
+
+/**
+ * One vector in the embedding similarity pool. Capped per-category;
+ * evicted oldest-first by `lastSeen` when a category fills.
+ *
+ * Stored in the `productEmbeddings` IndexedDB store, keyed by id. Pairs
+ * 1:1 with a LearnedProduct (same id) while the embedding lives; deletion
+ * here does not delete the LearnedProduct cache row.
+ */
+export interface ProductEmbedding {
+  /** Format: "{retailer}:{productId}" — same shape as LearnedProduct.id. */
+  id: string;
+  /** Denormalized from LearnedProduct so scoring can group by category
+   *  without a per-row join; kept in sync because approval writes both. */
+  categoryId: string;
+  /** Source text the embedding was derived from. Used by the UI's
+   *  "similar to your past 'X'" line and by any future re-embed. */
+  title: string;
+  /** 384-dim L2-normalized embedding vector. */
+  embedding: Float32Array;
+  /** ISO datetime — last time this product was approved. Drives eviction. */
   lastSeen: string;
-  /** Source text the embedding was derived from. Kept on the row so the UI
-   *  can surface it (e.g. "similar to your past 'Bounty Paper Towels'"). */
-  title?: string;
-  /** 384-dim L2-normalized embedding vector. Absent if the embedder wasn't
-   *  ready at write time; can be filled in on a later approval. */
-  embedding?: Float32Array;
 }
 
 /**
@@ -168,7 +181,6 @@ export interface YnabCharge {
   amountCents: number;
   payeeName: string;
   isRefund: boolean;
-  cardLastFour: string | null;
 }
 
 /** An order as returned by a RetailerAdapter. */
@@ -177,8 +189,6 @@ export interface ScrapedOrder {
   /** Adapter's notion of "same order". */
   orderId: string;
   items: ScrapedItem[];
-  /** ISO datetime. */
-  scrapedAt: string;
   /**
    * Amazon's displayed "Item(s) Subtotal" for this order, in cents.
    * Used by the scrape-completeness guard to verify that sum(items)
@@ -210,11 +220,9 @@ export interface AllocatedTransaction {
   date: string;
   /** YNAB charge total in cents. */
   amountCents: number;
-  cardLastFour: string | null;
   isRefund: boolean;
   /** Sum of item.allocatedCents equals amountCents exactly. */
   items: AllocatedItem[];
-  scrapedAt: string;
 }
 
 /** A scraped item plus its share of the YNAB charge. */

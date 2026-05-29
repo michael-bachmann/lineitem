@@ -12,7 +12,6 @@ function makeOrder(overrides: Partial<ScrapedOrder> = {}): ScrapedOrder {
     orderId: "111-test",
     items: [],
     displayedItemsSubtotalCents: 0,
-    scrapedAt: "2026-05-25T12:00:00Z",
     ...overrides,
   };
 }

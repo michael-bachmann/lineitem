@@ -2,14 +2,20 @@ import { getSettings } from "@/lib/settings";
 import { updateTransaction } from "@/lib/ynab";
 import {
   getAllocatedTransaction,
-  putProductCategory,
-  getAllProductCategories,
-  deleteProductCategory,
+  putLearnedProduct,
+  getAllProductEmbeddings,
+  putProductEmbedding,
+  deleteProductEmbedding,
 } from "@/lib/db";
 import { classifyItems } from "@/lib/classifier";
 import { embedBatch } from "./embedder";
 import { planEviction, PER_CATEGORY_CAP } from "./embedding-eviction";
-import type { AllocatedTransaction, ApprovalItem, ProductCategory } from "@/lib/types";
+import type {
+  AllocatedTransaction,
+  ApprovalItem,
+  LearnedProduct,
+  ProductEmbedding,
+} from "@/lib/types";
 import { groupBy } from "remeda";
 
 /** Check whether all items share the same category. */
@@ -79,7 +85,7 @@ interface LearnEntry {
 }
 
 /** Embed all titles in one batch; on failure, fall back to null per entry so
- *  the row is still written (just without `embedding`). */
+ *  the LearnedProduct row is still written (just without an embedding). */
 async function safeEmbedBatch(titles: string[]): Promise<(Float32Array | null)[]> {
   try {
     return await embedBatch(titles);
@@ -89,42 +95,54 @@ async function safeEmbedBatch(titles: string[]): Promise<(Float32Array | null)[]
   }
 }
 
-/** Build one persisted row from a LearnEntry, threading existing timesSeen. */
-function buildProductRecord(
+function buildLearnedProduct(id: string, entry: LearnEntry): LearnedProduct {
+  return { id, categoryId: entry.categoryId };
+}
+
+function buildProductEmbedding(
   id: string,
   entry: LearnEntry,
-  embedding: Float32Array | null,
-  existing: ProductCategory | undefined,
+  embedding: Float32Array,
   now: string,
-): ProductCategory {
+): ProductEmbedding {
   return {
     id,
     categoryId: entry.categoryId,
-    confirmedByUser: true,
-    timesSeen: (existing?.timesSeen ?? 0) + 1,
-    lastSeen: now,
     title: entry.title,
-    ...(embedding ? { embedding } : {}),
+    embedding,
+    lastSeen: now,
   };
 }
 
-/** Learn from this approval — save product→category mappings with embeddings for future classification. */
+/**
+ * Learn from this approval — write the cache row (forever) and the embedding
+ * row (capped pool, evicted on overflow). When embedBatch fails, the cache
+ * row still gets written; the embedding is just skipped for that entry.
+ */
 async function learnFromApproval(retailer: string, entries: readonly LearnEntry[]): Promise<void> {
   if (entries.length === 0) return;
 
   const embeddings = await safeEmbedBatch(entries.map((e) => e.title));
-  const existing = await getAllProductCategories();
-  const existingById = new Map(existing.map((r) => [r.id, r] as const));
   const now = new Date().toISOString();
 
-  const rows = entries.map((entry, i) => {
-    const id = `${retailer}:${entry.productId}`;
-    return buildProductRecord(id, entry, embeddings[i], existingById.get(id), now);
-  });
-  const { toDelete } = planEviction(existing, rows, PER_CATEGORY_CAP);
+  // Cache writes go through unconditionally for every entry.
+  const learnedRows = entries.map((entry) =>
+    buildLearnedProduct(`${retailer}:${entry.productId}`, entry),
+  );
 
-  await Promise.all(rows.map(putProductCategory));
-  await Promise.all(toDelete.map(deleteProductCategory));
+  // Embedding writes are gated on having a vector. Plan eviction against
+  // the existing embedding pool only.
+  const embeddingRows = entries.flatMap((entry, i): ProductEmbedding[] => {
+    const vec = embeddings[i];
+    if (!vec) return [];
+    return [buildProductEmbedding(`${retailer}:${entry.productId}`, entry, vec, now)];
+  });
+  const existingEmbeddings = await getAllProductEmbeddings();
+  const { toDelete } = planEviction(existingEmbeddings, embeddingRows, PER_CATEGORY_CAP);
+
+  await Promise.all(learnedRows.map(putLearnedProduct));
+  await Promise.all(embeddingRows.map(putProductEmbedding));
+  await Promise.all(toDelete.map(deleteProductEmbedding));
 }
 
 export async function approveTransaction(

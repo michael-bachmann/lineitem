@@ -1,4 +1,9 @@
-import type { AllocatedTransaction, ProductCategory, Category } from "./types";
+import type {
+  AllocatedTransaction,
+  Category,
+  LearnedProduct,
+  ProductEmbedding,
+} from "./types";
 
 const DB_NAME = "itemize";
 const DB_VERSION = 1;
@@ -16,7 +21,12 @@ function openDB(): Promise<IDBDatabase> {
       const txStore = db.createObjectStore("allocatedTransactions", { keyPath: "ynabTransactionId" });
       txStore.createIndex("orderKey", "orderKey", { unique: false });
 
-      db.createObjectStore("productCategories", { keyPath: "id" });
+      // learnedProducts: forever-row exact-match cache (id → categoryId).
+      db.createObjectStore("learnedProducts", { keyPath: "id" });
+
+      // productEmbeddings: bounded embedding pool, evicted oldest-first.
+      db.createObjectStore("productEmbeddings", { keyPath: "id" });
+
       db.createObjectStore("categories", { keyPath: "id" });
     };
     request.onsuccess = () => resolve(request.result);
@@ -69,27 +79,32 @@ export async function putAllocatedTransactions(
   });
 }
 
-// --- Product Categories (learned from user approvals) ---
+// --- Learned Products (forever-row cache) ---
 
-export async function getProductCategory(
-  id: string,
-): Promise<ProductCategory | undefined> {
-  const store = await getStore("productCategories");
+export async function getLearnedProduct(id: string): Promise<LearnedProduct | undefined> {
+  const store = await getStore("learnedProducts");
   return requestToPromise(store.get(id));
 }
 
-export async function putProductCategory(entry: ProductCategory): Promise<void> {
-  const store = await getStore("productCategories", "readwrite");
+export async function putLearnedProduct(entry: LearnedProduct): Promise<void> {
+  const store = await getStore("learnedProducts", "readwrite");
   await requestToPromise(store.put(entry));
 }
 
-export async function getAllProductCategories(): Promise<ProductCategory[]> {
-  const store = await getStore("productCategories");
+// --- Product Embeddings (capped similarity pool) ---
+
+export async function getAllProductEmbeddings(): Promise<ProductEmbedding[]> {
+  const store = await getStore("productEmbeddings");
   return requestToPromise(store.getAll());
 }
 
-export async function deleteProductCategory(id: string): Promise<void> {
-  const store = await getStore("productCategories", "readwrite");
+export async function putProductEmbedding(entry: ProductEmbedding): Promise<void> {
+  const store = await getStore("productEmbeddings", "readwrite");
+  await requestToPromise(store.put(entry));
+}
+
+export async function deleteProductEmbedding(id: string): Promise<void> {
+  const store = await getStore("productEmbeddings", "readwrite");
   await requestToPromise(store.delete(id));
 }
 
