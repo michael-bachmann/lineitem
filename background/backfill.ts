@@ -1,4 +1,4 @@
-import { groupBy } from "remeda";
+import { groupBy, sumBy } from "remeda";
 import { getSettings } from "@/lib/settings";
 import { getTransactionsSince } from "@/lib/ynab";
 import { getAllocatedTransaction } from "@/lib/db";
@@ -23,17 +23,6 @@ export interface BackfillOptions {
   fromDate: string;
   signal?: AbortSignal;
   onProgress?: (event: BackfillProgress) => void;
-}
-
-class AbortError extends Error {
-  constructor() {
-    super("aborted");
-    this.name = "AbortError";
-  }
-}
-
-function throwIfAborted(signal?: AbortSignal): void {
-  if (signal?.aborted) throw new AbortError();
 }
 
 function toYnabCharge(tx: YnabTransaction): YnabCharge {
@@ -63,7 +52,7 @@ export async function runBackfill(options: BackfillOptions): Promise<BackfillRes
   if (!settings.ynabToken || !settings.planId) throw new Error("Not connected to YNAB");
 
   onProgress?.({ phase: "fetching" });
-  throwIfAborted(signal);
+  signal?.throwIfAborted();
   const allTxs = await getTransactionsSince(settings.ynabToken, settings.planId, fromDate);
 
   const tagged = await filterCandidates(allTxs);
@@ -75,15 +64,16 @@ export async function runBackfill(options: BackfillOptions): Promise<BackfillRes
   // Sequential per retailer — each adapter call owns a browser tab; running
   // them in parallel would open multiple tabs at once. Sync's natural
   // bound of "one retailer per sync cycle" doesn't apply here.
-  let aggregate: Omit<BackfillResult, "total"> = {
-    matched: 0,
-    unmatched: 0,
-    failed: 0,
-    itemsWritten: 0,
-  };
+  let aggregate: RetailerTotals = { matched: 0, unmatched: 0, failed: 0, itemsWritten: 0 };
   for (const [retailerId, group] of Object.entries(byRetailer)) {
-    throwIfAborted(signal);
-    aggregate = sumTotals(aggregate, await runForRetailer(retailerId, group));
+    signal?.throwIfAborted();
+    const r = await runForRetailer(retailerId, group);
+    aggregate = {
+      matched: aggregate.matched + r.matched,
+      unmatched: aggregate.unmatched + r.unmatched,
+      failed: aggregate.failed + r.failed,
+      itemsWritten: aggregate.itemsWritten + r.itemsWritten,
+    };
   }
 
   onProgress?.({ phase: "done" });
@@ -125,50 +115,49 @@ async function filterCandidates(txs: YnabTransaction[]): Promise<TaggedTx[]> {
   return tagged.filter((t): t is TaggedTx => t !== null);
 }
 
-/** Per-retailer partial totals. Same shape as BackfillResult minus `total`,
- *  which is known up-front from the candidate count and isn't accumulated. */
-type RetailerTotals = Omit<BackfillResult, "total">;
-
-const ZERO: RetailerTotals = { matched: 0, unmatched: 0, failed: 0, itemsWritten: 0 };
-
-function sumTotals(a: RetailerTotals, b: RetailerTotals): RetailerTotals {
-  return {
-    matched: a.matched + b.matched,
-    unmatched: a.unmatched + b.unmatched,
-    failed: a.failed + b.failed,
-    itemsWritten: a.itemsWritten + b.itemsWritten,
-  };
+interface RetailerTotals {
+  matched: number;
+  unmatched: number;
+  failed: number;
+  itemsWritten: number;
 }
 
-/** Convert one matched-order entry into its contribution to the retailer's
- *  rolling totals. Returns zero-everything when the order can't be cleanly
- *  attributed (multi-charge, missing tx, missing category). */
+/** One matched order's contribution to the retailer's rolling counts. */
+interface OrderContribution {
+  matched: 0 | 1;
+  unmatched: number;
+  itemsWritten: number;
+  entries: LearnEntry[];
+}
+
+const EMPTY_CONTRIBUTION: OrderContribution = {
+  matched: 0,
+  unmatched: 0,
+  itemsWritten: 0,
+  entries: [],
+};
+
+/** Convert one matched-order entry into its contribution. Skips with
+ *  zero-everything when the order can't be cleanly attributed (multi-charge,
+ *  missing tx, or missing category). */
 function processMatchedOrder(
   matchedEntry: { order: ScrapedOrder; charges: YnabCharge[] },
   txById: Map<string, YnabTransaction>,
-): { totals: RetailerTotals; entries: LearnEntry[] } {
+): OrderContribution {
   const { order, charges: orderCharges } = matchedEntry;
   // Multi-charge orders can't be cleanly attributed: each charge has its
   // own YNAB category, so there's no single category to tag the items
   // with. Cheaper to skip than to invent a partition.
   if (orderCharges.length !== 1) {
-    return {
-      totals: { ...ZERO, unmatched: orderCharges.length },
-      entries: [],
-    };
+    return { ...EMPTY_CONTRIBUTION, unmatched: orderCharges.length };
   }
   const tx = txById.get(orderCharges[0].ynabTransactionId);
-  if (!tx || tx.category_id === null) {
-    return { totals: ZERO, entries: [] };
-  }
+  if (!tx || tx.category_id === null) return EMPTY_CONTRIBUTION;
   const categoryId = tx.category_id;
   const entries = order.items.map(
     (item): LearnEntry => ({ productId: item.productId, title: item.title, categoryId }),
   );
-  return {
-    totals: { ...ZERO, matched: 1, itemsWritten: order.items.length },
-    entries,
-  };
+  return { matched: 1, unmatched: 0, itemsWritten: order.items.length, entries };
 }
 
 async function runForRetailer(retailerId: string, group: TaggedTx[]): Promise<RetailerTotals> {
@@ -181,27 +170,21 @@ async function runForRetailer(retailerId: string, group: TaggedTx[]): Promise<Re
       maxPages: BACKFILL_MAX_PAGES,
     });
 
-    const folded = matched.reduce<{ totals: RetailerTotals; entries: LearnEntry[] }>(
-      (acc, m) => {
-        const r = processMatchedOrder(m, txById);
-        return {
-          totals: sumTotals(acc.totals, r.totals),
-          entries: [...acc.entries, ...r.entries],
-        };
-      },
-      { totals: ZERO, entries: [] },
-    );
+    const contribs = matched.map((m) => processMatchedOrder(m, txById));
+    const entries = contribs.flatMap((c) => c.entries);
 
-    if (folded.entries.length > 0) {
-      await learnFromApproval(retailerId, folded.entries);
-    }
+    if (entries.length > 0) await learnFromApproval(retailerId, entries);
 
     return {
-      ...folded.totals,
-      unmatched: folded.totals.unmatched + unmatched.length,
+      matched: sumBy(contribs, (c) => c.matched),
+      unmatched: sumBy(contribs, (c) => c.unmatched) + unmatched.length,
+      failed: 0,
+      itemsWritten: sumBy(contribs, (c) => c.itemsWritten),
     };
   } catch (err) {
-    if (err instanceof AbortError) throw err;
-    return { ...ZERO, failed: group.length };
+    // Re-throw abort so runBackfill stops the per-retailer loop instead of
+    // recording the cancellation as a "scrape failure" for this batch.
+    if (err instanceof DOMException && err.name === "AbortError") throw err;
+    return { matched: 0, unmatched: 0, failed: group.length, itemsWritten: 0 };
   }
 }

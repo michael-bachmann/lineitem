@@ -35,12 +35,18 @@ const PHASE_LABEL: Record<BackfillPhase, string> = {
   done: "Finishing up…",
 };
 
+const SECONDARY_BTN =
+  "w-full rounded-md bg-gray-800 border border-gray-700 px-3 py-2 text-sm font-medium text-gray-100 hover:bg-gray-700";
+
 export default function BackfillCard() {
   const [state, setState] = useState<BackfillUiState>({ kind: "idle" });
 
   useEffect(() => {
     const listener = (msg: unknown) => {
       if (!isBackfillProgressMessage(msg)) return;
+      // Race guard: a late progress event might land after the START_BACKFILL
+      // response already resolved us to "done" or "error". Don't bounce
+      // those terminal states back to "running".
       setState((prev) =>
         prev.kind === "running" ? { kind: "running", phase: msg.event.phase } : prev,
       );
@@ -84,7 +90,7 @@ export default function BackfillCard() {
       {state.kind === "idle" && (
         <button
           onClick={start}
-          className="w-full rounded-md bg-gray-800 border border-gray-700 px-3 py-2 text-sm font-medium text-gray-100 hover:bg-gray-700"
+          className={SECONDARY_BTN}
         >
           Backfill last 12 months
         </button>
@@ -98,7 +104,7 @@ export default function BackfillCard() {
           </div>
           <button
             onClick={cancel}
-            className="w-full rounded-md bg-gray-800 border border-gray-700 px-3 py-2 text-sm font-medium text-gray-100 hover:bg-gray-700"
+            className={SECONDARY_BTN}
           >
             Cancel
           </button>
@@ -111,6 +117,11 @@ export default function BackfillCard() {
             Backfilled {state.result.itemsWritten} items from {state.result.matched} of{" "}
             {state.result.total} transactions.
           </p>
+          {state.result.failed > 0 && (
+            <p className="text-xs text-amber-400">
+              {state.result.failed} failed — try again later.
+            </p>
+          )}
           {/* "Run again" is only useful when some charges didn't match — typically
               because the matching Amazon order belongs to a different account.
               After a clean run, the button has no real purpose. */}
@@ -122,7 +133,7 @@ export default function BackfillCard() {
               </p>
               <button
                 onClick={start}
-                className="w-full rounded-md bg-gray-800 border border-gray-700 px-3 py-2 text-sm font-medium text-gray-100 hover:bg-gray-700"
+                className={SECONDARY_BTN}
               >
                 Try a different Amazon account
               </button>
@@ -136,7 +147,7 @@ export default function BackfillCard() {
           <p className="text-xs text-red-400">{state.message}</p>
           <button
             onClick={start}
-            className="w-full rounded-md bg-gray-800 border border-gray-700 px-3 py-2 text-sm font-medium text-gray-100 hover:bg-gray-700"
+            className={SECONDARY_BTN}
           >
             Try again
           </button>
