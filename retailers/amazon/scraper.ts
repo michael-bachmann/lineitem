@@ -9,7 +9,6 @@ export interface RawTransaction {
   date: string; // ISO date
   amountCents: number;
   orderId: string | null;
-  cardLastFour: string | null;
   isRefund: boolean;
 }
 
@@ -102,18 +101,10 @@ export function parseTransactionsFromDocument(
         if (orderMatch) orderId = orderMatch[1];
       }
 
-      let cardLastFour: string | null = null;
-      const cardEl = item.querySelector(SELECTORS.cardSpan);
-      if (cardEl) {
-        const cardMatch = (cardEl.textContent ?? "").match(/\*{3,4}(\d{4})/);
-        if (cardMatch) cardLastFour = cardMatch[1];
-      }
-
       results.push({
         date,
         amountCents,
         orderId,
-        cardLastFour,
         isRefund,
       });
     });

@@ -152,7 +152,6 @@ const mkCharge = (
   amountCents,
   payeeName: "AMAZON",
   isRefund: false,
-  cardLastFour: null,
   ...overrides,
 });
 
@@ -160,7 +159,6 @@ const mkOrder = (orderId: string, items: ScrapedOrder["items"]): ScrapedOrder =>
   retailer: "amazon",
   orderId,
   items,
-  scrapedAt: "2026-05-24T00:00:00Z",
   displayedItemsSubtotalCents: items.reduce((s, it) => s + it.unitPriceCents * it.quantity, 0),
 });
 
@@ -238,15 +236,13 @@ describe("distributeOrder", () => {
     expect(sum(result.find((r) => r.ynabTransactionId === "tx2")!.items.map((i) => i.allocatedCents))).toBe(6600);
   });
 
-  it("metadata propagation: orderKey, retailer, date, cardLastFour all set", () => {
+  it("metadata propagation: orderKey, retailer, date all set", () => {
     const order = mkOrder("114-XYZ", [mkItem("A", 1000)]);
-    const charges = [mkCharge("tx1", 1000, { date: "2026-05-20", cardLastFour: "1234" })];
+    const charges = [mkCharge("tx1", 1000, { date: "2026-05-20" })];
     const result = distributeOrder(order, charges);
     expect(result[0].orderKey).toBe("amazon:114-XYZ");
     expect(result[0].retailer).toBe("amazon");
     expect(result[0].date).toBe("2026-05-20");
-    expect(result[0].cardLastFour).toBe("1234");
-    expect(result[0].scrapedAt).toBe("2026-05-24T00:00:00Z");
   });
 
   it("returns empty array when order has no items", () => {

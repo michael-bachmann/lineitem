@@ -1,5 +1,5 @@
 import { sortBy, unique } from "remeda";
-import type { ProductCategory } from "@/lib/types";
+import type { ProductEmbedding } from "@/lib/types";
 
 export interface EvictionPlan {
   toDelete: readonly string[];
@@ -8,8 +8,8 @@ export interface EvictionPlan {
 export const PER_CATEGORY_CAP = 50;
 
 /**
- * Decide which existing rows to evict to keep each category at or below cap
- * after a batch of writes lands.
+ * Decide which existing ProductEmbedding rows to evict to keep each category
+ * at or below cap after a batch of writes lands.
  *
  * For each category targeted by an incoming row, count what the category will
  * hold after the writes:
@@ -20,10 +20,13 @@ export const PER_CATEGORY_CAP = 50;
  *
  * Incoming rows themselves are never evicted — `lastSeen = now` makes them
  * the freshest anyway.
+ *
+ * Note: eviction operates on the embedding pool only. The corresponding
+ * LearnedProduct cache rows are never deleted.
  */
 export function planEviction(
-  existing: readonly ProductCategory[],
-  incoming: readonly ProductCategory[],
+  existing: readonly ProductEmbedding[],
+  incoming: readonly ProductEmbedding[],
   cap: number,
 ): EvictionPlan {
   const writeIds = new Set(incoming.map((r) => r.id));

@@ -79,7 +79,6 @@ export const amazonAdapter: RetailerAdapter = {
           orderId,
           items: result.items,
           displayedItemsSubtotalCents: result.subtotalCents,
-          scrapedAt: new Date().toISOString(),
         };
         const orderCharges = pairs.map(([charge]) => charge);
         matchedOrders.push({ order, charges: orderCharges });

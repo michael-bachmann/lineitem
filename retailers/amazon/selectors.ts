@@ -4,7 +4,6 @@ export const SELECTORS = {
   lineItem: ".apx-transactions-line-item-component-container",
   amountSpan: ".a-span3 span, .a-text-right span",
   orderLink: "a[href*='orderID=']",
-  cardSpan: ".a-span9 span",
   nextPageButton:
     'span.a-button:not(.a-button-disabled) input[type="submit"][aria-labelledby]',
 

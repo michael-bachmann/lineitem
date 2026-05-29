@@ -173,6 +173,5 @@ function toYnabCharge(tx: YnabTransaction): YnabCharge {
     amountCents: millunitsToCents(tx.amount),
     payeeName: tx.payee_name ?? "",
     isRefund: tx.amount > 0, // YNAB outflows negative; positive amount = refund/inflow
-    cardLastFour: null, // not in YNAB API; would come from a card field if present
   };
 }

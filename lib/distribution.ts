@@ -225,10 +225,8 @@ export function distributeOrder(
       retailer: order.retailer,
       date: charge.date,
       amountCents: charge.amountCents,
-      cardLastFour: charge.cardLastFour,
       isRefund: charge.isRefund,
       items,
-      scrapedAt: order.scrapedAt,
     };
   });
 }

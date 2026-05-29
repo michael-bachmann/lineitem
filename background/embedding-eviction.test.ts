@@ -1,17 +1,16 @@
 import { describe, expect, it } from "vitest";
 import { planEviction } from "./embedding-eviction";
-import type { ProductCategory } from "@/lib/types";
+import type { ProductEmbedding } from "@/lib/types";
 
 const PER_CATEGORY_CAP = 50;
 
-function row(id: string, categoryId: string, lastSeen: string): ProductCategory {
+function row(id: string, categoryId: string, lastSeen: string): ProductEmbedding {
   return {
     id,
     categoryId,
-    confirmedByUser: true,
-    timesSeen: 1,
-    lastSeen,
     title: id,
+    embedding: new Float32Array(384),
+    lastSeen,
   };
 }
 

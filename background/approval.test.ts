@@ -33,17 +33,21 @@ vi.mock("@/lib/settings", () => ({
 }));
 
 // In-memory mock of the db layer:
-const productCategoryStore = new Map<string, import("@/lib/types").ProductCategory>();
+const learnedStore = new Map<string, import("@/lib/types").LearnedProduct>();
+const embeddingStore = new Map<string, import("@/lib/types").ProductEmbedding>();
 const allocatedStore = new Map<string, import("@/lib/types").AllocatedTransaction>();
 
 vi.mock("@/lib/db", () => ({
-  getProductCategory: vi.fn(async (id: string) => productCategoryStore.get(id)),
-  putProductCategory: vi.fn(async (r: import("@/lib/types").ProductCategory) => {
-    productCategoryStore.set(r.id, r);
+  getLearnedProduct: vi.fn(async (id: string) => learnedStore.get(id)),
+  putLearnedProduct: vi.fn(async (r: import("@/lib/types").LearnedProduct) => {
+    learnedStore.set(r.id, r);
   }),
-  getAllProductCategories: vi.fn(async () => [...productCategoryStore.values()]),
-  deleteProductCategory: vi.fn(async (id: string) => {
-    productCategoryStore.delete(id);
+  getAllProductEmbeddings: vi.fn(async () => [...embeddingStore.values()]),
+  putProductEmbedding: vi.fn(async (r: import("@/lib/types").ProductEmbedding) => {
+    embeddingStore.set(r.id, r);
+  }),
+  deleteProductEmbedding: vi.fn(async (id: string) => {
+    embeddingStore.delete(id);
   }),
   getAllocatedTransaction: vi.fn(async (id: string) => allocatedStore.get(id)),
 }));
@@ -52,7 +56,8 @@ import { approveTransaction, buildSubtransactions } from "./approval";
 import type { AllocatedTransaction, ApprovalItem } from "@/lib/types";
 
 beforeEach(() => {
-  productCategoryStore.clear();
+  learnedStore.clear();
+  embeddingStore.clear();
   allocatedStore.clear();
   embedBatchMock.mockClear();
 });
@@ -64,9 +69,7 @@ function makeTx(overrides: Partial<AllocatedTransaction> = {}): AllocatedTransac
     retailer: "amazon",
     date: "2026-05-20",
     amountCents: 10000,
-    cardLastFour: "1234",
     isRefund: false,
-    scrapedAt: "2026-05-20T12:00:00Z",
     items: [],
     ...overrides,
   };
@@ -161,12 +164,11 @@ describe("buildSubtransactions", () => {
   });
 });
 
-describe("learnFromApproval writes embeddings", () => {
-  it("writes title + embedding on each approved item", async () => {
+describe("learnFromApproval writes both stores", () => {
+  it("writes a LearnedProduct cache row and a ProductEmbedding pool row per item", async () => {
     const tx: AllocatedTransaction = {
       ynabTransactionId: "txn-1", orderKey: "amazon:O1", retailer: "amazon",
-      date: "2026-05-20", amountCents: 5000, cardLastFour: "1234", isRefund: false,
-      scrapedAt: "2026-05-20T12:00:00Z",
+      date: "2026-05-20", amountCents: 5000, isRefund: false,
       items: [
         { productId: "A", title: "Paper towels", imageUrl: "", unitPriceCents: 2500, quantity: 1, allocatedCents: 2500 },
         { productId: "B", title: "Trash bags",  imageUrl: "", unitPriceCents: 2500, quantity: 1, allocatedCents: 2500 },
@@ -183,25 +185,28 @@ describe("learnFromApproval writes embeddings", () => {
 
     expect(embedBatchMock).toHaveBeenCalledWith(["Paper towels", "Trash bags"]);
 
-    const rowA = productCategoryStore.get("amazon:A");
-    expect(rowA).toMatchObject({
+    // Cache rows: just id + categoryId.
+    expect(learnedStore.get("amazon:A")).toEqual({ id: "amazon:A", categoryId: "cat-household" });
+    expect(learnedStore.get("amazon:B")).toEqual({ id: "amazon:B", categoryId: "cat-household" });
+
+    // Embedding rows: id, categoryId, title, embedding, lastSeen.
+    const embA = embeddingStore.get("amazon:A");
+    expect(embA).toMatchObject({
       id: "amazon:A",
       categoryId: "cat-household",
       title: "Paper towels",
-      confirmedByUser: true,
-      timesSeen: 1,
     });
-    expect(rowA?.embedding).toBeInstanceOf(Float32Array);
-    expect(rowA?.embedding?.length).toBe(384);
+    expect(embA?.embedding).toBeInstanceOf(Float32Array);
+    expect(embA?.embedding.length).toBe(384);
+    expect(embA?.lastSeen).toEqual(expect.any(String));
   });
 
-  it("falls back to writing the row without embedding fields when embedBatch throws", async () => {
+  it("still writes the cache row when embedBatch throws; skips the embedding row", async () => {
     embedBatchMock.mockRejectedValueOnce(new Error("model not ready"));
 
     const tx: AllocatedTransaction = {
       ynabTransactionId: "txn-2", orderKey: "amazon:O2", retailer: "amazon",
-      date: "2026-05-20", amountCents: 1000, cardLastFour: "1234", isRefund: false,
-      scrapedAt: "2026-05-20T12:00:00Z",
+      date: "2026-05-20", amountCents: 1000, isRefund: false,
       items: [
         { productId: "X", title: "Lightbulb", imageUrl: "", unitPriceCents: 1000, quantity: 1, allocatedCents: 1000 },
       ],
@@ -211,21 +216,16 @@ describe("learnFromApproval writes embeddings", () => {
     const result = await approveTransaction("txn-2", [{ productId: "X", categoryId: "cat-household" }]);
     expect(result).toEqual({ ok: true });
 
-    const row = productCategoryStore.get("amazon:X");
-    expect(row).toMatchObject({ id: "amazon:X", title: "Lightbulb", categoryId: "cat-household" });
-    expect(row?.embedding).toBeUndefined();
+    expect(learnedStore.get("amazon:X")).toEqual({ id: "amazon:X", categoryId: "cat-household" });
+    expect(embeddingStore.get("amazon:X")).toBeUndefined();
   });
 
-  it("increments timesSeen on overwrite", async () => {
-    productCategoryStore.set("amazon:Y", {
-      id: "amazon:Y", categoryId: "cat-old", confirmedByUser: true,
-      timesSeen: 3, lastSeen: "2026-01-01T00:00:00Z",
-    });
+  it("overwrites the cache row when a product is re-approved with a different category", async () => {
+    learnedStore.set("amazon:Y", { id: "amazon:Y", categoryId: "cat-old" });
 
     const tx: AllocatedTransaction = {
       ynabTransactionId: "txn-3", orderKey: "amazon:O3", retailer: "amazon",
-      date: "2026-05-20", amountCents: 100, cardLastFour: "1234", isRefund: false,
-      scrapedAt: "2026-05-20T12:00:00Z",
+      date: "2026-05-20", amountCents: 100, isRefund: false,
       items: [
         { productId: "Y", title: "Repeat", imageUrl: "", unitPriceCents: 100, quantity: 1, allocatedCents: 100 },
       ],
@@ -233,26 +233,26 @@ describe("learnFromApproval writes embeddings", () => {
     allocatedStore.set("txn-3", tx);
 
     await approveTransaction("txn-3", [{ productId: "Y", categoryId: "cat-new" }]);
-    expect(productCategoryStore.get("amazon:Y")?.timesSeen).toBe(4);
-    expect(productCategoryStore.get("amazon:Y")?.categoryId).toBe("cat-new");
+    expect(learnedStore.get("amazon:Y")?.categoryId).toBe("cat-new");
   });
 
-  it("evicts the oldest row in a category when writing would exceed cap=50", async () => {
-    // Seed exactly 50 rows in cat-household with increasing lastSeen.
+  it("evicts the oldest embedding in a category when writing would exceed cap=50 (cache rows untouched)", async () => {
+    // Seed exactly 50 embeddings in cat-household with increasing lastSeen.
+    // Also seed their matching cache rows.
     for (let i = 0; i < 50; i++) {
-      productCategoryStore.set(`amazon:seed${i}`, {
-        id: `amazon:seed${i}`,
+      const id = `amazon:seed${i}`;
+      learnedStore.set(id, { id, categoryId: "cat-household" });
+      embeddingStore.set(id, {
+        id,
         categoryId: "cat-household",
-        confirmedByUser: true,
-        timesSeen: 1,
-        lastSeen: `2026-01-${String(i + 1).padStart(2, "0")}T00:00:00Z`,
         title: `seed${i}`,
+        embedding: new Float32Array(384),
+        lastSeen: `2026-01-${String(i + 1).padStart(2, "0")}T00:00:00Z`,
       });
     }
     const tx: AllocatedTransaction = {
       ynabTransactionId: "txn-4", orderKey: "amazon:O4", retailer: "amazon",
-      date: "2026-05-20", amountCents: 100, cardLastFour: "1234", isRefund: false,
-      scrapedAt: "2026-05-20T12:00:00Z",
+      date: "2026-05-20", amountCents: 100, isRefund: false,
       items: [
         { productId: "NEW", title: "New thing", imageUrl: "", unitPriceCents: 100, quantity: 1, allocatedCents: 100 },
       ],
@@ -261,11 +261,13 @@ describe("learnFromApproval writes embeddings", () => {
 
     await approveTransaction("txn-4", [{ productId: "NEW", categoryId: "cat-household" }]);
 
-    // Oldest seed (seed0, lastSeen 2026-01-01) should be evicted.
-    expect(productCategoryStore.get("amazon:seed0")).toBeUndefined();
-    expect(productCategoryStore.get("amazon:NEW")).toBeDefined();
-    // Count in category should remain at 50.
-    const inCat = [...productCategoryStore.values()].filter((r) => r.categoryId === "cat-household");
-    expect(inCat).toHaveLength(50);
+    // Embedding for seed0 is gone, NEW's embedding is in.
+    expect(embeddingStore.get("amazon:seed0")).toBeUndefined();
+    expect(embeddingStore.get("amazon:NEW")).toBeDefined();
+    const embeddingsInCat = [...embeddingStore.values()].filter((r) => r.categoryId === "cat-household");
+    expect(embeddingsInCat).toHaveLength(50);
+
+    // But the cache row for seed0 survives the embedding eviction.
+    expect(learnedStore.get("amazon:seed0")).toEqual({ id: "amazon:seed0", categoryId: "cat-household" });
   });
 });

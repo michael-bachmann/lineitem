@@ -1,5 +1,5 @@
 import type { ClassifiedItem } from "./types";
-import { getProductCategory } from "./db";
+import { getLearnedProduct } from "./db";
 
 /**
  * Classify a line item into a YNAB category using the product cache.
@@ -11,7 +11,7 @@ export async function classifyItem(
   retailer: string,
 ): Promise<{ categoryId: string | null; source: ClassifiedItem["classificationSource"] }> {
   const key = `${retailer}:${item.productId}`;
-  const entry = await getProductCategory(key);
+  const entry = await getLearnedProduct(key);
   if (entry) {
     return { categoryId: entry.categoryId, source: "product_cache" };
   }
