@@ -23,7 +23,8 @@ export const amazonAdapter: RetailerAdapter = {
   id: "amazon",
   payees: PAYEES,
 
-  async scrapeMatchedOrders(charges) {
+  async scrapeMatchedOrders(charges, options) {
+    const maxPages = options?.maxPages ?? DEFAULT_MAX_PAGES;
     const tabResult = await openRetailerTab(START_URL);
     if (!tabResult) {
       return {
@@ -55,7 +56,7 @@ export const amazonAdapter: RetailerAdapter = {
       }
 
       // Phase 1: paginate list page and match
-      const { matchedPairs, unmatchedCharges, error } = await paginateAndMatch(tabId, charges);
+      const { matchedPairs, unmatchedCharges, error } = await paginateAndMatch(tabId, charges, maxPages);
 
       // Phase 2: group by orderId, scrape detail page per order
       const byOrderId = groupBy(matchedPairs, ([_charge, raw]) => raw.orderId!);
@@ -105,10 +106,9 @@ export const amazonAdapter: RetailerAdapter = {
 // Internal: list-page pagination + matching
 // ----------------------------------------------------------------------------
 
-// Upper bound on transaction-page pagination. Sync calls are naturally
-// bounded much earlier by `cutoffDateFor(charges)`; the higher cap exists
-// to let the past-order backfill walk far enough back to find old orders.
-const MAX_PAGES = 30;
+/** Default pagination cap for callers that don't pass `options.maxPages`.
+ *  Sync's natural cutoff (`cutoffDateFor`) short-circuits well before this. */
+const DEFAULT_MAX_PAGES = 10;
 
 interface PaginateResult {
   matchedPairs: [YnabCharge, RawTransaction][];
@@ -119,13 +119,14 @@ interface PaginateResult {
 async function paginateAndMatch(
   tabId: number,
   charges: YnabCharge[],
+  maxPages: number,
 ): Promise<PaginateResult> {
   const cutoffIso = cutoffDateFor(charges);
   let candidates: RawTransaction[] = [];
   let remaining = [...charges];
   let allMatched: [YnabCharge, RawTransaction][] = [];
 
-  for (let page = 0; page < MAX_PAGES; page++) {
+  for (let page = 0; page < maxPages; page++) {
     const txResponse = (await browser.tabs.sendMessage(tabId, {
       type: "SCRAPE_TRANSACTIONS",
     })) as { transactions: RawTransaction[] } | { error: string };

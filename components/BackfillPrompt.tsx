@@ -9,7 +9,8 @@ export default function BackfillPrompt({ onContinue }: BackfillPromptProps) {
     <div className="min-h-screen bg-gray-950 text-gray-100 p-4">
       <h1 className="text-lg font-semibold">You're connected!</h1>
       <p className="text-sm text-gray-400 mt-2">
-        Bootstrap suggestions from your past orders, or skip and run this later from Settings.
+        Learn from your past orders so category suggestions are smarter from day one — or skip
+        and run this later from Settings.
       </p>
 
       <div className="mt-6">

@@ -277,8 +277,16 @@ export interface RetailerAdapter {
    *
    * Returns matched orders with the charges they cover, plus unmatched
    * charges with a reason. No persistence, no classification.
+   *
+   * `options.maxPages` is the upper bound on transaction-list pagination
+   * the adapter is allowed to walk. Sync's natural cutoff (most recent
+   * unapproved charges) means a small default is fine; backfill passes a
+   * higher value so it can reach old orders.
    */
-  scrapeMatchedOrders(charges: YnabCharge[]): Promise<{
+  scrapeMatchedOrders(
+    charges: YnabCharge[],
+    options?: { maxPages?: number },
+  ): Promise<{
     matched: { order: ScrapedOrder; charges: YnabCharge[] }[];
     unmatched: { charge: YnabCharge; reason: string }[];
   }>;

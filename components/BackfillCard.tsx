@@ -77,7 +77,7 @@ export default function BackfillCard() {
         <p className="text-sm font-medium text-gray-100">Backfill from past orders</p>
         <p className="text-xs text-gray-400 mt-1">
           Walk your last 12 months of categorized YNAB transactions and learn from the orders
-          behind them. Bootstraps category suggestions for future items.
+          behind them. Improves category suggestions for future items.
         </p>
       </div>
 
@@ -92,7 +92,10 @@ export default function BackfillCard() {
 
       {state.kind === "running" && (
         <div className="space-y-2">
-          <p className="text-xs text-gray-300">{PHASE_LABEL[state.phase]}</p>
+          <div className="flex items-center gap-2">
+            <span className="inline-block h-3 w-3 rounded-full border-2 border-gray-600 border-t-gray-300 animate-spin" />
+            <p className="text-xs text-gray-300">{PHASE_LABEL[state.phase]}</p>
+          </div>
           <button
             onClick={cancel}
             className="w-full rounded-md bg-gray-800 border border-gray-700 px-3 py-2 text-sm font-medium text-gray-100 hover:bg-gray-700"
@@ -108,18 +111,23 @@ export default function BackfillCard() {
             Backfilled {state.result.itemsWritten} items from {state.result.matched} of{" "}
             {state.result.total} transactions.
           </p>
+          {/* "Run again" is only useful when some charges didn't match — typically
+              because the matching Amazon order belongs to a different account.
+              After a clean run, the button has no real purpose. */}
           {state.result.unmatched > 0 && (
-            <p className="text-xs text-gray-400">
-              {state.result.unmatched} couldn't be matched — if some are from a different Amazon
-              account, sign into it and run again.
-            </p>
+            <>
+              <p className="text-xs text-gray-400">
+                {state.result.unmatched} couldn't be matched — if some are from a different Amazon
+                account, sign into it and try again.
+              </p>
+              <button
+                onClick={start}
+                className="w-full rounded-md bg-gray-800 border border-gray-700 px-3 py-2 text-sm font-medium text-gray-100 hover:bg-gray-700"
+              >
+                Try a different Amazon account
+              </button>
+            </>
           )}
-          <button
-            onClick={start}
-            className="w-full rounded-md bg-gray-800 border border-gray-700 px-3 py-2 text-sm font-medium text-gray-100 hover:bg-gray-700"
-          >
-            Run again
-          </button>
         </div>
       )}
 

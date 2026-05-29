@@ -9,9 +9,14 @@ import { learnFromApproval, type LearnEntry } from "./approval";
 import type {
   BackfillProgress,
   BackfillResult,
+  ScrapedOrder,
   YnabCharge,
   YnabTransaction,
 } from "@/lib/types";
+
+/** Pagination cap we ask the retailer adapter to walk during backfill —
+ *  higher than sync's default so we can reach orders ~12 months back. */
+const BACKFILL_MAX_PAGES = 30;
 
 export interface BackfillOptions {
   /** ISO date string YYYY-MM-DD. Inclusive lower bound on tx.date. */
@@ -90,27 +95,38 @@ interface TaggedTx {
   retailer: string;
 }
 
-/** Eligibility filter — approved + outflow + single-category + scrape-strategy
- *  payee + not already processed via sync. Per-tx IDB read keeps it simple;
- *  candidate counts are O(months × txs/month), fine to fan out. */
+/** Synchronous shape check: is this transaction in principle backfill-able?
+ *  Returns the matched retailer when yes, null when not. */
+function backfillEligibility(tx: YnabTransaction): { retailer: string } | null {
+  if (!tx.approved) return null;
+  if (tx.category_id === null) return null;
+  if (tx.subtransactions.length > 0) return null;
+  if (tx.amount > 0) return null; // refund / inflow
+  if (tx.payee_name === null) return null;
+  const mapping = getRetailerForPayee(tx.payee_name);
+  if (!mapping || mapping.strategy !== "scrape") return null;
+  return { retailer: mapping.retailer };
+}
+
+/** Eligibility filter. Split into (a) a sync shape check and (b) an async
+ *  dedup against AllocatedTransaction so each concern is independently
+ *  readable. Per-tx IDB read keeps it simple; candidate counts are
+ *  O(months × txs/month), fine to fan out. */
 async function filterCandidates(txs: YnabTransaction[]): Promise<TaggedTx[]> {
   const tagged = await Promise.all(
     txs.map(async (tx): Promise<TaggedTx | null> => {
-      if (!tx.approved) return null;
-      if (tx.category_id === null) return null;
-      if (tx.subtransactions.length > 0) return null;
-      if (tx.amount > 0) return null; // refund / inflow
-      if (tx.payee_name === null) return null;
-      const mapping = getRetailerForPayee(tx.payee_name);
-      if (!mapping || mapping.strategy !== "scrape") return null;
+      const eligibility = backfillEligibility(tx);
+      if (!eligibility) return null;
       const already = await getAllocatedTransaction(tx.id);
       if (already) return null;
-      return { tx, retailer: mapping.retailer };
+      return { tx, retailer: eligibility.retailer };
     }),
   );
   return tagged.filter((t): t is TaggedTx => t !== null);
 }
 
+/** Per-retailer partial totals. Same shape as BackfillResult minus `total`,
+ *  which is known up-front from the candidate count and isn't accumulated. */
 type RetailerTotals = Omit<BackfillResult, "total">;
 
 const ZERO: RetailerTotals = { matched: 0, unmatched: 0, failed: 0, itemsWritten: 0 };
@@ -124,38 +140,53 @@ function sumTotals(a: RetailerTotals, b: RetailerTotals): RetailerTotals {
   };
 }
 
+/** Convert one matched-order entry into its contribution to the retailer's
+ *  rolling totals. Returns zero-everything when the order can't be cleanly
+ *  attributed (multi-charge, missing tx, missing category). */
+function processMatchedOrder(
+  matchedEntry: { order: ScrapedOrder; charges: YnabCharge[] },
+  txById: Map<string, YnabTransaction>,
+): { totals: RetailerTotals; entries: LearnEntry[] } {
+  const { order, charges: orderCharges } = matchedEntry;
+  // Multi-charge orders can't be cleanly attributed: each charge has its
+  // own YNAB category, so there's no single category to tag the items
+  // with. Cheaper to skip than to invent a partition.
+  if (orderCharges.length !== 1) {
+    return {
+      totals: { ...ZERO, unmatched: orderCharges.length },
+      entries: [],
+    };
+  }
+  const tx = txById.get(orderCharges[0].ynabTransactionId);
+  if (!tx || tx.category_id === null) {
+    return { totals: ZERO, entries: [] };
+  }
+  const categoryId = tx.category_id;
+  const entries = order.items.map(
+    (item): LearnEntry => ({ productId: item.productId, title: item.title, categoryId }),
+  );
+  return {
+    totals: { ...ZERO, matched: 1, itemsWritten: order.items.length },
+    entries,
+  };
+}
+
 async function runForRetailer(retailerId: string, group: TaggedTx[]): Promise<RetailerTotals> {
   const adapter = getAdapter(retailerId);
   const txById = new Map(group.map((g) => [g.tx.id, g.tx]));
   const charges = group.map((g) => toYnabCharge(g.tx));
 
   try {
-    const { matched, unmatched } = await adapter.scrapeMatchedOrders(charges);
+    const { matched, unmatched } = await adapter.scrapeMatchedOrders(charges, {
+      maxPages: BACKFILL_MAX_PAGES,
+    });
 
     const folded = matched.reduce<{ totals: RetailerTotals; entries: LearnEntry[] }>(
-      (acc, { order, charges: orderCharges }) => {
-        // Multi-charge orders can't be cleanly attributed: each charge has its
-        // own YNAB category, so there's no single category to tag the items
-        // with. Cheaper to skip than to invent a partition.
-        if (orderCharges.length !== 1) {
-          return {
-            ...acc,
-            totals: { ...acc.totals, unmatched: acc.totals.unmatched + orderCharges.length },
-          };
-        }
-        const tx = txById.get(orderCharges[0].ynabTransactionId);
-        if (!tx || tx.category_id === null) return acc;
-        const categoryId = tx.category_id;
-        const newEntries = order.items.map(
-          (item): LearnEntry => ({ productId: item.productId, title: item.title, categoryId }),
-        );
+      (acc, m) => {
+        const r = processMatchedOrder(m, txById);
         return {
-          totals: {
-            ...acc.totals,
-            matched: acc.totals.matched + 1,
-            itemsWritten: acc.totals.itemsWritten + order.items.length,
-          },
-          entries: [...acc.entries, ...newEntries],
+          totals: sumTotals(acc.totals, r.totals),
+          entries: [...acc.entries, ...r.entries],
         };
       },
       { totals: ZERO, entries: [] },
