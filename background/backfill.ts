@@ -6,27 +6,12 @@ import { getRetailerForPayee } from "@/lib/registry";
 import { getAdapter } from "@/retailers/registry";
 import { millunitsToCents } from "@/lib/money";
 import { learnFromApproval, type LearnEntry } from "./approval";
-import type { YnabCharge, YnabTransaction } from "@/lib/types";
-
-export type BackfillPhase = "fetching" | "scraping" | "done";
-
-export interface BackfillProgress {
-  phase: BackfillPhase;
-}
-
-export interface BackfillResult {
-  /** Candidates remaining after the eligibility filter. */
-  total: number;
-  /** Transactions whose order was scraped successfully and learned. */
-  matched: number;
-  /** Transactions skipped post-filter — no order found, or multi-charge
-   *  order (ambiguous category attribution). */
-  unmatched: number;
-  /** Transactions in a retailer batch that aborted the scrape. */
-  failed: number;
-  /** Sum of items written to LearnedProduct / ProductEmbedding stores. */
-  itemsWritten: number;
-}
+import type {
+  BackfillProgress,
+  BackfillResult,
+  YnabCharge,
+  YnabTransaction,
+} from "@/lib/types";
 
 export interface BackfillOptions {
   /** ISO date string YYYY-MM-DD. Inclusive lower bound on tx.date. */

@@ -15,7 +15,9 @@ const {
   getRetailerForPayeeMock: vi.fn(),
   scrapeMatchedOrdersMock: vi.fn(),
   getAdapterMock: vi.fn(),
-  learnFromApprovalMock: vi.fn(async () => {}),
+  learnFromApprovalMock: vi.fn(
+    async (_retailer: string, _entries: readonly { productId: string; title: string; categoryId: string }[]) => {},
+  ),
 }));
 
 vi.mock("@/lib/settings", () => ({ getSettings: getSettingsMock }));

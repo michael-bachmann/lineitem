@@ -124,7 +124,34 @@ export type MessageRequest =
   | { type: "GET_PLANS"; token: string }
   | { type: "REFRESH_CATEGORIES" }
   | { type: "GET_CATEGORIES" }
-  | { type: "CLEAR_SETTINGS" };
+  | { type: "CLEAR_SETTINGS" }
+  | { type: "START_BACKFILL"; fromDate: string }
+  | { type: "CANCEL_BACKFILL" };
+
+/** Messages broadcast from the background to interested listeners (e.g. the
+ *  side panel). Distinct from MessageRequest because no response is expected. */
+export type MessageBroadcast =
+  | { type: "BACKFILL_PROGRESS"; event: BackfillProgress };
+
+export type BackfillPhase = "fetching" | "scraping" | "done";
+
+export interface BackfillProgress {
+  phase: BackfillPhase;
+}
+
+export interface BackfillResult {
+  /** Candidates remaining after the eligibility filter. */
+  total: number;
+  /** Transactions whose order was scraped successfully and learned. */
+  matched: number;
+  /** Transactions skipped post-filter — no order found, or multi-charge
+   *  order (ambiguous category attribution). */
+  unmatched: number;
+  /** Transactions in a retailer batch that aborted the scrape. */
+  failed: number;
+  /** Sum of items written to LearnedProduct / ProductEmbedding stores. */
+  itemsWritten: number;
+}
 
 /**
  * The user's category choice for one item in a transaction. Slimmer than
