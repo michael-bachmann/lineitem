@@ -8,11 +8,12 @@ type BackfillUiState =
   | { kind: "done"; result: BackfillResult }
   | { kind: "error"; message: string };
 
-/** Date 12 months before today, formatted YYYY-MM-DD. */
+/** Date 12 months before today, formatted YYYY-MM-DD. The Date constructor
+ *  handles month-underflow (month: -1 → previous December) so no mutation. */
 function defaultFromDate(): string {
-  const d = new Date();
-  d.setMonth(d.getMonth() - 12);
-  return d.toISOString().slice(0, 10);
+  const now = new Date();
+  const past = new Date(now.getFullYear(), now.getMonth() - 12, now.getDate());
+  return past.toISOString().slice(0, 10);
 }
 
 function isBackfillProgressMessage(

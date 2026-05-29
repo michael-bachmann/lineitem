@@ -51,8 +51,8 @@ export async function runBackfill(options: BackfillOptions): Promise<BackfillRes
   const settings = await getSettings();
   if (!settings.ynabToken || !settings.planId) throw new Error("Not connected to YNAB");
 
-  onProgress?.({ status: "preparing" });
   signal?.throwIfAborted();
+  onProgress?.({ status: "preparing" });
   const allTxs = await getTransactionsSince(settings.ynabToken, settings.planId, fromDate);
 
   const tagged = await filterCandidates(allTxs);
@@ -119,42 +119,36 @@ interface RetailerTotals {
   itemsWritten: number;
 }
 
-/** One matched order's contribution to the retailer's rolling counts. */
-interface OrderContribution {
-  matched: 0 | 1;
-  unmatched: number;
-  itemsWritten: number;
-  entries: LearnEntry[];
-}
+/**
+ * The three things that can happen when we try to attribute a matched order
+ * to a learnable category:
+ *  - `ok`: one charge, with a category — we'll write its items.
+ *  - `ambiguous`: multi-charge order. Each charge has its own YNAB category,
+ *    so there's no single category to tag the items with. Cheaper to skip
+ *    than to invent a partition. Each charge counts as unmatched.
+ *  - `skip`: charge present but the looked-up tx has no category (shouldn't
+ *    happen post-filter; defensive only). Contributes nothing.
+ */
+type OrderOutcome =
+  | { kind: "ok"; entries: LearnEntry[] }
+  | { kind: "ambiguous"; chargeCount: number }
+  | { kind: "skip" };
 
-const EMPTY_CONTRIBUTION: OrderContribution = {
-  matched: 0,
-  unmatched: 0,
-  itemsWritten: 0,
-  entries: [],
-};
-
-/** Convert one matched-order entry into its contribution. Skips with
- *  zero-everything when the order can't be cleanly attributed (multi-charge,
- *  missing tx, or missing category). */
 function processMatchedOrder(
   matchedEntry: { order: ScrapedOrder; charges: YnabCharge[] },
   txById: Map<string, YnabTransaction>,
-): OrderContribution {
+): OrderOutcome {
   const { order, charges: orderCharges } = matchedEntry;
-  // Multi-charge orders can't be cleanly attributed: each charge has its
-  // own YNAB category, so there's no single category to tag the items
-  // with. Cheaper to skip than to invent a partition.
   if (orderCharges.length !== 1) {
-    return { ...EMPTY_CONTRIBUTION, unmatched: orderCharges.length };
+    return { kind: "ambiguous", chargeCount: orderCharges.length };
   }
   const tx = txById.get(orderCharges[0].ynabTransactionId);
-  if (!tx || tx.category_id === null) return EMPTY_CONTRIBUTION;
+  if (!tx || tx.category_id === null) return { kind: "skip" };
   const categoryId = tx.category_id;
   const entries = order.items.map(
     (item): LearnEntry => ({ productId: item.productId, title: item.title, categoryId }),
   );
-  return { matched: 1, unmatched: 0, itemsWritten: order.items.length, entries };
+  return { kind: "ok", entries };
 }
 
 async function runForRetailer(
@@ -169,19 +163,21 @@ async function runForRetailer(
   try {
     const { matched, unmatched } = await adapter.scrapeMatchedOrders(charges, {
       maxPages: BACKFILL_MAX_PAGES,
-      onScrapeProgress: (event) => onProgress?.({ status: "scraping", ...event }),
+      onScrapeProgress: ({ index, total }) =>
+        onProgress?.({ status: "scraping", index, total }),
     });
 
-    const contribs = matched.map((m) => processMatchedOrder(m, txById));
-    const entries = contribs.flatMap((c) => c.entries);
+    const outcomes = matched.map((m) => processMatchedOrder(m, txById));
+    const entries = outcomes.flatMap((o) => (o.kind === "ok" ? o.entries : []));
 
     if (entries.length > 0) await learnFromApproval(retailerId, entries);
 
     return {
-      matched: sumBy(contribs, (c) => c.matched),
-      unmatched: sumBy(contribs, (c) => c.unmatched) + unmatched.length,
+      matched: outcomes.filter((o) => o.kind === "ok").length,
+      unmatched:
+        sumBy(outcomes, (o) => (o.kind === "ambiguous" ? o.chargeCount : 0)) + unmatched.length,
       failed: 0,
-      itemsWritten: sumBy(contribs, (c) => c.itemsWritten),
+      itemsWritten: entries.length,
     };
   } catch (err) {
     // Re-throw abort so runBackfill stops the per-retailer loop instead of
