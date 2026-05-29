@@ -6,12 +6,6 @@ import type {
   BackfillResult,
 } from "@/lib/types";
 
-interface BackfillCardProps {
-  /** Called once the run finishes successfully, in case the parent wants
-   *  to advance (e.g. onboarding flow → "Continue"). */
-  onDone?: (result: BackfillResult) => void;
-}
-
 type BackfillUiState =
   | { kind: "idle" }
   | { kind: "running"; phase: BackfillPhase }
@@ -41,7 +35,7 @@ const PHASE_LABEL: Record<BackfillPhase, string> = {
   done: "Finishing up…",
 };
 
-export default function BackfillCard({ onDone }: BackfillCardProps) {
+export default function BackfillCard() {
   const [state, setState] = useState<BackfillUiState>({ kind: "idle" });
 
   useEffect(() => {
@@ -67,7 +61,6 @@ export default function BackfillCard({ onDone }: BackfillCardProps) {
         setState({ kind: "error", message: response.error });
       } else {
         setState({ kind: "done", result: response.result });
-        onDone?.(response.result);
       }
     } catch (e) {
       setState({ kind: "error", message: e instanceof Error ? e.message : "Backfill failed" });

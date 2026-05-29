@@ -1,13 +1,14 @@
 import { useEffect, useState } from "react";
 import { browser } from "wxt/browser";
 import Onboarding from "@/components/Onboarding";
+import BackfillPrompt from "@/components/BackfillPrompt";
 import Settings from "@/components/Settings";
 import QueueView from "@/components/QueueView";
 import DetailView from "@/components/DetailView";
 import { isFullyClassified } from "@/lib/queue";
 import type { QueueEntry, Category, ApprovalItem } from "@/lib/types";
 
-type View = "loading" | "onboarding" | "queue" | "settings" | "detail";
+type View = "loading" | "onboarding" | "backfill_prompt" | "queue" | "settings" | "detail";
 
 export default function App() {
   const [view, setView] = useState<View>("loading");
@@ -46,10 +47,14 @@ export default function App() {
       <Onboarding
         onComplete={(name: string) => {
           setPlanName(name);
-          setView("queue");
+          setView("backfill_prompt");
         }}
       />
     );
+  }
+
+  if (view === "backfill_prompt") {
+    return <BackfillPrompt onContinue={() => setView("queue")} />;
   }
 
   if (view === "settings") {
