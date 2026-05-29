@@ -289,11 +289,17 @@ export interface RetailerAdapter {
    * before it runs, with the 1-indexed position and the total number of
    * detail-page scrapes planned for this batch. The transaction-list
    * pagination phase emits no events (we don't know the total yet).
+   *
+   * `options.signal` lets the caller cancel mid-batch. Adapters must check
+   * it at natural pause points (between detail-page scrapes, between list-
+   * page paginations) and throw the standard DOMException AbortError when
+   * the signal aborts; in-progress detail scrapes are allowed to finish.
    */
   scrapeMatchedOrders(
     charges: YnabCharge[],
     options?: {
       maxPages?: number;
+      signal?: AbortSignal;
       onScrapeProgress?: (event: { index: number; total: number }) => void;
     },
   ): Promise<{

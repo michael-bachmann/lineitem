@@ -222,6 +222,21 @@ describe("runBackfill — abort", () => {
     expect(scrapeMatchedOrdersMock).not.toHaveBeenCalled();
   });
 
+  it("passes signal to the adapter and propagates a mid-scrape abort", async () => {
+    getTransactionsSinceMock.mockResolvedValue([tx({ id: "tx-1" })]);
+    const ctrl = new AbortController();
+    scrapeMatchedOrdersMock.mockImplementation(
+      async (_charges: YnabCharge[], opts?: { signal?: AbortSignal }) => {
+        ctrl.abort();
+        opts?.signal?.throwIfAborted();
+        return { matched: [], unmatched: [] }; // not reached
+      },
+    );
+
+    await expect(runBackfill({ fromDate: "2025-01-01", signal: ctrl.signal })).rejects.toThrow();
+    expect(learnFromApprovalMock).not.toHaveBeenCalled();
+  });
+
   it("halts between retailers when signal aborts mid-run", async () => {
     getTransactionsSinceMock.mockResolvedValue([
       tx({ id: "tx-amz", payee_name: "AMAZON.COM" }),

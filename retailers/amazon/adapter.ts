@@ -26,6 +26,7 @@ export const amazonAdapter: RetailerAdapter = {
   async scrapeMatchedOrders(charges, options) {
     const maxPages = options?.maxPages ?? DEFAULT_MAX_PAGES;
     const onScrapeProgress = options?.onScrapeProgress;
+    const signal = options?.signal;
     const tabResult = await openRetailerTab(START_URL);
     if (!tabResult) {
       return {
@@ -68,6 +69,9 @@ export const amazonAdapter: RetailerAdapter = {
       const detailFailures: { charge: YnabCharge; reason: string }[] = [];
 
       for (let i = 0; i < totalOrders; i++) {
+        // Honor cancellation between detail-page scrapes — the long phase
+        // the user actually sees the spinner spinning through.
+        signal?.throwIfAborted();
         const [orderId, pairs] = orderEntries[i];
         // Emit progress BEFORE the scrape so the UI shows "Scraping order N
         // of T" while N is in flight, not after it lands.

@@ -65,7 +65,7 @@ export async function runBackfill(options: BackfillOptions): Promise<BackfillRes
   let aggregate: RetailerTotals = { matched: 0, unmatched: 0, failed: 0, itemsWritten: 0 };
   for (const [retailerId, group] of Object.entries(byRetailer)) {
     signal?.throwIfAborted();
-    const r = await runForRetailer(retailerId, group, onProgress);
+    const r = await runForRetailer(retailerId, group, { signal, onProgress });
     aggregate = {
       matched: aggregate.matched + r.matched,
       unmatched: aggregate.unmatched + r.unmatched,
@@ -151,10 +151,15 @@ function processMatchedOrder(
   return { kind: "ok", entries };
 }
 
+interface RetailerCtx {
+  signal?: AbortSignal;
+  onProgress?: (event: BackfillProgress) => void;
+}
+
 async function runForRetailer(
   retailerId: string,
   group: TaggedTx[],
-  onProgress?: (event: BackfillProgress) => void,
+  ctx: RetailerCtx,
 ): Promise<RetailerTotals> {
   const adapter = getAdapter(retailerId);
   const txById = new Map(group.map((g) => [g.tx.id, g.tx]));
@@ -163,8 +168,9 @@ async function runForRetailer(
   try {
     const { matched, unmatched } = await adapter.scrapeMatchedOrders(charges, {
       maxPages: BACKFILL_MAX_PAGES,
+      signal: ctx.signal,
       onScrapeProgress: ({ index, total }) =>
-        onProgress?.({ status: "scraping", index, total }),
+        ctx.onProgress?.({ status: "scraping", index, total }),
     });
 
     const outcomes = matched.map((m) => processMatchedOrder(m, txById));
