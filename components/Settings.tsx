@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { browser } from "wxt/browser";
 import BackfillCard from "./BackfillCard";
+import SecondaryButton from "./SecondaryButton";
 
 interface SettingsProps {
   planName: string;
@@ -67,13 +68,12 @@ export default function Settings({ planName, onDisconnect, onBack }: SettingsPro
           <p className="text-sm font-medium text-gray-100 mt-1">{planName}</p>
         </div>
 
-        <button
+        <SecondaryButton
           onClick={handleRefreshCategories}
           disabled={refreshing || disconnecting}
-          className="w-full rounded-md bg-gray-800 border border-gray-700 px-3 py-2 text-sm font-medium text-gray-100 hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {refreshing ? "Refreshing..." : "Refresh Categories from YNAB"}
-        </button>
+        </SecondaryButton>
 
         <BackfillCard />
 

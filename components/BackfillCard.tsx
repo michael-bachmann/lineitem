@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { browser } from "wxt/browser";
 import type { BackfillProgress, BackfillResult } from "@/lib/types";
+import SecondaryButton from "./SecondaryButton";
 
 type BackfillUiState =
   | { kind: "idle" }
@@ -30,9 +31,6 @@ function progressLabel(p: BackfillProgress): string {
   if (p.status === "preparing") return "Preparing…";
   return `Scraping order ${p.index} of ${p.total}…`;
 }
-
-const SECONDARY_BTN =
-  "w-full rounded-md bg-gray-800 border border-gray-700 px-3 py-2 text-sm font-medium text-gray-100 hover:bg-gray-700";
 
 export default function BackfillCard() {
   const [state, setState] = useState<BackfillUiState>({ kind: "idle" });
@@ -84,12 +82,7 @@ export default function BackfillCard() {
       </div>
 
       {state.kind === "idle" && (
-        <button
-          onClick={start}
-          className={SECONDARY_BTN}
-        >
-          Backfill last 12 months
-        </button>
+        <SecondaryButton onClick={start}>Backfill last 12 months</SecondaryButton>
       )}
 
       {state.kind === "running" && (
@@ -98,12 +91,7 @@ export default function BackfillCard() {
             <span className="inline-block h-3 w-3 rounded-full border-2 border-gray-600 border-t-gray-300 animate-spin" />
             <p className="text-xs text-gray-300">{progressLabel(state.progress)}</p>
           </div>
-          <button
-            onClick={cancel}
-            className={SECONDARY_BTN}
-          >
-            Cancel
-          </button>
+          <SecondaryButton onClick={cancel}>Cancel</SecondaryButton>
         </div>
       )}
 
@@ -127,12 +115,7 @@ export default function BackfillCard() {
                 {state.result.unmatched} couldn't be matched — if some are from a different Amazon
                 account, sign into it and try again.
               </p>
-              <button
-                onClick={start}
-                className={SECONDARY_BTN}
-              >
-                Try a different Amazon account
-              </button>
+              <SecondaryButton onClick={start}>Try a different Amazon account</SecondaryButton>
             </>
           )}
         </div>
@@ -141,12 +124,7 @@ export default function BackfillCard() {
       {state.kind === "error" && (
         <div className="space-y-2">
           <p className="text-xs text-red-400">{state.message}</p>
-          <button
-            onClick={start}
-            className={SECONDARY_BTN}
-          >
-            Try again
-          </button>
+          <SecondaryButton onClick={start}>Try again</SecondaryButton>
         </div>
       )}
     </div>
