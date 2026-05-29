@@ -1,14 +1,10 @@
 import { useEffect, useState } from "react";
 import { browser } from "wxt/browser";
-import type {
-  BackfillPhase,
-  BackfillProgress,
-  BackfillResult,
-} from "@/lib/types";
+import type { BackfillProgress, BackfillResult } from "@/lib/types";
 
 type BackfillUiState =
   | { kind: "idle" }
-  | { kind: "running"; phase: BackfillPhase }
+  | { kind: "running"; progress: BackfillProgress }
   | { kind: "done"; result: BackfillResult }
   | { kind: "error"; message: string };
 
@@ -29,11 +25,10 @@ function isBackfillProgressMessage(
   );
 }
 
-const PHASE_LABEL: Record<BackfillPhase, string> = {
-  fetching: "Fetching transactions from YNAB…",
-  scraping: "Scraping orders (this can take a few minutes)…",
-  done: "Finishing up…",
-};
+function progressLabel(p: BackfillProgress): string {
+  if (p.status === "preparing") return "Preparing…";
+  return `Scraping order ${p.index} of ${p.total}…`;
+}
 
 const SECONDARY_BTN =
   "w-full rounded-md bg-gray-800 border border-gray-700 px-3 py-2 text-sm font-medium text-gray-100 hover:bg-gray-700";
@@ -48,7 +43,7 @@ export default function BackfillCard() {
       // response already resolved us to "done" or "error". Don't bounce
       // those terminal states back to "running".
       setState((prev) =>
-        prev.kind === "running" ? { kind: "running", phase: msg.event.phase } : prev,
+        prev.kind === "running" ? { kind: "running", progress: msg.event } : prev,
       );
     };
     browser.runtime.onMessage.addListener(listener);
@@ -56,7 +51,7 @@ export default function BackfillCard() {
   }, []);
 
   async function start() {
-    setState({ kind: "running", phase: "fetching" });
+    setState({ kind: "running", progress: { status: "preparing" } });
     try {
       const response = (await browser.runtime.sendMessage({
         type: "START_BACKFILL",
@@ -100,7 +95,7 @@ export default function BackfillCard() {
         <div className="space-y-2">
           <div className="flex items-center gap-2">
             <span className="inline-block h-3 w-3 rounded-full border-2 border-gray-600 border-t-gray-300 animate-spin" />
-            <p className="text-xs text-gray-300">{PHASE_LABEL[state.phase]}</p>
+            <p className="text-xs text-gray-300">{progressLabel(state.progress)}</p>
           </div>
           <button
             onClick={cancel}

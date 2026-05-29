@@ -244,13 +244,42 @@ describe("runBackfill — abort", () => {
 });
 
 describe("runBackfill — progress events", () => {
-  it("emits fetching → scraping → done in order", async () => {
+  it("emits a 'preparing' event before any scraping happens", async () => {
     getTransactionsSinceMock.mockResolvedValue([]);
-    const phases: string[] = [];
+    const events: import("@/lib/types").BackfillProgress[] = [];
     await runBackfill({
       fromDate: "2025-01-01",
-      onProgress: (e) => phases.push(e.phase),
+      onProgress: (e) => events.push(e),
     });
-    expect(phases).toEqual(["fetching", "scraping", "done"]);
+    expect(events).toEqual([{ status: "preparing" }]);
+  });
+
+  it("forwards the adapter's onScrapeProgress as 'scraping' events", async () => {
+    getTransactionsSinceMock.mockResolvedValue([tx({ id: "tx-1" }), tx({ id: "tx-2" })]);
+    scrapeMatchedOrdersMock.mockImplementation(
+      async (
+        charges: YnabCharge[],
+        opts?: { onScrapeProgress?: (e: { index: number; total: number }) => void },
+      ) => {
+        opts?.onScrapeProgress?.({ index: 1, total: 2 });
+        opts?.onScrapeProgress?.({ index: 2, total: 2 });
+        return {
+          matched: charges.map((c) => ({ order: order(), charges: [c] })),
+          unmatched: [],
+        };
+      },
+    );
+
+    const events: import("@/lib/types").BackfillProgress[] = [];
+    await runBackfill({
+      fromDate: "2025-01-01",
+      onProgress: (e) => events.push(e),
+    });
+
+    expect(events).toEqual([
+      { status: "preparing" },
+      { status: "scraping", index: 1, total: 2 },
+      { status: "scraping", index: 2, total: 2 },
+    ]);
   });
 });

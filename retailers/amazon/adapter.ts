@@ -25,6 +25,7 @@ export const amazonAdapter: RetailerAdapter = {
 
   async scrapeMatchedOrders(charges, options) {
     const maxPages = options?.maxPages ?? DEFAULT_MAX_PAGES;
+    const onScrapeProgress = options?.onScrapeProgress;
     const tabResult = await openRetailerTab(START_URL);
     if (!tabResult) {
       return {
@@ -60,11 +61,17 @@ export const amazonAdapter: RetailerAdapter = {
 
       // Phase 2: group by orderId, scrape detail page per order
       const byOrderId = groupBy(matchedPairs, ([_charge, raw]) => raw.orderId!);
+      const orderEntries = Object.entries(byOrderId);
+      const totalOrders = orderEntries.length;
 
       const matchedOrders: { order: ScrapedOrder; charges: YnabCharge[] }[] = [];
       const detailFailures: { charge: YnabCharge; reason: string }[] = [];
 
-      for (const [orderId, pairs] of Object.entries(byOrderId)) {
+      for (let i = 0; i < totalOrders; i++) {
+        const [orderId, pairs] = orderEntries[i];
+        // Emit progress BEFORE the scrape so the UI shows "Scraping order N
+        // of T" while N is in flight, not after it lands.
+        onScrapeProgress?.({ index: i + 1, total: totalOrders });
         const result = await scrapeOrderItems(tabId, orderId);
 
         if ("error" in result || result.items.length === 0) {

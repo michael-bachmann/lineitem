@@ -51,7 +51,7 @@ export async function runBackfill(options: BackfillOptions): Promise<BackfillRes
   const settings = await getSettings();
   if (!settings.ynabToken || !settings.planId) throw new Error("Not connected to YNAB");
 
-  onProgress?.({ phase: "fetching" });
+  onProgress?.({ status: "preparing" });
   signal?.throwIfAborted();
   const allTxs = await getTransactionsSince(settings.ynabToken, settings.planId, fromDate);
 
@@ -59,15 +59,13 @@ export async function runBackfill(options: BackfillOptions): Promise<BackfillRes
   const total = tagged.length;
   const byRetailer = groupBy(tagged, (e) => e.retailer);
 
-  onProgress?.({ phase: "scraping" });
-
   // Sequential per retailer — each adapter call owns a browser tab; running
   // them in parallel would open multiple tabs at once. Sync's natural
   // bound of "one retailer per sync cycle" doesn't apply here.
   let aggregate: RetailerTotals = { matched: 0, unmatched: 0, failed: 0, itemsWritten: 0 };
   for (const [retailerId, group] of Object.entries(byRetailer)) {
     signal?.throwIfAborted();
-    const r = await runForRetailer(retailerId, group);
+    const r = await runForRetailer(retailerId, group, onProgress);
     aggregate = {
       matched: aggregate.matched + r.matched,
       unmatched: aggregate.unmatched + r.unmatched,
@@ -76,7 +74,6 @@ export async function runBackfill(options: BackfillOptions): Promise<BackfillRes
     };
   }
 
-  onProgress?.({ phase: "done" });
   return { total, ...aggregate };
 }
 
@@ -160,7 +157,11 @@ function processMatchedOrder(
   return { matched: 1, unmatched: 0, itemsWritten: order.items.length, entries };
 }
 
-async function runForRetailer(retailerId: string, group: TaggedTx[]): Promise<RetailerTotals> {
+async function runForRetailer(
+  retailerId: string,
+  group: TaggedTx[],
+  onProgress?: (event: BackfillProgress) => void,
+): Promise<RetailerTotals> {
   const adapter = getAdapter(retailerId);
   const txById = new Map(group.map((g) => [g.tx.id, g.tx]));
   const charges = group.map((g) => toYnabCharge(g.tx));
@@ -168,6 +169,7 @@ async function runForRetailer(retailerId: string, group: TaggedTx[]): Promise<Re
   try {
     const { matched, unmatched } = await adapter.scrapeMatchedOrders(charges, {
       maxPages: BACKFILL_MAX_PAGES,
+      onScrapeProgress: (event) => onProgress?.({ status: "scraping", ...event }),
     });
 
     const contribs = matched.map((m) => processMatchedOrder(m, txById));

@@ -133,11 +133,13 @@ export type MessageRequest =
 export type MessageBroadcast =
   | { type: "BACKFILL_PROGRESS"; event: BackfillProgress };
 
-export type BackfillPhase = "fetching" | "scraping" | "done";
-
-export interface BackfillProgress {
-  phase: BackfillPhase;
-}
+/** What backfill is doing right now. "preparing" covers fetching YNAB
+ *  transactions plus the retailer's transaction-list pagination — phases
+ *  where we don't yet know how many orders we'll scrape. Once detail-page
+ *  scrapes start, each event reports the order index + total. */
+export type BackfillProgress =
+  | { status: "preparing" }
+  | { status: "scraping"; index: number; total: number };
 
 export interface BackfillResult {
   /** Candidates remaining after the eligibility filter. */
@@ -282,10 +284,18 @@ export interface RetailerAdapter {
    * the adapter is allowed to walk. Sync's natural cutoff (most recent
    * unapproved charges) means a small default is fine; backfill passes a
    * higher value so it can reach old orders.
+   *
+   * `options.onScrapeProgress` is called once per detail-page scrape just
+   * before it runs, with the 1-indexed position and the total number of
+   * detail-page scrapes planned for this batch. The transaction-list
+   * pagination phase emits no events (we don't know the total yet).
    */
   scrapeMatchedOrders(
     charges: YnabCharge[],
-    options?: { maxPages?: number },
+    options?: {
+      maxPages?: number;
+      onScrapeProgress?: (event: { index: number; total: number }) => void;
+    },
   ): Promise<{
     matched: { order: ScrapedOrder; charges: YnabCharge[] }[];
     unmatched: { charge: YnabCharge; reason: string }[];
