@@ -183,6 +183,11 @@ async function runForRetailer(
         ctx.onProgress?.({ status: "scraping", index, total }),
     });
 
+    // The adapter checks the signal between detail-page scrapes but not
+    // after the last one returns. Catch the "cancel landed during the
+    // final scrape" window before we commit anything downstream.
+    ctx.signal?.throwIfAborted();
+
     const outcomes = matched.map((m) => processMatchedOrder(m, txById));
     const entries = outcomes.flatMap((o) => (o.kind === "ok" ? o.entries : []));
 

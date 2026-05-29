@@ -295,6 +295,22 @@ describe("runBackfill — abort", () => {
     expect(scrapeMatchedOrdersMock).not.toHaveBeenCalled();
   });
 
+  it("aborts after the adapter returns if cancel landed during the final scrape", async () => {
+    // Adapter doesn't see the abort (cancel came in after its last signal
+    // check, mid-final-scrape). It returns normally with matched results.
+    // Backfill must catch the late abort before committing.
+    getTransactionsSinceMock.mockResolvedValue([tx({ id: "tx-1" })]);
+    const ctrl = new AbortController();
+    scrapeMatchedOrdersMock.mockImplementation(async (charges: YnabCharge[]) => {
+      ctrl.abort();
+      return { matched: [{ order: order(), charges: [charges[0]] }], unmatched: [] };
+    });
+
+    await expect(runBackfill({ fromDate: "2025-01-01", signal: ctrl.signal })).rejects.toThrow();
+    expect(learnFromApprovalMock).not.toHaveBeenCalled();
+    expect(putBackfilledTransactionsMock).not.toHaveBeenCalled();
+  });
+
   it("passes signal to the adapter and propagates a mid-scrape abort", async () => {
     getTransactionsSinceMock.mockResolvedValue([tx({ id: "tx-1" })]);
     const ctrl = new AbortController();
