@@ -47,26 +47,6 @@ export interface ProductEmbedding {
 }
 
 /**
- * Marker that a YNAB transaction was processed by the past-order backfill
- * flow. Its presence — not its contents — is what matters: it lets repeat
- * backfill runs skip transactions we've already scraped, so re-runs only
- * pick up the leftover unmatched ones (typically: orders on a different
- * retailer account).
- *
- * Sync uses AllocatedTransaction as its own "already processed" marker;
- * backfill never writes AllocatedTransaction (no allocation happens), so
- * it tracks its own marker here.
- *
- * Stored in the `backfilledTransactions` IndexedDB store, keyed by id.
- */
-export interface BackfilledTransaction {
-  /** YNAB transaction UUID. */
-  ynabTransactionId: string;
-  /** ISO timestamp when backfill last touched this transaction. */
-  backfilledAt: string;
-}
-
-/**
  * A YNAB category, synced from the user's plan.
  *
  * Stored in the `categories` IndexedDB store, keyed by id.

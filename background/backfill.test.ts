@@ -4,36 +4,39 @@ const {
   getSettingsMock,
   getTransactionsSinceMock,
   getAllocatedTransactionMock,
-  getBackfilledTransactionMock,
-  putBackfilledTransactionsMock,
+  putAllocatedTransactionsMock,
   getRetailerForPayeeMock,
   scrapeMatchedOrdersMock,
   getAdapterMock,
   learnFromApprovalMock,
+  verifyScrapeMock,
+  distributeOrderMock,
 } = vi.hoisted(() => ({
   getSettingsMock: vi.fn(),
   getTransactionsSinceMock: vi.fn(),
   getAllocatedTransactionMock: vi.fn(),
-  getBackfilledTransactionMock: vi.fn(),
-  putBackfilledTransactionsMock: vi.fn(async (_rows: readonly { ynabTransactionId: string; backfilledAt: string }[]) => {}),
+  putAllocatedTransactionsMock: vi.fn(async (_rows: readonly { ynabTransactionId: string }[]) => {}),
   getRetailerForPayeeMock: vi.fn(),
   scrapeMatchedOrdersMock: vi.fn(),
   getAdapterMock: vi.fn(),
   learnFromApprovalMock: vi.fn(
     async (_retailer: string, _entries: readonly { productId: string; title: string; categoryId: string }[]) => {},
   ),
+  verifyScrapeMock: vi.fn(),
+  distributeOrderMock: vi.fn(),
 }));
 
 vi.mock("@/lib/settings", () => ({ getSettings: getSettingsMock }));
 vi.mock("@/lib/ynab", () => ({ getTransactionsSince: getTransactionsSinceMock }));
 vi.mock("@/lib/db", () => ({
   getAllocatedTransaction: getAllocatedTransactionMock,
-  getBackfilledTransaction: getBackfilledTransactionMock,
-  putBackfilledTransactions: putBackfilledTransactionsMock,
+  putAllocatedTransactions: putAllocatedTransactionsMock,
 }));
 vi.mock("@/lib/registry", () => ({ getRetailerForPayee: getRetailerForPayeeMock }));
 vi.mock("@/retailers/registry", () => ({ getAdapter: getAdapterMock }));
 vi.mock("./approval", () => ({ learnFromApproval: learnFromApprovalMock }));
+vi.mock("@/lib/verify-scrape", () => ({ verifyScrape: verifyScrapeMock }));
+vi.mock("@/lib/distribution", () => ({ distributeOrder: distributeOrderMock }));
 
 import { runBackfill } from "./backfill";
 import type {
@@ -69,15 +72,43 @@ function order(overrides: Partial<ScrapedOrder> = {}): ScrapedOrder {
   };
 }
 
+function allocatedTx(
+  overrides: Partial<import("@/lib/types").AllocatedTransaction> = {},
+): import("@/lib/types").AllocatedTransaction {
+  return {
+    ynabTransactionId: "tx-1",
+    orderKey: "amazon:111-2222222-3333333",
+    retailer: "amazon",
+    date: "2026-04-01",
+    amountCents: 1000,
+    isRefund: false,
+    items: [],
+    ...overrides,
+  };
+}
+
 beforeEach(() => {
   getSettingsMock.mockResolvedValue({ ynabToken: "tok", planId: "plan" });
   getAllocatedTransactionMock.mockResolvedValue(undefined);
-  getBackfilledTransactionMock.mockResolvedValue(undefined);
-  putBackfilledTransactionsMock.mockClear();
+  putAllocatedTransactionsMock.mockClear();
   getTransactionsSinceMock.mockReset();
   getRetailerForPayeeMock.mockReset();
   scrapeMatchedOrdersMock.mockReset();
   learnFromApprovalMock.mockReset();
+  verifyScrapeMock.mockReset();
+  distributeOrderMock.mockReset();
+  // Defaults: verify passes, distribute echoes one allocation per charge.
+  verifyScrapeMock.mockReturnValue({ ok: true });
+  distributeOrderMock.mockImplementation(
+    (order: import("@/lib/types").ScrapedOrder, charges: YnabCharge[]) =>
+      charges.map((c) =>
+        allocatedTx({
+          ynabTransactionId: c.ynabTransactionId,
+          orderKey: `${order.retailer}:${order.orderId}`,
+          amountCents: c.amountCents,
+        }),
+      ),
+  );
   // Default: every Amazon-looking payee maps to amazon/scrape.
   getRetailerForPayeeMock.mockImplementation((payee: string) =>
     /amazon/i.test(payee) ? { retailer: "amazon", strategy: "scrape" } : null,
@@ -140,20 +171,10 @@ describe("runBackfill — filtering", () => {
     expect(result.total).toBe(0);
   });
 
-  it("skips transactions previously marked as backfilled", async () => {
-    getTransactionsSinceMock.mockResolvedValue([tx()]);
-    getBackfilledTransactionMock.mockResolvedValue({
-      ynabTransactionId: "tx-1",
-      backfilledAt: "2026-01-01T00:00:00Z",
-    });
-    const result = await runBackfill({ fromDate: "2025-01-01" });
-    expect(result.total).toBe(0);
-    expect(scrapeMatchedOrdersMock).not.toHaveBeenCalled();
-  });
 });
 
-describe("runBackfill — idempotency markers", () => {
-  it("writes a marker for every adapter-matched tx after learnFromApproval succeeds", async () => {
+describe("runBackfill — idempotency via AllocatedTransaction", () => {
+  it("writes an AllocatedTransaction for each successfully-processed order", async () => {
     getTransactionsSinceMock.mockResolvedValue([tx({ id: "tx-1" }), tx({ id: "tx-2" })]);
     scrapeMatchedOrdersMock.mockImplementation(async (charges: YnabCharge[]) => ({
       matched: charges.map((c) => ({ order: order(), charges: [c] })),
@@ -162,12 +183,14 @@ describe("runBackfill — idempotency markers", () => {
 
     await runBackfill({ fromDate: "2025-01-01" });
 
-    expect(putBackfilledTransactionsMock).toHaveBeenCalledTimes(1);
-    const [markers] = putBackfilledTransactionsMock.mock.calls[0];
-    expect(markers.map((m) => m.ynabTransactionId).sort()).toEqual(["tx-1", "tx-2"]);
+    expect(putAllocatedTransactionsMock).toHaveBeenCalledTimes(1);
+    const [rows] = putAllocatedTransactionsMock.mock.calls[0];
+    expect(rows.map((r) => r.ynabTransactionId).sort()).toEqual(["tx-1", "tx-2"]);
+    // Learn happens before persist — items committed even if persist fails.
+    expect(learnFromApprovalMock).toHaveBeenCalledTimes(1);
   });
 
-  it("does NOT mark adapter-unmatched txs (they should retry on the next run)", async () => {
+  it("does NOT persist for adapter-unmatched charges (so they retry next run)", async () => {
     getTransactionsSinceMock.mockResolvedValue([tx({ id: "tx-1" }), tx({ id: "tx-2" })]);
     scrapeMatchedOrdersMock.mockImplementation(async (charges: YnabCharge[]) => ({
       matched: [{ order: order(), charges: [charges[0]] }],
@@ -176,11 +199,11 @@ describe("runBackfill — idempotency markers", () => {
 
     await runBackfill({ fromDate: "2025-01-01" });
 
-    const [markers] = putBackfilledTransactionsMock.mock.calls[0];
-    expect(markers.map((m) => m.ynabTransactionId)).toEqual(["tx-1"]);
+    const [rows] = putAllocatedTransactionsMock.mock.calls[0];
+    expect(rows.map((r) => r.ynabTransactionId)).toEqual(["tx-1"]);
   });
 
-  it("marks ambiguous (multi-charge) txs so they aren't re-scraped pointlessly", async () => {
+  it("does NOT persist ambiguous (multi-charge) orders — accepts the cheap retry", async () => {
     getTransactionsSinceMock.mockResolvedValue([tx({ id: "tx-1" }), tx({ id: "tx-2" })]);
     scrapeMatchedOrdersMock.mockImplementation(async (charges: YnabCharge[]) => ({
       matched: [{ order: order(), charges }],
@@ -189,18 +212,32 @@ describe("runBackfill — idempotency markers", () => {
 
     await runBackfill({ fromDate: "2025-01-01" });
 
-    const [markers] = putBackfilledTransactionsMock.mock.calls[0];
-    expect(markers.map((m) => m.ynabTransactionId).sort()).toEqual(["tx-1", "tx-2"]);
+    expect(putAllocatedTransactionsMock).not.toHaveBeenCalled();
     expect(learnFromApprovalMock).not.toHaveBeenCalled();
   });
 
-  it("does not write markers when the adapter throws", async () => {
+  it("skips orders whose scrape doesn't verify (and doesn't persist them)", async () => {
+    getTransactionsSinceMock.mockResolvedValue([tx({ id: "tx-1" })]);
+    scrapeMatchedOrdersMock.mockImplementation(async (charges: YnabCharge[]) => ({
+      matched: [{ order: order(), charges: [charges[0]] }],
+      unmatched: [],
+    }));
+    verifyScrapeMock.mockReturnValue({ ok: false, message: "subtotal mismatch" });
+
+    const result = await runBackfill({ fromDate: "2025-01-01" });
+
+    expect(result.matched).toBe(0);
+    expect(putAllocatedTransactionsMock).not.toHaveBeenCalled();
+    expect(learnFromApprovalMock).not.toHaveBeenCalled();
+  });
+
+  it("does not persist when the adapter throws", async () => {
     getTransactionsSinceMock.mockResolvedValue([tx()]);
     scrapeMatchedOrdersMock.mockRejectedValue(new Error("boom"));
 
     await runBackfill({ fromDate: "2025-01-01" });
 
-    expect(putBackfilledTransactionsMock).not.toHaveBeenCalled();
+    expect(putAllocatedTransactionsMock).not.toHaveBeenCalled();
   });
 });
 
@@ -308,7 +345,7 @@ describe("runBackfill — abort", () => {
 
     await expect(runBackfill({ fromDate: "2025-01-01", signal: ctrl.signal })).rejects.toThrow();
     expect(learnFromApprovalMock).not.toHaveBeenCalled();
-    expect(putBackfilledTransactionsMock).not.toHaveBeenCalled();
+    expect(putAllocatedTransactionsMock).not.toHaveBeenCalled();
   });
 
   it("passes signal to the adapter and propagates a mid-scrape abort", async () => {

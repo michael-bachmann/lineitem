@@ -1,17 +1,15 @@
 import { groupBy, sumBy } from "remeda";
 import { getSettings } from "@/lib/settings";
 import { getTransactionsSince } from "@/lib/ynab";
-import {
-  getAllocatedTransaction,
-  getBackfilledTransaction,
-  putBackfilledTransactions,
-} from "@/lib/db";
+import { getAllocatedTransaction, putAllocatedTransactions } from "@/lib/db";
 import { getRetailerForPayee } from "@/lib/registry";
 import { getAdapter } from "@/retailers/registry";
 import { millunitsToCents } from "@/lib/money";
+import { verifyScrape } from "@/lib/verify-scrape";
+import { distributeOrder } from "@/lib/distribution";
 import { learnFromApproval, type LearnEntry } from "./approval";
 import type {
-  BackfilledTransaction,
+  AllocatedTransaction,
   BackfillProgress,
   BackfillResult,
   ScrapedOrder,
@@ -30,8 +28,6 @@ export interface BackfillOptions {
   onProgress?: (event: BackfillProgress) => void;
 }
 
-const now = (): string => new Date().toISOString();
-
 function toYnabCharge(tx: YnabTransaction): YnabCharge {
   return {
     ynabTransactionId: tx.id,
@@ -43,14 +39,16 @@ function toYnabCharge(tx: YnabTransaction): YnabCharge {
 }
 
 /**
- * Walk approved YNAB transactions since `fromDate` and feed their scraped
- * items into `learnFromApproval` so they bootstrap the embedding pool.
+ * Walk approved YNAB transactions since `fromDate`, scrape their orders,
+ * persist them through the same pipeline pieces sync uses (`verifyScrape`,
+ * `distributeOrder`, `putAllocatedTransactions`), then feed the items into
+ * `learnFromApproval` to bootstrap the embedding pool.
  *
- * Idempotent — re-running skips transactions we've already processed via
- * the sync pipeline (anything in the AllocatedTransaction store). This is
- * also what makes the multi-Amazon-account workflow work: charges that
- * didn't match the first Amazon login simply have no AllocatedTransaction
- * row, so they get re-attempted on the next run with a different login.
+ * `AllocatedTransaction` serves as the "we've processed this tx" marker —
+ * shared with sync. Re-running skips anything already in that store, which
+ * makes the multi-Amazon-account workflow work: charges that didn't match
+ * the first Amazon login have no AllocatedTransaction row and get re-
+ * attempted on the next run with a different login.
  */
 export async function runBackfill(options: BackfillOptions): Promise<BackfillResult> {
   const { fromDate, signal, onProgress } = options;
@@ -103,19 +101,16 @@ function backfillEligibility(tx: YnabTransaction): { retailer: string } | null {
 }
 
 /** Eligibility filter. Split into (a) a sync shape check and (b) an async
- *  dedup against AllocatedTransaction (sync's marker) and BackfilledTransaction
- *  (backfill's own marker). Per-tx IDB reads — candidate counts are
- *  O(months × txs/month), fine to fan out. */
+ *  dedup against `AllocatedTransaction` (written by both sync and backfill
+ *  as a "we've processed this tx" marker). Per-tx IDB read keeps it simple;
+ *  candidate counts are O(months × txs/month), fine to fan out. */
 async function filterCandidates(txs: YnabTransaction[]): Promise<TaggedTx[]> {
   const tagged = await Promise.all(
     txs.map(async (tx): Promise<TaggedTx | null> => {
       const eligibility = backfillEligibility(tx);
       if (!eligibility) return null;
-      const [allocated, backfilled] = await Promise.all([
-        getAllocatedTransaction(tx.id),
-        getBackfilledTransaction(tx.id),
-      ]);
-      if (allocated || backfilled) return null;
+      const already = await getAllocatedTransaction(tx.id);
+      if (already) return null;
       return { tx, retailer: eligibility.retailer };
     }),
   );
@@ -130,17 +125,19 @@ interface RetailerTotals {
 }
 
 /**
- * The three things that can happen when we try to attribute a matched order
- * to a learnable category:
- *  - `ok`: one charge, with a category — we'll write its items.
+ * What we do with one matched order:
+ *  - `ok`: single-charge with a category, verified and distributed — we'll
+ *    persist the AllocatedTransaction (the marker) AND learn from the items.
  *  - `ambiguous`: multi-charge order. Each charge has its own YNAB category,
- *    so there's no single category to tag the items with. Cheaper to skip
- *    than to invent a partition. Each charge counts as unmatched.
- *  - `skip`: charge present but the looked-up tx has no category (shouldn't
- *    happen post-filter; defensive only). Contributes nothing.
+ *    so attribution would require splitting items across charges via
+ *    distribution; not worth the complexity for backfill. Skipped — re-runs
+ *    will reattempt (cheap and accepted).
+ *  - `skip`: data unusable (missing tx, missing category, verifyScrape
+ *    failed, distributeOrder produced nothing). Contributes nothing; not
+ *    marked, so re-runs will reattempt.
  */
 type OrderOutcome =
-  | { kind: "ok"; entries: LearnEntry[] }
+  | { kind: "ok"; allocated: AllocatedTransaction; entries: LearnEntry[] }
   | { kind: "ambiguous"; chargeCount: number }
   | { kind: "skip" };
 
@@ -152,13 +149,23 @@ function processMatchedOrder(
   if (orderCharges.length !== 1) {
     return { kind: "ambiguous", chargeCount: orderCharges.length };
   }
-  const tx = txById.get(orderCharges[0].ynabTransactionId);
+  const charge = orderCharges[0];
+  const tx = txById.get(charge.ynabTransactionId);
   if (!tx || tx.category_id === null) return { kind: "skip" };
+
+  // Run the same guards sync uses: items must reconcile to the retailer's
+  // displayed subtotal, and distribution must produce a row that sums to
+  // the YNAB charge.
+  const verification = verifyScrape(order);
+  if (!verification.ok) return { kind: "skip" };
+  const allocated = distributeOrder(order, [charge]);
+  if (allocated.length === 0) return { kind: "skip" };
+
   const categoryId = tx.category_id;
   const entries = order.items.map(
     (item): LearnEntry => ({ productId: item.productId, title: item.title, categoryId }),
   );
-  return { kind: "ok", entries };
+  return { kind: "ok", allocated: allocated[0], entries };
 }
 
 interface RetailerCtx {
@@ -190,17 +197,14 @@ async function runForRetailer(
 
     const outcomes = matched.map((m) => processMatchedOrder(m, txById));
     const entries = outcomes.flatMap((o) => (o.kind === "ok" ? o.entries : []));
+    const allocations = outcomes.flatMap((o) => (o.kind === "ok" ? [o.allocated] : []));
 
+    // Order matters: learn first (best-effort), then persist allocations.
+    // AllocatedTransaction is the dedup marker for re-runs — writing it
+    // before learn would let a learn failure leave a tx marked "processed"
+    // with nothing actually learned.
     if (entries.length > 0) await learnFromApproval(retailerId, entries);
-
-    // Mark every adapter-matched tx so re-runs skip them. Includes ambiguous
-    // multi-charge orders: re-scraping them produces the same skip; the
-    // adapter-unmatched charges are NOT marked, so a second run under a
-    // different retailer login picks them up.
-    const markers: BackfilledTransaction[] = matched.flatMap(({ charges: cs }) =>
-      cs.map((c) => ({ ynabTransactionId: c.ynabTransactionId, backfilledAt: now() })),
-    );
-    await putBackfilledTransactions(markers);
+    if (allocations.length > 0) await putAllocatedTransactions(allocations);
 
     return {
       matched: outcomes.filter((o) => o.kind === "ok").length,
