@@ -183,16 +183,23 @@ export default function DetailView({ entry, categories, onBack, onApprove }: Det
         )}
 
         {classifiedItems.map((item, i) => (
-          <ItemCard
-            key={item.productId}
-            title={item.title}
-            imageUrl={item.imageUrl}
-            price={item.unitPriceCents}
-            quantity={item.quantity}
-            selectedCategoryId={selectedCategories.get(i) ?? null}
-            categories={categories}
-            onCategoryChange={(categoryId) => handleCategoryChange(i, categoryId)}
-          />
+          <div key={item.productId} className="flex flex-col gap-1">
+            <ItemCard
+              title={item.title}
+              imageUrl={item.imageUrl}
+              price={item.unitPriceCents}
+              quantity={item.quantity}
+              selectedCategoryId={selectedCategories.get(i) ?? null}
+              classificationSource={item.classificationSource}
+              categories={categories}
+              onCategoryChange={(categoryId) => handleCategoryChange(i, categoryId)}
+            />
+            {item.classificationSource === "embedding" && item.matchedSource && (
+              <p className="text-xs text-gray-500 italic pl-2">
+                Suggested based on similarity to your past “{item.matchedSource.title}”.
+              </p>
+            )}
+          </div>
         ))}
       </div>
 

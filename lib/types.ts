@@ -154,7 +154,10 @@ export interface ClassifiedItem extends AllocatedItem {
   /** YNAB category UUID suggested by the classifier, or null if uncategorized. */
   suggestedCategoryId: string | null;
   /** Which classifier tier produced the suggestion, or null if uncategorized. */
-  classificationSource: "product_cache" | null;
+  classificationSource: "product_cache" | "embedding" | null;
+  /** Only set when classificationSource === "embedding". The nearest past
+   *  title and its cosine, used for the UI "similar to your past X" hint. */
+  matchedSource?: { title: string; cosine: number };
 }
 
 /** A YNAB transaction paired with its retailer match status for display in the queue. */
