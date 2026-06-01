@@ -172,6 +172,7 @@ describe("distributeOrder", () => {
     expect(result.allocated).toHaveLength(1);
     expect(result.allocated[0].ynabTransactionId).toBe("tx1");
     expect(result.allocated[0].amountCents).toBe(8800);
+    expect(result.allocated[0].isRefund).toBe(false);
     expect(sum(result.allocated[0].items.map((i) => i.allocatedCents))).toBe(8800);
     expect(result.allocated[0].items.map((i) => i.productId).sort()).toEqual(["A", "B"]);
     expect(result.failures).toEqual([]);
@@ -279,6 +280,7 @@ describe("distributeOrder with refunds", () => {
     };
     const result = distributeOrder(order, [refundCharge]);
     expect(result.allocated).toHaveLength(1);
+    expect(result.allocated[0].isRefund).toBe(true);
     expect(result.allocated[0].items.map((i) => i.productId)).toEqual(["B"]);
     expect(result.allocated[0].items[0].allocatedCents).toBe(1500);
     expect(result.failures).toEqual([]);
@@ -394,6 +396,28 @@ describe("distributeOrder with refunds", () => {
     const byTx = new Map(result.allocated.map((a) => [a.ynabTransactionId, a]));
     expect(byTx.get("yt-purchase")!.items.map((i) => i.productId).sort()).toEqual(["A", "B"]);
     expect(byTx.get("yt-refund")!.items.map((i) => i.productId)).toEqual(["C"]);
+  });
+
+  it("pure-refund order with purchase charge: fails purchase with a specific reason", () => {
+    const items = [
+      { ...mkItem("A", 1000), refundedAmountCents: 1000 },
+      { ...mkItem("B", 1500), refundedAmountCents: 1500 },
+    ];
+    const order: ScrapedOrder = {
+      ...mkOrder(items),
+      refund: { itemCents: 2500, taxCents: 0, totalCents: 2500 },
+    };
+    const purchase: YnabCharge = {
+      ynabTransactionId: "yt-purchase",
+      date: "2026-05-31",
+      amountCents: 2500,
+      payeeName: "Amazon",
+      isRefund: false,
+    };
+    const result = distributeOrder(order, [purchase]);
+    expect(result.allocated).toEqual([]);
+    expect(result.failures).toHaveLength(1);
+    expect(result.failures[0].reason).toMatch(/refunded/i);
   });
 
   it("multiple sequential refunds: each consumes its matched items from the pool", () => {

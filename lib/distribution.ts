@@ -333,15 +333,27 @@ export function distributeOrder(
 
   // ---- Purchase path: run existing partition logic over non-refunded items.
   if (purchaseCharges.length > 0) {
-    const nonRefundedIndices: number[] = [];
-    for (let i = 0; i < order.items.length; i++) {
-      if (order.items[i].refundedAmountCents === 0) nonRefundedIndices.push(i);
-    }
+    const nonRefundedIndices = order.items.flatMap((it, i) =>
+      it.refundedAmountCents === 0 ? [i] : [],
+    );
     const nonRefundedItems = nonRefundedIndices.map((i) => order.items[i]);
     const itemSubtotals = nonRefundedItems.map((it) => it.unitPriceCents * it.quantity);
     const chargeAmounts = purchaseCharges.map((c) => c.amountCents);
     const orderTotal = sum(chargeAmounts);
     const itemsSubtotal = sum(itemSubtotals);
+
+    // All items refunded — can happen with split tx where everything came back.
+    // assignItemsToCharges would also fail here, but with a confusing reason.
+    if (nonRefundedItems.length === 0) {
+      for (const c of purchaseCharges) {
+        failures.push({
+          ynabTransactionId: c.ynabTransactionId,
+          reason:
+            "All items in this order have been refunded — purchase charge has nothing to allocate to.",
+        });
+      }
+      return { allocated, failures };
+    }
 
     const partition = assignItemsToCharges(
       itemSubtotals,
