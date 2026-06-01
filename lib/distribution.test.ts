@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { sum } from "remeda";
-import { allocateProportional, assignItemsToCharges, distributeOrder } from "./distribution";
+import { allocateProportional, assignItemsToCharges, distributeOrder, matchRefundToItems } from "./distribution";
 import type { ScrapedOrder, YnabCharge } from "./types";
 
 describe("allocateProportional", () => {
@@ -257,5 +257,44 @@ describe("distributeOrder", () => {
     const order = mkOrder("o1", [mkItem("A", 1000)]);
     const charges = [mkCharge("tx1", 500), mkCharge("tx2", 500)];
     expect(distributeOrder(order, charges)).toEqual([]);
+  });
+});
+
+describe("matchRefundToItems", () => {
+  // Refunded items represented as (index, refundedAmountCents).
+  it("returns the unique single-item subset that matches", () => {
+    // YNAB refund $15.00, no tax; one refunded item of $15 → trivial match.
+    expect(matchRefundToItems([449, 279, 638, 1500, 739], 1500, 1.0)).toEqual([3]);
+  });
+
+  it("returns null when no subset matches", () => {
+    // Refunded items sum to $9 max but YNAB refund is $20.
+    expect(matchRefundToItems([200, 300, 400], 2000, 1.0)).toBeNull();
+  });
+
+  it("returns null when two distinct subsets both match (ambiguous)", () => {
+    // Items: 100, 100, 200; YNAB amount 200 — matches {200} OR {100, 100}.
+    expect(matchRefundToItems([100, 100, 200], 200, 1.0)).toBeNull();
+  });
+
+  it("matches a multi-item subset uniquely", () => {
+    // Items: 100, 200, 300. YNAB amount 500 → unique {200, 300}.
+    expect(matchRefundToItems([100, 200, 300], 500, 1.0)).toEqual([1, 2]);
+  });
+
+  it("applies the tax-grossed ratio when matching", () => {
+    // One refunded item of $59.95 item-only. Refund total $65.80 → ratio 65.80/59.95.
+    // YNAB refund $65.80 should match the single item.
+    const ratio = 6580 / 5995;
+    expect(matchRefundToItems([5995], 6580, ratio)).toEqual([0]);
+  });
+
+  it("returns null for an empty refunded-items pool", () => {
+    expect(matchRefundToItems([], 100, 1.0)).toBeNull();
+  });
+
+  it("ignores items with zero refundedAmountCents in subset enumeration", () => {
+    // Mixed: only indices 1 and 3 are refunded. YNAB 700 → unique {1, 3} = 200 + 500.
+    expect(matchRefundToItems([0, 200, 0, 500], 700, 1.0)).toEqual([1, 3]);
   });
 });

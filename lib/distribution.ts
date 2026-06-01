@@ -171,6 +171,72 @@ function enumerateSubsets(
 }
 
 /**
+ * Tolerance per item for refund subset matching. Per-item refund amounts
+ * are integer cents; the tax-grossed ratio introduces sub-cent rounding.
+ * We allow ±1 cent per item summed.
+ */
+const REFUND_MATCH_TOLERANCE_CENTS_PER_ITEM = 1;
+
+/**
+ * Find the unique subset of refunded items whose grossed-up amounts match
+ * the YNAB refund charge.
+ *
+ * `refundedAmounts[i]` is the per-item refund in cents (0 means "not
+ * refunded"; such indices never appear in any returned subset). `ratio`
+ * is `refund.totalCents / refund.itemCents` from the order's popover,
+ * which grosses item-only refund amounts up to include tax. Use 1.0 when
+ * there is no tax line.
+ *
+ * Returns the matching subset (as item indices in ascending order) when
+ * exactly one subset matches the charge amount within tolerance. Returns
+ * null when:
+ *  - no subset matches,
+ *  - more than one distinct subset matches (ambiguous — refuse to guess),
+ *  - the refunded-items pool is empty.
+ *
+ * Branch-and-bound DFS over the indices with nonzero refundedAmounts.
+ * Mirrors the cap from `assignItemsToCharges`: we won't enumerate when
+ * the refunded pool exceeds MAX_ITEMS (= 20).
+ */
+export function matchRefundToItems(
+  refundedAmounts: number[],
+  chargeAmountCents: number,
+  ratio: number,
+): number[] | null {
+  const eligible: number[] = [];
+  for (let i = 0; i < refundedAmounts.length; i++) {
+    if (refundedAmounts[i] > 0) eligible.push(i);
+  }
+  if (eligible.length === 0) return null;
+  if (eligible.length > MAX_ITEMS) return null;
+
+  let found: number[] | null = null;
+  let foundCount = 0;
+
+  function search(i: number, current: number[], currentSum: number): void {
+    if (foundCount >= 2) return; // pruning: already ambiguous
+    if (i === eligible.length) {
+      if (current.length === 0) return;
+      const grossed = Math.round(currentSum * ratio);
+      const tolerance = REFUND_MATCH_TOLERANCE_CENTS_PER_ITEM * current.length;
+      if (Math.abs(grossed - chargeAmountCents) <= tolerance) {
+        found = [...current];
+        foundCount++;
+      }
+      return;
+    }
+    const idx = eligible[i];
+    // Include
+    search(i + 1, [...current, idx], currentSum + refundedAmounts[idx]);
+    // Exclude
+    search(i + 1, current, currentSum);
+  }
+
+  search(0, [], 0);
+  return foundCount === 1 ? found : null;
+}
+
+/**
  * The full distribution algorithm: take a scraped order and its YNAB
  * charges, return one AllocatedTransaction per charge with items
  * partitioned across charges and per-item allocated amounts that sum
