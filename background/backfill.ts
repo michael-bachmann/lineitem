@@ -196,14 +196,19 @@ function processMatchedOrder(
   // the YNAB charge.
   const verification = verifyScrape(order);
   if (!verification.ok) return { kind: "skip" };
-  const allocated = distributeOrder(order, [charge]);
-  if (allocated.length === 0) return { kind: "skip" };
+  const distribution = distributeOrder(order, [charge]);
+  if (distribution.allocated.length === 0) return { kind: "skip" };
 
+  const allocated = distribution.allocated[0];
   const categoryId = tx.category_id;
-  const entries = order.items.map(
+  // Learn from items that landed on THIS allocated tx, not all order items.
+  // For a refund whose allocation only covers a subset, the other items
+  // weren't on this YNAB transaction and shouldn't be associated with its
+  // category.
+  const entries = allocated.items.map(
     (item): LearnEntry => ({ productId: item.productId, title: item.title, categoryId }),
   );
-  return { kind: "ok", allocated: allocated[0], entries };
+  return { kind: "ok", allocated, entries };
 }
 
 interface RetailerCtx {

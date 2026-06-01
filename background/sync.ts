@@ -103,27 +103,21 @@ async function performSyncInner(): Promise<{ queue: QueueEntry[] } | { error: st
       );
 
       // 3. DISTRIBUTE
-      const allocated = validMatched.flatMap(({ order, charges }) => distributeOrder(order, charges));
+      const distributionResults = validMatched.map(({ order, charges }) =>
+        distributeOrder(order, charges),
+      );
 
-      // Map distribution failures (empty result) to error entries
+      const allocated = distributionResults.flatMap((r) => r.allocated);
+
+      // Per-charge failures with their specific reason
       errorEntries.push(
-        ...validMatched.flatMap(({ order, charges }) => {
-          const allocatedIds = new Set(
-            allocated
-              .filter((a) => a.orderKey === `${order.retailer}:${order.orderId}`)
-              .map((a) => a.ynabTransactionId),
-          );
-          return charges
-            .filter((charge) => !allocatedIds.has(charge.ynabTransactionId))
-            .map((charge) => ({
-              ynabTransaction: entryById.get(charge.ynabTransactionId)!.tx,
-              retailer: retailerId,
-              matchStatus: {
-                status: "error" as const,
-                message: "Could not partition items across charges (too many items or charges > items)",
-              },
-            }));
-        }),
+        ...distributionResults.flatMap((r) =>
+          r.failures.map((f) => ({
+            ynabTransaction: entryById.get(f.ynabTransactionId)!.tx,
+            retailer: retailerId,
+            matchStatus: { status: "error" as const, message: f.reason },
+          })),
+        ),
       );
 
       allAllocated.push(...allocated);

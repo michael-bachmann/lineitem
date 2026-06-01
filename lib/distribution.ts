@@ -237,62 +237,157 @@ export function matchRefundToItems(
 }
 
 /**
- * The full distribution algorithm: take a scraped order and its YNAB
- * charges, return one AllocatedTransaction per charge with items
- * partitioned across charges and per-item allocated amounts that sum
- * exactly to each charge's amountCents.
+ * Per-charge outcomes from `distributeOrder`. Either the charge was
+ * allocated (entry in `allocated`) or it failed for a specific reason
+ * (entry in `failures`). A charge appears in exactly one list.
+ */
+export interface DistributionResult {
+  allocated: AllocatedTransaction[];
+  failures: { ynabTransactionId: string; reason: string }[];
+}
+
+/**
+ * Take a scraped order and its YNAB charges, return per-charge outcomes.
  *
- * Returns an empty array if the partition cannot be computed (no items,
- * M > n, or n exceeds the cap). Callers should treat that as an error
- * for the affected charges.
+ * The dispatch splits charges by sign:
+ *  - Purchase charges (isRefund=false) run through `assignItemsToCharges`
+ *    against the order's non-refunded items, exactly as before.
+ *  - Refund charges (isRefund=true) run through `matchRefundToItems`
+ *    against the refunded items pool, with the order's popover ratio.
+ *    Each refund consumes its matched items so a later refund can't
+ *    re-use them.
+ *
+ * A refund that can't be matched cleanly never falls back to "all items
+ * on the refund" — it returns a per-charge failure so the user sees the
+ * ambiguity rather than wrong attribution.
  */
 export function distributeOrder(
   order: ScrapedOrder,
   charges: YnabCharge[],
-): AllocatedTransaction[] {
-  if (order.items.length === 0) return [];
-
-  const itemSubtotals = order.items.map((item) => item.unitPriceCents * item.quantity);
-  const chargeAmounts = charges.map((c) => c.amountCents);
-  const orderTotal = sum(chargeAmounts);
-  const itemsSubtotal = sum(itemSubtotals);
-
-  const partition = assignItemsToCharges(
-    itemSubtotals,
-    chargeAmounts,
-    orderTotal,
-    itemsSubtotal,
-  );
-  if (partition === null) return [];
-
-  // Log per-charge distance for debugging — not persisted.
-  const totalDist = sum(partition.distanceCentsPerCharge);
-  if (totalDist > 0) {
-    console.debug(
-      `[distributeOrder] order=${order.orderId} total_distance_cents=${totalDist} ` +
-        `per_charge=${partition.distanceCentsPerCharge.join(",")}`,
-    );
+): DistributionResult {
+  if (order.items.length === 0) {
+    return {
+      allocated: [],
+      failures: charges.map((c) => ({
+        ynabTransactionId: c.ynabTransactionId,
+        reason: "Order has no scraped items",
+      })),
+    };
   }
 
-  return charges.map((charge, chargeIdx) => {
-    const itemIndices = partition.indicesPerCharge[chargeIdx];
-    const subsetItems = itemIndices.map((i) => order.items[i]);
-    const subsetSubtotals = itemIndices.map((i) => itemSubtotals[i]);
-    const allocatedAmounts = allocateProportional(subsetSubtotals, charge.amountCents);
+  const purchaseCharges = charges.filter((c) => !c.isRefund);
+  const refundCharges = charges.filter((c) => c.isRefund);
 
-    const items: AllocatedItem[] = subsetItems.map((item, i) => ({
+  const allocated: AllocatedTransaction[] = [];
+  const failures: { ynabTransactionId: string; reason: string }[] = [];
+
+  // ---- Refund path: process each refund charge against the refunded pool.
+  // Consume matched items so later refunds can't re-use them.
+  const refundedAmounts = order.items.map((it) => it.refundedAmountCents);
+  const refundConsumed = new Set<number>();
+  const ratio =
+    order.refund && order.refund.itemCents > 0
+      ? order.refund.totalCents / order.refund.itemCents
+      : 1;
+
+  for (const charge of refundCharges) {
+    if (!order.refund) {
+      failures.push({
+        ynabTransactionId: charge.ynabTransactionId,
+        reason: "Couldn't match refund to specific items (order has no refund data)",
+      });
+      continue;
+    }
+    // Mask consumed items as 0 for this matcher invocation.
+    const available = refundedAmounts.map((amt, i) =>
+      refundConsumed.has(i) ? 0 : amt,
+    );
+    const subset = matchRefundToItems(available, charge.amountCents, ratio);
+    if (subset === null) {
+      failures.push({
+        ynabTransactionId: charge.ynabTransactionId,
+        reason: "Couldn't unambiguously match refund to specific items",
+      });
+      continue;
+    }
+    // Allocate the charge across the matched items in proportion to their
+    // (item-only) refund amounts.
+    const matchedItems = subset.map((i) => order.items[i]);
+    const matchedSubtotals = subset.map((i) => refundedAmounts[i]);
+    const allocatedAmounts = allocateProportional(matchedSubtotals, charge.amountCents);
+    const items: AllocatedItem[] = matchedItems.map((item, i) => ({
       ...item,
       allocatedCents: allocatedAmounts[i],
     }));
-
-    return {
+    allocated.push({
       ynabTransactionId: charge.ynabTransactionId,
       orderKey: `${order.retailer}:${order.orderId}`,
       retailer: order.retailer,
       date: charge.date,
       amountCents: charge.amountCents,
-      isRefund: charge.isRefund,
+      isRefund: true,
       items,
-    };
-  });
+    });
+    for (const i of subset) refundConsumed.add(i);
+  }
+
+  // ---- Purchase path: run existing partition logic over non-refunded items.
+  if (purchaseCharges.length > 0) {
+    const nonRefundedIndices: number[] = [];
+    for (let i = 0; i < order.items.length; i++) {
+      if (order.items[i].refundedAmountCents === 0) nonRefundedIndices.push(i);
+    }
+    const nonRefundedItems = nonRefundedIndices.map((i) => order.items[i]);
+    const itemSubtotals = nonRefundedItems.map((it) => it.unitPriceCents * it.quantity);
+    const chargeAmounts = purchaseCharges.map((c) => c.amountCents);
+    const orderTotal = sum(chargeAmounts);
+    const itemsSubtotal = sum(itemSubtotals);
+
+    const partition = assignItemsToCharges(
+      itemSubtotals,
+      chargeAmounts,
+      orderTotal,
+      itemsSubtotal,
+    );
+
+    if (partition === null) {
+      for (const c of purchaseCharges) {
+        failures.push({
+          ynabTransactionId: c.ynabTransactionId,
+          reason: "Could not partition items across purchase charges (too many items or charges > items)",
+        });
+      }
+    } else {
+      // Log per-charge distance for debugging — not persisted.
+      const totalDist = sum(partition.distanceCentsPerCharge);
+      if (totalDist > 0) {
+        console.debug(
+          `[distributeOrder] order=${order.orderId} total_distance_cents=${totalDist} ` +
+            `per_charge=${partition.distanceCentsPerCharge.join(",")}`,
+        );
+      }
+      for (let chargeIdx = 0; chargeIdx < purchaseCharges.length; chargeIdx++) {
+        const charge = purchaseCharges[chargeIdx];
+        const localIndices = partition.indicesPerCharge[chargeIdx];
+        const subsetItems = localIndices.map((i) => nonRefundedItems[i]);
+        const subsetSubtotals = localIndices.map((i) => itemSubtotals[i]);
+        const allocatedAmounts = allocateProportional(subsetSubtotals, charge.amountCents);
+        const items: AllocatedItem[] = subsetItems.map((item, i) => ({
+          ...item,
+          allocatedCents: allocatedAmounts[i],
+        }));
+        allocated.push({
+          ynabTransactionId: charge.ynabTransactionId,
+          orderKey: `${order.retailer}:${order.orderId}`,
+          retailer: order.retailer,
+          date: charge.date,
+          amountCents: charge.amountCents,
+          isRefund: false,
+          items,
+        });
+      }
+    }
+  }
+
+  return { allocated, failures };
 }
