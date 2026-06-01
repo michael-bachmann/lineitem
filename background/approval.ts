@@ -78,7 +78,7 @@ export function buildSubtransactions(
  * retailer to form the storage key inside learnFromApproval), the title we
  * store for later re-embedding, and the user's category choice.
  */
-interface LearnEntry {
+export interface LearnEntry {
   productId: string;
   title: string;
   categoryId: string;
@@ -119,7 +119,7 @@ function buildProductEmbedding(
  * row (capped pool, evicted on overflow). When embedBatch fails, the cache
  * row still gets written; the embedding is just skipped for that entry.
  */
-async function learnFromApproval(retailer: string, entries: readonly LearnEntry[]): Promise<void> {
+export async function learnFromApproval(retailer: string, entries: readonly LearnEntry[]): Promise<void> {
   if (entries.length === 0) return;
 
   const embeddings = await safeEmbedBatch(entries.map((e) => e.title));

@@ -124,7 +124,36 @@ export type MessageRequest =
   | { type: "GET_PLANS"; token: string }
   | { type: "REFRESH_CATEGORIES" }
   | { type: "GET_CATEGORIES" }
-  | { type: "CLEAR_SETTINGS" };
+  | { type: "CLEAR_SETTINGS" }
+  | { type: "START_BACKFILL"; fromDate: string }
+  | { type: "CANCEL_BACKFILL" };
+
+/** Messages broadcast from the background to interested listeners (e.g. the
+ *  side panel). Distinct from MessageRequest because no response is expected. */
+export type MessageBroadcast =
+  | { type: "BACKFILL_PROGRESS"; event: BackfillProgress };
+
+/** What backfill is doing right now. "preparing" covers fetching YNAB
+ *  transactions plus the retailer's transaction-list pagination — phases
+ *  where we don't yet know how many orders we'll scrape. Once detail-page
+ *  scrapes start, each event reports the order index + total. */
+export type BackfillProgress =
+  | { status: "preparing" }
+  | { status: "scraping"; index: number; total: number };
+
+export interface BackfillResult {
+  /** Candidates remaining after the eligibility filter. */
+  total: number;
+  /** Transactions whose order was scraped successfully and learned. */
+  matched: number;
+  /** Transactions skipped post-filter — no order found, or multi-charge
+   *  order (ambiguous category attribution). */
+  unmatched: number;
+  /** Transactions in a retailer batch that aborted the scrape. */
+  failed: number;
+  /** Sum of items written to LearnedProduct / ProductEmbedding stores. */
+  itemsWritten: number;
+}
 
 /**
  * The user's category choice for one item in a transaction. Slimmer than
@@ -250,8 +279,30 @@ export interface RetailerAdapter {
    *
    * Returns matched orders with the charges they cover, plus unmatched
    * charges with a reason. No persistence, no classification.
+   *
+   * `options.maxPages` is the upper bound on transaction-list pagination
+   * the adapter is allowed to walk. Sync's natural cutoff (most recent
+   * unapproved charges) means a small default is fine; backfill passes a
+   * higher value so it can reach old orders.
+   *
+   * `options.onScrapeProgress` is called once per detail-page scrape just
+   * before it runs, with the 1-indexed position and the total number of
+   * detail-page scrapes planned for this batch. The transaction-list
+   * pagination phase emits no events (we don't know the total yet).
+   *
+   * `options.signal` lets the caller cancel mid-batch. Adapters must check
+   * it at natural pause points (between detail-page scrapes, between list-
+   * page paginations) and throw the standard DOMException AbortError when
+   * the signal aborts; in-progress detail scrapes are allowed to finish.
    */
-  scrapeMatchedOrders(charges: YnabCharge[]): Promise<{
+  scrapeMatchedOrders(
+    charges: YnabCharge[],
+    options?: {
+      maxPages?: number;
+      signal?: AbortSignal;
+      onScrapeProgress?: (event: { index: number; total: number }) => void;
+    },
+  ): Promise<{
     matched: { order: ScrapedOrder; charges: YnabCharge[] }[];
     unmatched: { charge: YnabCharge; reason: string }[];
   }>;

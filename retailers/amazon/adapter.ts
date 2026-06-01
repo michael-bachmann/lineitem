@@ -23,7 +23,10 @@ export const amazonAdapter: RetailerAdapter = {
   id: "amazon",
   payees: PAYEES,
 
-  async scrapeMatchedOrders(charges) {
+  async scrapeMatchedOrders(charges, options) {
+    const maxPages = options?.maxPages ?? DEFAULT_MAX_PAGES;
+    const onScrapeProgress = options?.onScrapeProgress;
+    const signal = options?.signal;
     const tabResult = await openRetailerTab(START_URL);
     if (!tabResult) {
       return {
@@ -55,15 +58,24 @@ export const amazonAdapter: RetailerAdapter = {
       }
 
       // Phase 1: paginate list page and match
-      const { matchedPairs, unmatchedCharges, error } = await paginateAndMatch(tabId, charges);
+      const { matchedPairs, unmatchedCharges, error } = await paginateAndMatch(tabId, charges, maxPages);
 
       // Phase 2: group by orderId, scrape detail page per order
       const byOrderId = groupBy(matchedPairs, ([_charge, raw]) => raw.orderId!);
+      const orderEntries = Object.entries(byOrderId);
+      const totalOrders = orderEntries.length;
 
       const matchedOrders: { order: ScrapedOrder; charges: YnabCharge[] }[] = [];
       const detailFailures: { charge: YnabCharge; reason: string }[] = [];
 
-      for (const [orderId, pairs] of Object.entries(byOrderId)) {
+      for (let i = 0; i < totalOrders; i++) {
+        // Honor cancellation between detail-page scrapes — the long phase
+        // the user actually sees the spinner spinning through.
+        signal?.throwIfAborted();
+        const [orderId, pairs] = orderEntries[i];
+        // Emit progress BEFORE the scrape so the UI shows "Scraping order N
+        // of T" while N is in flight, not after it lands.
+        onScrapeProgress?.({ index: i + 1, total: totalOrders });
         const result = await scrapeOrderItems(tabId, orderId);
 
         if ("error" in result || result.items.length === 0) {
@@ -105,7 +117,9 @@ export const amazonAdapter: RetailerAdapter = {
 // Internal: list-page pagination + matching
 // ----------------------------------------------------------------------------
 
-const MAX_PAGES = 10;
+/** Default pagination cap for callers that don't pass `options.maxPages`.
+ *  Sync's natural cutoff (`cutoffDateFor`) short-circuits well before this. */
+const DEFAULT_MAX_PAGES = 10;
 
 interface PaginateResult {
   matchedPairs: [YnabCharge, RawTransaction][];
@@ -116,13 +130,14 @@ interface PaginateResult {
 async function paginateAndMatch(
   tabId: number,
   charges: YnabCharge[],
+  maxPages: number,
 ): Promise<PaginateResult> {
   const cutoffIso = cutoffDateFor(charges);
   let candidates: RawTransaction[] = [];
   let remaining = [...charges];
   let allMatched: [YnabCharge, RawTransaction][] = [];
 
-  for (let page = 0; page < MAX_PAGES; page++) {
+  for (let page = 0; page < maxPages; page++) {
     const txResponse = (await browser.tabs.sendMessage(tabId, {
       type: "SCRAPE_TRANSACTIONS",
     })) as { transactions: RawTransaction[] } | { error: string };
