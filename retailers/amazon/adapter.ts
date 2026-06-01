@@ -91,6 +91,7 @@ export const amazonAdapter: RetailerAdapter = {
           orderId,
           items: result.items,
           displayedItemsSubtotalCents: result.subtotalCents,
+          refund: null, // populated in Task 6
         };
         const orderCharges = pairs.map(([charge]) => charge);
         matchedOrders.push({ order, charges: orderCharges });
@@ -245,6 +246,7 @@ async function scrapeOrderItems(
         imageUrl: raw.imageUrl,
         unitPriceCents: raw.priceCents,
         quantity: raw.quantity,
+        refundedAmountCents: 0, // populated in Tasks 4–5 once the scraper extracts it
       }),
     ),
     subtotalCents: summaryResp.subtotalCents,

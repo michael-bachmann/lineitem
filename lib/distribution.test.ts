@@ -140,6 +140,7 @@ const mkItem = (productId: string, unitPriceCents: number, quantity = 1) => ({
   imageUrl: "",
   unitPriceCents,
   quantity,
+  refundedAmountCents: 0,
 });
 
 const mkCharge = (
@@ -160,6 +161,7 @@ const mkOrder = (orderId: string, items: ScrapedOrder["items"]): ScrapedOrder =>
   orderId,
   items,
   displayedItemsSubtotalCents: items.reduce((s, it) => s + it.unitPriceCents * it.quantity, 0),
+  refund: null,
 });
 
 describe("distributeOrder", () => {

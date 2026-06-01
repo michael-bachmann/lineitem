@@ -64,10 +64,11 @@ function order(overrides: Partial<ScrapedOrder> = {}): ScrapedOrder {
     retailer: "amazon",
     orderId: "111-2222222-3333333",
     items: [
-      { productId: "A1", title: "Paper towels", imageUrl: "", unitPriceCents: 500, quantity: 1 },
-      { productId: "A2", title: "Trash bags", imageUrl: "", unitPriceCents: 500, quantity: 1 },
+      { productId: "A1", title: "Paper towels", imageUrl: "", unitPriceCents: 500, quantity: 1, refundedAmountCents: 0 },
+      { productId: "A2", title: "Trash bags", imageUrl: "", unitPriceCents: 500, quantity: 1, refundedAmountCents: 0 },
     ],
     displayedItemsSubtotalCents: 1000,
+    refund: null,
     ...overrides,
   };
 }

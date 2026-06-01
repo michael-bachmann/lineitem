@@ -3,7 +3,7 @@ import { verifyScrape } from "./verify-scrape";
 import type { ScrapedOrder, ScrapedItem } from "./types";
 
 function makeItem(productId: string, unitPriceCents: number, quantity = 1): ScrapedItem {
-  return { productId, title: productId, imageUrl: "", unitPriceCents, quantity };
+  return { productId, title: productId, imageUrl: "", unitPriceCents, quantity, refundedAmountCents: 0 };
 }
 
 function makeOrder(overrides: Partial<ScrapedOrder> = {}): ScrapedOrder {
@@ -12,6 +12,7 @@ function makeOrder(overrides: Partial<ScrapedOrder> = {}): ScrapedOrder {
     orderId: "111-test",
     items: [],
     displayedItemsSubtotalCents: 0,
+    refund: null,
     ...overrides,
   };
 }
