@@ -4,8 +4,11 @@ export const SELECTORS = {
   lineItem: ".apx-transactions-line-item-component-container",
   amountSpan: ".a-span3 span, .a-text-right span",
   orderLink: "a[href*='orderID=']",
+  // Amazon's pagination widget emits an input whose `name` encodes the event
+  // (`ppw-widgetEvent:DefaultNextPageNavigationEvent:...`). Stable across pages;
+  // `aria-labelledby` is present on page 0 only.
   nextPageButton:
-    'span.a-button:not(.a-button-disabled) input[type="submit"][aria-labelledby]',
+    'span.a-button:not(.a-button-disabled) input[type="submit"][name*="NextPageNavigationEvent"]',
 
   // Order detail page (summary)
   itemBoxPrimary: ".a-fixed-left-grid-inner",
