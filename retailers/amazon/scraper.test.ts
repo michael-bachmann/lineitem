@@ -1,6 +1,11 @@
 // @vitest-environment happy-dom
 import { describe, expect, it, beforeEach } from "vitest";
-import { isGroceryOrder, parseItemmodFromDocument, extractItemsSubtotal } from "./scraper";
+import {
+  isGroceryOrder,
+  parseItemmodFromDocument,
+  extractItemsSubtotal,
+  parseRefundSummary,
+} from "./scraper";
 
 beforeEach(() => {
   document.body.innerHTML = "";
@@ -194,5 +199,61 @@ describe("extractItemsSubtotal", () => {
       </div>
     `;
     expect(extractItemsSubtotal(document)).toBe(1234);
+  });
+});
+
+describe("parseRefundSummary", () => {
+  it("extracts item, tax, and total cents from a regular Amazon popover", () => {
+    // Regular Amazon popovers use `inlineContent`. Encoded < (&lt;) and > (&gt;)
+    // are decoded by JSON.parse during attribute read.
+    const popoverJson = JSON.stringify({
+      inlineContent:
+        '<div class="a-row"><span>Item(s) refund</span><span>$59.95</span></div>' +
+        '<div class="a-row"><span>Tax refund</span><span>$5.85</span></div>' +
+        '<div class="a-row"><span class="a-text-bold">Refund Total</span><span>$65.80</span></div>',
+    });
+    document.body.innerHTML = `<span data-a-popover='${popoverJson.replace(/'/g, "&#39;")}'>Refund Total</span>`;
+    expect(parseRefundSummary(document)).toEqual({
+      itemCents: 5995,
+      taxCents: 585,
+      totalCents: 6580,
+    });
+  });
+
+  it("extracts totals from a Whole Foods popover (no tax line)", () => {
+    // WF popovers use `content` instead of `inlineContent`. No tax line on groceries.
+    const popoverJson = JSON.stringify({
+      content:
+        '<div><span>Item(s) refund</span><span>$36.05</span></div>' +
+        '<div><span class="a-text-bold">Refund Total</span><span>$36.05</span></div>',
+    });
+    document.body.innerHTML = `<span data-a-popover='${popoverJson.replace(/'/g, "&#39;")}'>Refund Total</span>`;
+    expect(parseRefundSummary(document)).toEqual({
+      itemCents: 3605,
+      taxCents: 0,
+      totalCents: 3605,
+    });
+  });
+
+  it("returns null when no popover with Refund Total exists", () => {
+    document.body.innerHTML = `<span data-a-popover='${JSON.stringify({ content: "<div>About bag fees</div>" })}'>Bag fees</span>`;
+    expect(parseRefundSummary(document)).toBeNull();
+  });
+
+  it("returns null when the page has no popovers at all", () => {
+    document.body.innerHTML = `<div>no popovers here</div>`;
+    expect(parseRefundSummary(document)).toBeNull();
+  });
+
+  it("skips popovers with malformed JSON without throwing", () => {
+    document.body.innerHTML = `
+      <span data-a-popover='{not json}'>broken</span>
+      <span data-a-popover='${JSON.stringify({ content: "<div><span>Item(s) refund</span><span>$10.00</span></div><div><span>Refund Total</span><span>$10.00</span></div>" })}'>Refund</span>
+    `;
+    expect(parseRefundSummary(document)).toEqual({
+      itemCents: 1000,
+      taxCents: 0,
+      totalCents: 1000,
+    });
   });
 });

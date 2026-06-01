@@ -264,3 +264,50 @@ export function extractItemsSubtotal(doc: Document): number | null {
   const match = (row.textContent ?? "").match(DOLLAR_VALUE_REGEX);
   return match ? parseCents(match[0]) : null;
 }
+
+// ---------------------------------------------------------------------------
+// Refund summary popover
+// ---------------------------------------------------------------------------
+
+const REFUND_ITEM_REGEX = /Item\(s\)\s*refund[\s\S]*?\$([0-9,]+\.[0-9]{2})/i;
+const REFUND_TAX_REGEX = /Tax\s*refund[\s\S]*?\$([0-9,]+\.[0-9]{2})/i;
+const REFUND_TOTAL_REGEX = /Refund\s*Total[\s\S]*?\$([0-9,]+\.[0-9]{2})/i;
+
+/**
+ * Extract Amazon's refund-summary popover totals from an order detail page.
+ *
+ * Amazon emits a JSON-encoded popover via `data-a-popover` on the "Refund
+ * Total" trigger. Two field names occur in the wild: `inlineContent`
+ * (regular orders) and `content` (Whole Foods). Both wrap a small HTML
+ * fragment we regex over to pull out `Item(s) refund`, `Tax refund`
+ * (absent on grocery), and `Refund Total`.
+ *
+ * Returns null when no popover on the page mentions "Refund Total" — that's
+ * the signal that the order has no refunds.
+ */
+export function parseRefundSummary(
+  doc: Document,
+): { itemCents: number; taxCents: number; totalCents: number } | null {
+  const triggers = doc.querySelectorAll(SELECTORS.refundSummaryTrigger);
+  for (const trigger of triggers) {
+    const raw = trigger.getAttribute("data-a-popover");
+    if (!raw || !raw.includes("Refund Total")) continue;
+    let parsed: { inlineContent?: string; content?: string };
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      continue; // malformed; try next popover
+    }
+    const body = parsed.inlineContent ?? parsed.content ?? "";
+    const totalMatch = body.match(REFUND_TOTAL_REGEX);
+    if (!totalMatch) continue;
+    const itemMatch = body.match(REFUND_ITEM_REGEX);
+    const taxMatch = body.match(REFUND_TAX_REGEX);
+    return {
+      itemCents: itemMatch ? parseCents(itemMatch[1]) : 0,
+      taxCents: taxMatch ? parseCents(taxMatch[1]) : 0,
+      totalCents: parseCents(totalMatch[1]),
+    };
+  }
+  return null;
+}
