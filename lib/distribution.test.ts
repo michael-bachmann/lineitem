@@ -289,6 +289,18 @@ describe("matchRefundToItems", () => {
     expect(matchRefundToItems([5995], 6580, ratio)).toEqual([0]);
   });
 
+  it("matches within rounding tolerance (per-item-in-subset)", () => {
+    // Single refunded item of $5.00. ratio=1.002 → grossed = round(500 * 1.002) = 501.
+    // Charge is $5.00 → gap = 1 cent. Tolerance for a 1-item subset = 1 → match.
+    expect(matchRefundToItems([500], 500, 1.002)).toEqual([0]);
+  });
+
+  it("rejects when grossed sum exceeds tolerance from charge", () => {
+    // Single refunded item of $10.00. ratio=1.01 → grossed = 1010. Charge = $10.05.
+    // Gap = 5 cents, tolerance for a 1-item subset = 1 → no match.
+    expect(matchRefundToItems([1000], 1005, 1.01)).toBeNull();
+  });
+
   it("returns null for an empty refunded-items pool", () => {
     expect(matchRefundToItems([], 100, 1.0)).toBeNull();
   });
