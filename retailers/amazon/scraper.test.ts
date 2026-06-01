@@ -247,7 +247,7 @@ describe("parseRefundSummary", () => {
 
   it("skips popovers with malformed JSON without throwing", () => {
     document.body.innerHTML = `
-      <span data-a-popover='{not json}'>broken</span>
+      <span data-a-popover='{not json Refund Total}'>broken</span>
       <span data-a-popover='${JSON.stringify({ content: "<div><span>Item(s) refund</span><span>$10.00</span></div><div><span>Refund Total</span><span>$10.00</span></div>" })}'>Refund</span>
     `;
     expect(parseRefundSummary(document)).toEqual({
