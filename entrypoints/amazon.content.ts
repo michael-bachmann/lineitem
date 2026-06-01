@@ -98,15 +98,8 @@ function randomDelay(min = 1000, max = 3000): Promise<void> {
 }
 
 async function nextPage(): Promise<{ hasNext: boolean }> {
-  const buttons = document.querySelectorAll<HTMLInputElement>(
-    SELECTORS.nextPageButton,
-  );
-  const nextButton = buttons[buttons.length - 1];
+  const nextButton = document.querySelector<HTMLInputElement>(SELECTORS.nextPageButton);
   if (!nextButton) return { hasNext: false };
-
-  const labelId = nextButton.getAttribute("aria-labelledby") ?? "";
-  const labelEl = labelId ? document.getElementById(labelId) : null;
-  if (labelEl?.textContent?.trim() !== "Next Page") return { hasNext: false };
 
   nextButton.click();
   await randomDelay();

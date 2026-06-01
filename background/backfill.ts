@@ -49,6 +49,11 @@ function toYnabCharge(tx: YnabTransaction): YnabCharge {
  * makes the multi-Amazon-account workflow work: charges that didn't match
  * the first Amazon login have no AllocatedTransaction row and get re-
  * attempted on the next run with a different login.
+ *
+ * Result counts are cumulative: `transactionsBackfilled` and `itemsLearned`
+ * include both this run's new matches and the pre-existing allocations
+ * already in IDB. That lets the UI keep growing numbers across multi-account
+ * re-runs instead of resetting to "0 of N" each time.
  */
 export async function runBackfill(options: BackfillOptions): Promise<BackfillResult> {
   const { fromDate, signal, onProgress } = options;
@@ -60,9 +65,8 @@ export async function runBackfill(options: BackfillOptions): Promise<BackfillRes
   onProgress?.({ status: "preparing" });
   const allTxs = await getTransactionsSince(settings.ynabToken, settings.planId, fromDate);
 
-  const tagged = await filterCandidates(allTxs);
-  const total = tagged.length;
-  const byRetailer = groupBy(tagged, (e) => e.retailer);
+  const assessment = await assessCandidates(allTxs);
+  const byRetailer = groupBy(assessment.pending, (e) => e.retailer);
 
   // Sequential per retailer — each adapter call owns a browser tab; running
   // them in parallel would open multiple tabs at once. Sync's natural
@@ -79,7 +83,21 @@ export async function runBackfill(options: BackfillOptions): Promise<BackfillRes
     };
   }
 
-  return { total, ...aggregate };
+  const alreadyBackfilledCount = assessment.totalEligible - assessment.pending.length;
+  const transactionsBackfilled = alreadyBackfilledCount + aggregate.matched;
+  const itemsLearned = assessment.alreadyBackfilledItems + aggregate.itemsWritten;
+  const hasUnbackfilled = transactionsBackfilled < assessment.totalEligible;
+
+  // Debug breakdown — surface internal counters that the UI deliberately hides.
+  console.log("[backfill] done", {
+    totalEligible: assessment.totalEligible,
+    alreadyBackfilled: alreadyBackfilledCount,
+    newlyMatched: aggregate.matched,
+    unmatched: aggregate.unmatched,
+    failed: aggregate.failed,
+  });
+
+  return { transactionsBackfilled, itemsLearned, hasUnbackfilled, failed: aggregate.failed };
 }
 
 interface TaggedTx {
@@ -100,21 +118,41 @@ function backfillEligibility(tx: YnabTransaction): { retailer: string } | null {
   return { retailer: mapping.retailer };
 }
 
-/** Eligibility filter. Split into (a) a sync shape check and (b) an async
- *  dedup against `AllocatedTransaction` (written by both sync and backfill
- *  as a "we've processed this tx" marker). Per-tx IDB read keeps it simple;
- *  candidate counts are O(months × txs/month), fine to fan out. */
-async function filterCandidates(txs: YnabTransaction[]): Promise<TaggedTx[]> {
-  const tagged = await Promise.all(
-    txs.map(async (tx): Promise<TaggedTx | null> => {
+interface CandidateAssessment {
+  /** Eligible-AND-not-yet-allocated — what we'll actually scrape this run. */
+  pending: TaggedTx[];
+  /** All eligible-by-shape tx in the window, allocated or not. */
+  totalEligible: number;
+  /** Items in AllocatedTransactions for eligible tx that were already backfilled
+   *  before this run. Added to this run's items for the cumulative total. */
+  alreadyBackfilledItems: number;
+}
+
+/** Walk the YNAB tx set once: bucket each into eligible-pending,
+ *  eligible-already-allocated, or ineligible. Same per-tx IDB read the old
+ *  `filterCandidates` did, but it also captures the pre-existing item count
+ *  so the result shape can be cumulative. */
+async function assessCandidates(txs: YnabTransaction[]): Promise<CandidateAssessment> {
+  type Outcome =
+    | { kind: "pending"; tagged: TaggedTx }
+    | { kind: "already"; items: number }
+    | null;
+
+  const outcomes = await Promise.all(
+    txs.map(async (tx): Promise<Outcome> => {
       const eligibility = backfillEligibility(tx);
       if (!eligibility) return null;
-      const already = await getAllocatedTransaction(tx.id);
-      if (already) return null;
-      return { tx, retailer: eligibility.retailer };
+      const existing = await getAllocatedTransaction(tx.id);
+      if (existing) return { kind: "already", items: existing.items.length };
+      return { kind: "pending", tagged: { tx, retailer: eligibility.retailer } };
     }),
   );
-  return tagged.filter((t): t is TaggedTx => t !== null);
+
+  const eligible = outcomes.filter((o): o is Exclude<Outcome, null> => o !== null);
+  const pending = eligible.flatMap((o) => (o.kind === "pending" ? [o.tagged] : []));
+  const alreadyBackfilledItems = sumBy(eligible, (o) => (o.kind === "already" ? o.items : 0));
+
+  return { pending, totalEligible: eligible.length, alreadyBackfilledItems };
 }
 
 interface RetailerTotals {

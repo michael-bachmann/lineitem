@@ -126,14 +126,15 @@ describe("runBackfill — filtering", () => {
     getTransactionsSinceMock.mockResolvedValue([tx({ approved: false })]);
     scrapeMatchedOrdersMock.mockResolvedValue({ matched: [], unmatched: [] });
     const result = await runBackfill({ fromDate: "2025-01-01" });
-    expect(result.total).toBe(0);
+    expect(result.transactionsBackfilled).toBe(0);
+    expect(result.hasUnbackfilled).toBe(false);
     expect(scrapeMatchedOrdersMock).not.toHaveBeenCalled();
   });
 
   it("skips uncategorized transactions", async () => {
     getTransactionsSinceMock.mockResolvedValue([tx({ category_id: null })]);
     const result = await runBackfill({ fromDate: "2025-01-01" });
-    expect(result.total).toBe(0);
+    expect(result.transactionsBackfilled).toBe(0);
   });
 
   it("skips transactions with subtransactions", async () => {
@@ -141,34 +142,40 @@ describe("runBackfill — filtering", () => {
       tx({ subtransactions: [{ amount: -5000, category_id: "c", memo: null }] }),
     ]);
     const result = await runBackfill({ fromDate: "2025-01-01" });
-    expect(result.total).toBe(0);
+    expect(result.transactionsBackfilled).toBe(0);
   });
 
   it("skips refund / inflow transactions", async () => {
     getTransactionsSinceMock.mockResolvedValue([tx({ amount: 5000 })]);
     const result = await runBackfill({ fromDate: "2025-01-01" });
-    expect(result.total).toBe(0);
+    expect(result.transactionsBackfilled).toBe(0);
   });
 
   it("skips payees that don't map to a scrape-strategy retailer", async () => {
     getRetailerForPayeeMock.mockReturnValue(null);
     getTransactionsSinceMock.mockResolvedValue([tx({ payee_name: "Mystery Cafe" })]);
     const result = await runBackfill({ fromDate: "2025-01-01" });
-    expect(result.total).toBe(0);
+    expect(result.transactionsBackfilled).toBe(0);
   });
 
   it("skips skip-strategy payees (e.g. Amazon Prime)", async () => {
     getRetailerForPayeeMock.mockReturnValue({ retailer: "amazon", strategy: "skip" });
     getTransactionsSinceMock.mockResolvedValue([tx({ payee_name: "Amazon Prime" })]);
     const result = await runBackfill({ fromDate: "2025-01-01" });
-    expect(result.total).toBe(0);
+    expect(result.transactionsBackfilled).toBe(0);
   });
 
-  it("skips transactions already in the AllocatedTransaction store", async () => {
+  it("counts already-allocated eligible tx toward the cumulative total without re-scraping", async () => {
     getTransactionsSinceMock.mockResolvedValue([tx()]);
-    getAllocatedTransactionMock.mockResolvedValue({ ynabTransactionId: "tx-1" });
+    getAllocatedTransactionMock.mockResolvedValue({
+      ynabTransactionId: "tx-1",
+      items: [{ productId: "p1" }, { productId: "p2" }, { productId: "p3" }],
+    });
     const result = await runBackfill({ fromDate: "2025-01-01" });
-    expect(result.total).toBe(0);
+    expect(result.transactionsBackfilled).toBe(1);
+    expect(result.itemsLearned).toBe(3);
+    expect(result.hasUnbackfilled).toBe(false);
+    expect(scrapeMatchedOrdersMock).not.toHaveBeenCalled();
   });
 
 });
@@ -226,7 +233,7 @@ describe("runBackfill — idempotency via AllocatedTransaction", () => {
 
     const result = await runBackfill({ fromDate: "2025-01-01" });
 
-    expect(result.matched).toBe(0);
+    expect(result.transactionsBackfilled).toBe(0);
     expect(putAllocatedTransactionsMock).not.toHaveBeenCalled();
     expect(learnFromApprovalMock).not.toHaveBeenCalled();
   });
@@ -251,9 +258,9 @@ describe("runBackfill — happy path", () => {
 
     const result = await runBackfill({ fromDate: "2025-01-01" });
 
-    expect(result.matched).toBe(2);
-    expect(result.itemsWritten).toBe(4);
-    expect(result.unmatched).toBe(0);
+    expect(result.transactionsBackfilled).toBe(2);
+    expect(result.itemsLearned).toBe(4);
+    expect(result.hasUnbackfilled).toBe(false);
     expect(result.failed).toBe(0);
     expect(learnFromApprovalMock).toHaveBeenCalledTimes(1);
     const [retailerArg, entriesArg] = learnFromApprovalMock.mock.calls[0];
@@ -262,7 +269,7 @@ describe("runBackfill — happy path", () => {
     expect(entriesArg.every((e: { categoryId: string }) => e.categoryId === "cat-groceries")).toBe(true);
   });
 
-  it("counts adapter-unmatched charges in the unmatched total", async () => {
+  it("flags hasUnbackfilled when the adapter couldn't match every charge", async () => {
     getTransactionsSinceMock.mockResolvedValue([tx({ id: "tx-1" }), tx({ id: "tx-2" })]);
     scrapeMatchedOrdersMock.mockImplementation(async (charges: YnabCharge[]) => ({
       matched: [{ order: order(), charges: [charges[0]] }],
@@ -271,12 +278,12 @@ describe("runBackfill — happy path", () => {
 
     const result = await runBackfill({ fromDate: "2025-01-01" });
 
-    expect(result.matched).toBe(1);
-    expect(result.unmatched).toBe(1);
-    expect(result.itemsWritten).toBe(2);
+    expect(result.transactionsBackfilled).toBe(1);
+    expect(result.hasUnbackfilled).toBe(true);
+    expect(result.itemsLearned).toBe(2);
   });
 
-  it("counts multi-charge orders as unmatched (ambiguous category)", async () => {
+  it("counts multi-charge orders as unbackfilled (ambiguous category)", async () => {
     getTransactionsSinceMock.mockResolvedValue([tx({ id: "tx-1" }), tx({ id: "tx-2" })]);
     scrapeMatchedOrdersMock.mockImplementation(async (charges: YnabCharge[]) => ({
       matched: [{ order: order(), charges }],
@@ -285,10 +292,31 @@ describe("runBackfill — happy path", () => {
 
     const result = await runBackfill({ fromDate: "2025-01-01" });
 
-    expect(result.matched).toBe(0);
-    expect(result.unmatched).toBe(2);
-    expect(result.itemsWritten).toBe(0);
+    expect(result.transactionsBackfilled).toBe(0);
+    expect(result.hasUnbackfilled).toBe(true);
+    expect(result.itemsLearned).toBe(0);
     expect(learnFromApprovalMock).not.toHaveBeenCalled();
+  });
+
+  it("returns cumulative numbers spanning pre-existing allocations and this run's new matches", async () => {
+    // tx-1 already has an allocation from a prior run (3 items).
+    // tx-2 is pending and gets matched this run (2 items from the default order()).
+    getTransactionsSinceMock.mockResolvedValue([tx({ id: "tx-1" }), tx({ id: "tx-2" })]);
+    getAllocatedTransactionMock.mockImplementation(async (id: string) =>
+      id === "tx-1"
+        ? { ynabTransactionId: "tx-1", items: [{ productId: "p1" }, { productId: "p2" }, { productId: "p3" }] }
+        : undefined,
+    );
+    scrapeMatchedOrdersMock.mockImplementation(async (charges: YnabCharge[]) => ({
+      matched: charges.map((c) => ({ order: order(), charges: [c] })),
+      unmatched: [],
+    }));
+
+    const result = await runBackfill({ fromDate: "2025-01-01" });
+
+    expect(result.transactionsBackfilled).toBe(2); // 1 pre-existing + 1 new
+    expect(result.itemsLearned).toBe(5); // 3 pre-existing + 2 new
+    expect(result.hasUnbackfilled).toBe(false);
   });
 
   it("does not call learnFromApproval when no entries were produced", async () => {
@@ -313,8 +341,8 @@ describe("runBackfill — failure handling", () => {
     const result = await runBackfill({ fromDate: "2025-01-01" });
 
     expect(result.failed).toBe(2);
-    expect(result.matched).toBe(0);
-    expect(result.itemsWritten).toBe(0);
+    expect(result.transactionsBackfilled).toBe(0);
+    expect(result.itemsLearned).toBe(0);
   });
 
   it("throws if YNAB credentials are missing", async () => {

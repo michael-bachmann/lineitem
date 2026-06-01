@@ -142,17 +142,17 @@ export type BackfillProgress =
   | { status: "scraping"; index: number; total: number };
 
 export interface BackfillResult {
-  /** Candidates remaining after the eligibility filter. */
-  total: number;
-  /** Transactions whose order was scraped successfully and learned. */
-  matched: number;
-  /** Transactions skipped post-filter — no order found, or multi-charge
-   *  order (ambiguous category attribution). */
-  unmatched: number;
-  /** Transactions in a retailer batch that aborted the scrape. */
+  /** Cumulative count of eligible transactions in the window that now have
+   *  order data (pre-existing AllocatedTransactions from sync/prior backfill,
+   *  plus this run's new matches). Drives the done-state numerator. */
+  transactionsBackfilled: number;
+  /** Cumulative count of items across all backfilled transactions. */
+  itemsLearned: number;
+  /** Whether eligible transactions remain without allocations — drives the
+   *  "Run again" CTA on the done card. */
+  hasUnbackfilled: boolean;
+  /** Transactions in a retailer batch that aborted the scrape THIS run. */
   failed: number;
-  /** Sum of items written to LearnedProduct / ProductEmbedding stores. */
-  itemsWritten: number;
 }
 
 /**

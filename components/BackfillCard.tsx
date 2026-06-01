@@ -98,24 +98,24 @@ export default function BackfillCard() {
       {state.kind === "done" && (
         <div className="space-y-2">
           <p className="text-xs text-gray-300">
-            Backfilled {state.result.itemsWritten} items from {state.result.matched} of{" "}
-            {state.result.total} transactions.
+            Learned {state.result.itemsLearned} items from {state.result.transactionsBackfilled}{" "}
+            transactions.
           </p>
           {state.result.failed > 0 && (
             <p className="text-xs text-amber-400">
               {state.result.failed} failed — try again later.
             </p>
           )}
-          {/* "Run again" is only useful when some charges didn't match — typically
-              because the matching Amazon order belongs to a different account.
-              After a clean run, the button has no real purpose. */}
-          {state.result.unmatched > 0 && (
+          {/* "Run again" appears whenever eligible transactions remain without
+              order data — typically because they're on a different Amazon
+              account. We deliberately don't surface the count to avoid making
+              "12 still pending" read as failure. */}
+          {state.result.hasUnbackfilled && (
             <>
               <p className="text-xs text-gray-400">
-                {state.result.unmatched} couldn't be matched — if some are from a different Amazon
-                account, sign into it and try again.
+                If you have other Amazon accounts, sign in and run again.
               </p>
-              <SecondaryButton onClick={start}>Try a different Amazon account</SecondaryButton>
+              <SecondaryButton onClick={start}>Run again</SecondaryButton>
             </>
           )}
         </div>
