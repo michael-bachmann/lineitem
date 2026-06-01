@@ -246,7 +246,7 @@ async function scrapeOrderItems(
         imageUrl: raw.imageUrl,
         unitPriceCents: raw.priceCents,
         quantity: raw.quantity,
-        refundedAmountCents: 0, // populated in Tasks 4–5 once the scraper extracts it
+        refundedAmountCents: raw.refundedAmountCents,
       }),
     ),
     subtotalCents: summaryResp.subtotalCents,

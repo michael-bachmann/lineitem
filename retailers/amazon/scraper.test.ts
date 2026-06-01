@@ -43,6 +43,7 @@ describe("parseItemmodFromDocument", () => {
         priceCents: 223,
         quantity: 1,
         imageUrl: "https://example.com/bananas.jpg",
+        refundedAmountCents: 0,
       },
     ]);
   });
@@ -65,6 +66,7 @@ describe("parseItemmodFromDocument", () => {
         priceCents: 1598,
         quantity: 1,
         imageUrl: "https://example.com/eggs.jpg",
+        refundedAmountCents: 0,
       },
     ]);
   });
@@ -138,6 +140,45 @@ describe("parseItemmodFromDocument", () => {
       </div>
     `;
     expect(parseItemmodFromDocument(document)).toEqual([]);
+  });
+
+  it("sets refundedAmountCents from the per-item refund marker", () => {
+    document.body.innerHTML = `
+      <div id="B0BFKD24CF-item-grid-row" role="row">
+        <img src="https://example.com/chips.jpg" />
+        <a href="/gp/product/B0BFKD24CF?ref_=x"><span>Wilde Snacks Chips</span></a>
+        <span id="B0BFKD24CF-item-total-price"> $15.00 </span>
+        <div class="ufpo-item-status">
+          <div class="a-row">
+            <span class="a-size-small a-text-bold">Refunded (3)</span>
+            <span class="ufpo-item-status-price"><span class="a-size-small a-text-bold"> -$15.00 </span></span>
+          </div>
+        </div>
+      </div>
+    `;
+    expect(parseItemmodFromDocument(document)).toEqual([
+      {
+        productId: "B0BFKD24CF",
+        title: "Wilde Snacks Chips",
+        priceCents: 1500,
+        quantity: 1,
+        imageUrl: "https://example.com/chips.jpg",
+        refundedAmountCents: 1500,
+      },
+    ]);
+  });
+
+  it("leaves refundedAmountCents at 0 when no refund marker is present", () => {
+    document.body.innerHTML = `
+      <div id="B0DHFXHD8Q-item-grid-row" role="row">
+        <img src="https://example.com/m.jpg" />
+        <a href="/gp/product/B0DHFXHD8Q?ref_=x"><span>Rudis Muffins</span></a>
+        <span id="B0DHFXHD8Q-item-total-price"> $5.49 </span>
+      </div>
+    `;
+    const items = parseItemmodFromDocument(document);
+    expect(items).toHaveLength(1);
+    expect(items[0].refundedAmountCents).toBe(0);
   });
 });
 

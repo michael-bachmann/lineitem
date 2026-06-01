@@ -18,6 +18,8 @@ export interface RawItem {
   priceCents: number;
   quantity: number;
   imageUrl: string;
+  /** Sum of refund markers on this item; 0 when not refunded. */
+  refundedAmountCents: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -163,7 +165,7 @@ function parseItemFromElement(item: Element): RawItem | null {
     }
   }
 
-  return { productId, title, priceCents, quantity, imageUrl };
+  return { productId, title, priceCents, quantity, imageUrl, refundedAmountCents: 0 };
 }
 
 export function parseItemsFromDocument(doc: Document): RawItem[] {
@@ -223,7 +225,21 @@ function parseItemmodElement(item: Element): RawItem | null {
   const priceCents = parseCents(lineTotalEl?.textContent ?? "0");
   if (priceCents === 0) return null;
 
-  return { productId, title, priceCents, quantity: 1, imageUrl };
+  // Per-item refund marker. Text reads e.g. " -$15.00 ". parseCents strips
+  // the sign and returns absolute cents, which is what we store.
+  const refundEl = item.querySelector(SELECTORS.itemmodItemRefundPrice);
+  const refundedAmountCents = refundEl
+    ? parseCents(refundEl.textContent ?? "0")
+    : 0;
+
+  return {
+    productId,
+    title,
+    priceCents,
+    quantity: 1,
+    imageUrl,
+    refundedAmountCents,
+  };
 }
 
 export function parseItemmodFromDocument(doc: Document): RawItem[] {
