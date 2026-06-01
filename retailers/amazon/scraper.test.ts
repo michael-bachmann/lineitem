@@ -3,6 +3,7 @@ import { describe, expect, it, beforeEach } from "vitest";
 import {
   isGroceryOrder,
   parseItemmodFromDocument,
+  parseItemsFromDocument,
   extractItemsSubtotal,
   parseRefundSummary,
 } from "./scraper";
@@ -177,6 +178,71 @@ describe("parseItemmodFromDocument", () => {
       </div>
     `;
     const items = parseItemmodFromDocument(document);
+    expect(items).toHaveLength(1);
+    expect(items[0].refundedAmountCents).toBe(0);
+  });
+});
+
+describe("parseItemsFromDocument refund detection", () => {
+  it("marks items in a 'Refunded' shipment as refunded at full line total", () => {
+    document.body.innerHTML = `
+      <div data-component="shipmentsLeftGrid">
+        <div data-component="shipmentStatus">
+          <h4 class="od-status-message"><span>Refunded</span></h4>
+        </div>
+        <div data-component="purchasedItems">
+          <div class="a-fixed-left-grid-inner">
+            <img src="https://example.com/slide.jpg" />
+            <a href="/dp/B00C1ZTNNM?ref_=x">OOFOS Recovery Slide</a>
+            <span class="a-color-price">$59.95</span>
+          </div>
+        </div>
+      </div>
+    `;
+    const items = parseItemsFromDocument(document);
+    expect(items).toEqual([
+      {
+        productId: "B00C1ZTNNM",
+        title: "OOFOS Recovery Slide",
+        priceCents: 5995,
+        quantity: 1,
+        imageUrl: "https://example.com/slide.jpg",
+        refundedAmountCents: 5995,
+      },
+    ]);
+  });
+
+  it("leaves refundedAmountCents at 0 for items in a 'Delivered' shipment", () => {
+    document.body.innerHTML = `
+      <div data-component="shipmentsLeftGrid">
+        <div data-component="shipmentStatus">
+          <h4 class="od-status-message">
+            <span class="a-text-bold">Delivered </span><span>May 13</span>
+          </h4>
+        </div>
+        <div data-component="purchasedItems">
+          <div class="a-fixed-left-grid-inner">
+            <img src="https://example.com/book.jpg" />
+            <a href="/dp/1680524402?ref_=x">Mommy and Me Board Book</a>
+            <span class="a-color-price">$12.99</span>
+          </div>
+        </div>
+      </div>
+    `;
+    const items = parseItemsFromDocument(document);
+    expect(items).toHaveLength(1);
+    expect(items[0].refundedAmountCents).toBe(0);
+  });
+
+  it("does not mark items as refunded when no shipment ancestor exists", () => {
+    document.body.innerHTML = `
+      <div class="a-fixed-left-grid-inner">
+        <img src="https://example.com/x.jpg" />
+        <a href="/dp/B0000XXXXX?ref_=x">Standalone item</a>
+        <span class="a-color-price">$10.00</span>
+      </div>
+    `;
+    const items = parseItemsFromDocument(document);
     expect(items).toHaveLength(1);
     expect(items[0].refundedAmountCents).toBe(0);
   });

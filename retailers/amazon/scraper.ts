@@ -165,7 +165,23 @@ function parseItemFromElement(item: Element): RawItem | null {
     }
   }
 
-  return { productId, title, priceCents, quantity, imageUrl, refundedAmountCents: 0 };
+  // Shipment-level refund detection: walk up to the enclosing shipment
+  // container and look at its status header. Edge case noted on BAC-122:
+  // when only some items in a shipment are returned, Amazon's regular-order
+  // detail UI may not show per-item refund markers — this conservative
+  // "whole shipment is refunded" rule will over-mark in that case. The
+  // grocery itemmod path uses real per-item markers and is not affected.
+  let refundedAmountCents = 0;
+  const shipmentRoot = item.closest(SELECTORS.shipmentRoot);
+  if (shipmentRoot) {
+    const statusEl = shipmentRoot.querySelector(SELECTORS.shipmentStatusText);
+    const statusText = statusEl?.textContent?.trim() ?? "";
+    if (/^Refunded/i.test(statusText)) {
+      refundedAmountCents = priceCents * quantity;
+    }
+  }
+
+  return { productId, title, priceCents, quantity, imageUrl, refundedAmountCents };
 }
 
 export function parseItemsFromDocument(doc: Document): RawItem[] {
