@@ -1,5 +1,6 @@
 import type { YnabTransaction, Category } from "./types";
 import { getValidAccessToken, NeedsReauthError } from "./oauth";
+import { saveSettings } from "./settings";
 
 const BASE_URL = "https://api.ynab.com/v1";
 const INTERNAL_CATEGORY_GROUP = "Internal Master Category";
@@ -31,7 +32,7 @@ async function ynabFetch(path: string, options?: RequestInit): Promise<any> {
   if (response.status === 401) {
     // Force refresh by clearing the cached expiry, then re-fetching the token.
     // `getValidAccessToken` will hit /oauth/refresh because expiresAt < now.
-    await import("./settings").then(({ saveSettings }) => saveSettings({ accessTokenExpiresAt: 0 }));
+    await saveSettings({ accessTokenExpiresAt: 0 });
     token = await getValidAccessToken();
     response = await sendRequest(path, token, options);
   }
