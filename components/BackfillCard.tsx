@@ -29,11 +29,23 @@ function isBackfillProgressMessage(
 
 function progressLabel(p: BackfillProgress): string {
   if (p.status === "preparing") return "Preparing…";
+  if (p.status === "learning") return `Learning from item ${p.index} of ${p.total}…`;
   return `Scraping order ${p.index} of ${p.total}…`;
 }
 
-export default function BackfillCard() {
+interface BackfillCardProps {
+  /** Fires whenever the internal UI state changes — lets a parent gate its
+   *  own controls (e.g. disable an onboarding Continue button while a
+   *  backfill is running). */
+  onStateChange?: (state: BackfillUiState) => void;
+}
+
+export default function BackfillCard({ onStateChange }: BackfillCardProps = {}) {
   const [state, setState] = useState<BackfillUiState>({ kind: "idle" });
+
+  useEffect(() => {
+    onStateChange?.(state);
+  }, [state, onStateChange]);
 
   useEffect(() => {
     const listener = (msg: unknown) => {

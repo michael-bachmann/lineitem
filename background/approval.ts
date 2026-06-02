@@ -84,8 +84,21 @@ export interface LearnEntry {
   categoryId: string;
 }
 
-/** Embed all titles in one batch; on failure, fall back to null per entry so
- *  the LearnedProduct row is still written (just without an embedding). */
+/** Progress event emitted by learnFromApproval after each embedding chunk
+ *  completes. `index` is the cumulative item count processed so far. */
+export interface LearnProgress {
+  index: number;
+  total: number;
+}
+
+/** Chunk size for embedding during learn. Sized to give roughly one progress
+ *  event every couple seconds on CPU (the model takes ~50-200ms per item),
+ *  smooth enough for a progress bar without overwhelming the message channel. */
+const LEARN_CHUNK_SIZE = 25;
+
+/** Embed a chunk of titles; on failure, fall back to null per entry so the
+ *  LearnedProduct row is still written (just without an embedding). Failures
+ *  are per-chunk so one bad batch doesn't poison the others. */
 async function safeEmbedBatch(titles: string[]): Promise<(Float32Array | null)[]> {
   try {
     return await embedBatch(titles);
@@ -118,11 +131,26 @@ function buildProductEmbedding(
  * Learn from this approval — write the cache row (forever) and the embedding
  * row (capped pool, evicted on overflow). When embedBatch fails, the cache
  * row still gets written; the embedding is just skipped for that entry.
+ *
+ * Embedding is chunked so a long approval (e.g. backfill, hundreds of items)
+ * can stream progress to the caller. `onProgress` fires after each chunk
+ * completes with the cumulative item count.
  */
-export async function learnFromApproval(retailer: string, entries: readonly LearnEntry[]): Promise<void> {
+export async function learnFromApproval(
+  retailer: string,
+  entries: readonly LearnEntry[],
+  onProgress?: (p: LearnProgress) => void,
+): Promise<void> {
   if (entries.length === 0) return;
 
-  const embeddings = await safeEmbedBatch(entries.map((e) => e.title));
+  const total = entries.length;
+  const embeddings: (Float32Array | null)[] = [];
+  for (let i = 0; i < total; i += LEARN_CHUNK_SIZE) {
+    const chunk = entries.slice(i, i + LEARN_CHUNK_SIZE);
+    const chunkVectors = await safeEmbedBatch(chunk.map((e) => e.title));
+    for (const v of chunkVectors) embeddings.push(v);
+    onProgress?.({ index: Math.min(i + LEARN_CHUNK_SIZE, total), total });
+  }
   const now = new Date().toISOString();
 
   // Cache writes go through unconditionally for every entry.

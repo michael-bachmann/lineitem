@@ -20,7 +20,11 @@ const {
   scrapeMatchedOrdersMock: vi.fn(),
   getAdapterMock: vi.fn(),
   learnFromApprovalMock: vi.fn(
-    async (_retailer: string, _entries: readonly { productId: string; title: string; categoryId: string }[]) => {},
+    async (
+      _retailer: string,
+      _entries: readonly { productId: string; title: string; categoryId: string }[],
+      _onProgress?: (p: { index: number; total: number }) => void,
+    ) => {},
   ),
   verifyScrapeMock: vi.fn(),
   distributeOrderMock: vi.fn(),
@@ -454,5 +458,31 @@ describe("runBackfill — progress events", () => {
       { status: "scraping", index: 1, total: 2 },
       { status: "scraping", index: 2, total: 2 },
     ]);
+  });
+
+  it("forwards learnFromApproval's progress as 'learning' events", async () => {
+    getTransactionsSinceMock.mockResolvedValue([tx({ id: "tx-1" })]);
+    scrapeMatchedOrdersMock.mockImplementation(async (charges: YnabCharge[]) => ({
+      matched: charges.map((c) => ({ order: order(), charges: [c] })),
+      unmatched: [],
+    }));
+    // Simulate the chunked progress callback that real learnFromApproval emits.
+    learnFromApprovalMock.mockImplementationOnce(
+      async (
+        _retailer: string,
+        entries: readonly { productId: string; title: string; categoryId: string }[],
+        onProgress?: (p: { index: number; total: number }) => void,
+      ) => {
+        onProgress?.({ index: entries.length, total: entries.length });
+      },
+    );
+
+    const events: import("@/lib/types").BackfillProgress[] = [];
+    await runBackfill({
+      fromDate: "2025-01-01",
+      onProgress: (e) => events.push(e),
+    });
+
+    expect(events).toContainEqual({ status: "learning", index: 2, total: 2 });
   });
 });

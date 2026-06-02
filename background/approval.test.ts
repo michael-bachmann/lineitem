@@ -52,7 +52,7 @@ vi.mock("@/lib/db", () => ({
   getAllocatedTransaction: vi.fn(async (id: string) => allocatedStore.get(id)),
 }));
 
-import { approveTransaction, buildSubtransactions } from "./approval";
+import { approveTransaction, buildSubtransactions, learnFromApproval } from "./approval";
 import type { AllocatedTransaction, ApprovalItem } from "@/lib/types";
 
 beforeEach(() => {
@@ -236,6 +236,34 @@ describe("learnFromApproval writes both stores", () => {
 
     await approveTransaction("txn-3", [{ productId: "Y", categoryId: "cat-new" }]);
     expect(learnedStore.get("amazon:Y")?.categoryId).toBe("cat-new");
+  });
+
+  it("emits a single progress event when entries fit in one embedding chunk", async () => {
+    const entries = [
+      { productId: "A", title: "Apple", categoryId: "cat-1" },
+      { productId: "B", title: "Bread", categoryId: "cat-1" },
+    ];
+    const events: { index: number; total: number }[] = [];
+    await learnFromApproval("amazon", entries, (e) => events.push(e));
+    expect(events).toEqual([{ index: 2, total: 2 }]);
+  });
+
+  it("emits progress at chunk boundaries for batches larger than the chunk size", async () => {
+    // 60 entries with chunk size 25 → events at 25, 50, 60.
+    const entries = Array.from({ length: 60 }, (_, i) => ({
+      productId: `P${i}`,
+      title: `Item ${i}`,
+      categoryId: "cat-1",
+    }));
+    const events: { index: number; total: number }[] = [];
+    await learnFromApproval("amazon", entries, (e) => events.push(e));
+    expect(events).toEqual([
+      { index: 25, total: 60 },
+      { index: 50, total: 60 },
+      { index: 60, total: 60 },
+    ]);
+    // The cumulative final index always equals total — drives 100% in the UI.
+    expect(events.at(-1)?.index).toBe(60);
   });
 
   it("evicts the oldest embedding in a category when writing would exceed cap=50 (cache rows untouched)", async () => {
