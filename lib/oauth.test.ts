@@ -74,6 +74,42 @@ describe("getValidAccessToken", () => {
     getSettingsMock.mockResolvedValue({ accessToken: null, refreshToken: null, accessTokenExpiresAt: null });
     await expect(getValidAccessToken()).rejects.toBeInstanceOf(NeedsReauthError);
   });
+
+  it("dedupes concurrent refreshes — followers share the in-flight fetch", async () => {
+    getSettingsMock.mockResolvedValue({
+      accessToken: "stale",
+      refreshToken: "rt",
+      accessTokenExpiresAt: Date.now() - 1_000,
+    });
+
+    // Hold the refresh request open until both callers are awaiting it.
+    let resolveFetch!: (r: Response) => void;
+    fetchSpy.mockImplementation(
+      () => new Promise<Response>((resolve) => {
+        resolveFetch = resolve;
+      }),
+    );
+
+    const a = getValidAccessToken();
+    const b = getValidAccessToken();
+
+    // Let the microtask queue drain so both callers have hit `await inflightRefresh`.
+    await Promise.resolve();
+
+    resolveFetch(
+      new Response(JSON.stringify({
+        access_token: "fresh",
+        refresh_token: "rt2",
+        token_type: "Bearer",
+        expires_in: 7200,
+      }), { status: 200 }),
+    );
+
+    const [resultA, resultB] = await Promise.all([a, b]);
+    expect(resultA).toBe("fresh");
+    expect(resultB).toBe("fresh");
+    expect(fetchSpy).toHaveBeenCalledOnce();
+  });
 });
 
 describe("exchangeCodeForTokens", () => {
