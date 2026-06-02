@@ -1,6 +1,12 @@
 // @vitest-environment happy-dom
 import { describe, expect, it, beforeEach } from "vitest";
-import { isGroceryOrder, parseItemmodFromDocument, extractItemsSubtotal } from "./scraper";
+import {
+  isGroceryOrder,
+  parseItemmodFromDocument,
+  parseItemsFromDocument,
+  extractItemsSubtotal,
+  parseRefundSummary,
+} from "./scraper";
 
 beforeEach(() => {
   document.body.innerHTML = "";
@@ -38,6 +44,7 @@ describe("parseItemmodFromDocument", () => {
         priceCents: 223,
         quantity: 1,
         imageUrl: "https://example.com/bananas.jpg",
+        refundedAmountCents: 0,
       },
     ]);
   });
@@ -60,6 +67,7 @@ describe("parseItemmodFromDocument", () => {
         priceCents: 1598,
         quantity: 1,
         imageUrl: "https://example.com/eggs.jpg",
+        refundedAmountCents: 0,
       },
     ]);
   });
@@ -134,6 +142,110 @@ describe("parseItemmodFromDocument", () => {
     `;
     expect(parseItemmodFromDocument(document)).toEqual([]);
   });
+
+  it("sets refundedAmountCents from the per-item refund marker", () => {
+    document.body.innerHTML = `
+      <div id="B0BFKD24CF-item-grid-row" role="row">
+        <img src="https://example.com/chips.jpg" />
+        <a href="/gp/product/B0BFKD24CF?ref_=x"><span>Wilde Snacks Chips</span></a>
+        <span id="B0BFKD24CF-item-total-price"> $15.00 </span>
+        <div class="ufpo-item-status">
+          <div class="a-row">
+            <span class="a-size-small a-text-bold">Refunded (3)</span>
+            <span class="ufpo-item-status-price"><span class="a-size-small a-text-bold"> -$15.00 </span></span>
+          </div>
+        </div>
+      </div>
+    `;
+    expect(parseItemmodFromDocument(document)).toEqual([
+      {
+        productId: "B0BFKD24CF",
+        title: "Wilde Snacks Chips",
+        priceCents: 1500,
+        quantity: 1,
+        imageUrl: "https://example.com/chips.jpg",
+        refundedAmountCents: 1500,
+      },
+    ]);
+  });
+
+  it("leaves refundedAmountCents at 0 when no refund marker is present", () => {
+    document.body.innerHTML = `
+      <div id="B0DHFXHD8Q-item-grid-row" role="row">
+        <img src="https://example.com/m.jpg" />
+        <a href="/gp/product/B0DHFXHD8Q?ref_=x"><span>Rudis Muffins</span></a>
+        <span id="B0DHFXHD8Q-item-total-price"> $5.49 </span>
+      </div>
+    `;
+    const items = parseItemmodFromDocument(document);
+    expect(items).toHaveLength(1);
+    expect(items[0].refundedAmountCents).toBe(0);
+  });
+});
+
+describe("parseItemsFromDocument refund detection", () => {
+  it("marks items in a 'Refunded' shipment as refunded at full line total", () => {
+    document.body.innerHTML = `
+      <div data-component="shipmentsLeftGrid">
+        <div data-component="shipmentStatus">
+          <h4 class="od-status-message"><span>Refunded</span></h4>
+        </div>
+        <div data-component="purchasedItems">
+          <div class="a-fixed-left-grid-inner">
+            <img src="https://example.com/slide.jpg" />
+            <a href="/dp/B00C1ZTNNM?ref_=x">OOFOS Recovery Slide</a>
+            <span class="a-color-price">$59.95</span>
+          </div>
+        </div>
+      </div>
+    `;
+    const items = parseItemsFromDocument(document);
+    expect(items).toEqual([
+      {
+        productId: "B00C1ZTNNM",
+        title: "OOFOS Recovery Slide",
+        priceCents: 5995,
+        quantity: 1,
+        imageUrl: "https://example.com/slide.jpg",
+        refundedAmountCents: 5995,
+      },
+    ]);
+  });
+
+  it("leaves refundedAmountCents at 0 for items in a 'Delivered' shipment", () => {
+    document.body.innerHTML = `
+      <div data-component="shipmentsLeftGrid">
+        <div data-component="shipmentStatus">
+          <h4 class="od-status-message">
+            <span class="a-text-bold">Delivered </span><span>May 13</span>
+          </h4>
+        </div>
+        <div data-component="purchasedItems">
+          <div class="a-fixed-left-grid-inner">
+            <img src="https://example.com/book.jpg" />
+            <a href="/dp/1680524402?ref_=x">Mommy and Me Board Book</a>
+            <span class="a-color-price">$12.99</span>
+          </div>
+        </div>
+      </div>
+    `;
+    const items = parseItemsFromDocument(document);
+    expect(items).toHaveLength(1);
+    expect(items[0].refundedAmountCents).toBe(0);
+  });
+
+  it("does not mark items as refunded when no shipment ancestor exists", () => {
+    document.body.innerHTML = `
+      <div class="a-fixed-left-grid-inner">
+        <img src="https://example.com/x.jpg" />
+        <a href="/dp/B0000XXXXX?ref_=x">Standalone item</a>
+        <span class="a-color-price">$10.00</span>
+      </div>
+    `;
+    const items = parseItemsFromDocument(document);
+    expect(items).toHaveLength(1);
+    expect(items[0].refundedAmountCents).toBe(0);
+  });
 });
 
 describe("extractItemsSubtotal", () => {
@@ -194,5 +306,61 @@ describe("extractItemsSubtotal", () => {
       </div>
     `;
     expect(extractItemsSubtotal(document)).toBe(1234);
+  });
+});
+
+describe("parseRefundSummary", () => {
+  it("extracts item, tax, and total cents from a regular Amazon popover", () => {
+    // Regular Amazon popovers use `inlineContent`. Encoded < (&lt;) and > (&gt;)
+    // are decoded by JSON.parse during attribute read.
+    const popoverJson = JSON.stringify({
+      inlineContent:
+        '<div class="a-row"><span>Item(s) refund</span><span>$59.95</span></div>' +
+        '<div class="a-row"><span>Tax refund</span><span>$5.85</span></div>' +
+        '<div class="a-row"><span class="a-text-bold">Refund Total</span><span>$65.80</span></div>',
+    });
+    document.body.innerHTML = `<span data-a-popover='${popoverJson.replace(/'/g, "&#39;")}'>Refund Total</span>`;
+    expect(parseRefundSummary(document)).toEqual({
+      itemCents: 5995,
+      taxCents: 585,
+      totalCents: 6580,
+    });
+  });
+
+  it("extracts totals from a Whole Foods popover (no tax line)", () => {
+    // WF popovers use `content` instead of `inlineContent`. No tax line on groceries.
+    const popoverJson = JSON.stringify({
+      content:
+        '<div><span>Item(s) refund</span><span>$36.05</span></div>' +
+        '<div><span class="a-text-bold">Refund Total</span><span>$36.05</span></div>',
+    });
+    document.body.innerHTML = `<span data-a-popover='${popoverJson.replace(/'/g, "&#39;")}'>Refund Total</span>`;
+    expect(parseRefundSummary(document)).toEqual({
+      itemCents: 3605,
+      taxCents: 0,
+      totalCents: 3605,
+    });
+  });
+
+  it("returns null when no popover with Refund Total exists", () => {
+    document.body.innerHTML = `<span data-a-popover='${JSON.stringify({ content: "<div>About bag fees</div>" })}'>Bag fees</span>`;
+    expect(parseRefundSummary(document)).toBeNull();
+  });
+
+  it("returns null when the page has no popovers at all", () => {
+    document.body.innerHTML = `<div>no popovers here</div>`;
+    expect(parseRefundSummary(document)).toBeNull();
+  });
+
+  it("skips popovers with malformed JSON without throwing", () => {
+    document.body.innerHTML = `
+      <span data-a-popover='{not json Refund Total}'>broken</span>
+      <span data-a-popover='${JSON.stringify({ content: "<div><span>Item(s) refund</span><span>$10.00</span></div><div><span>Refund Total</span><span>$10.00</span></div>" })}'>Refund</span>
+    `;
+    expect(parseRefundSummary(document)).toEqual({
+      itemCents: 1000,
+      taxCents: 0,
+      totalCents: 1000,
+    });
   });
 });

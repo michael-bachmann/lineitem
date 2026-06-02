@@ -91,6 +91,7 @@ export const amazonAdapter: RetailerAdapter = {
           orderId,
           items: result.items,
           displayedItemsSubtotalCents: result.subtotalCents,
+          refund: result.refund,
         };
         const orderCharges = pairs.map(([charge]) => charge);
         matchedOrders.push({ order, charges: orderCharges });
@@ -189,38 +190,43 @@ async function paginateAndMatch(
 // ----------------------------------------------------------------------------
 
 type SummaryResponse =
-  | { items: RawItem[]; subtotalCents: number }
-  | { requiresItemmod: true; subtotalCents: number }
+  | { items: RawItem[]; subtotalCents: number; refund: ScrapedOrder["refund"] }
+  | { requiresItemmod: true; subtotalCents: number; refund: ScrapedOrder["refund"] }
   | { error: string };
 
 type ItemmodResponse =
-  | { items: RawItem[] }
+  | { items: RawItem[]; refund: ScrapedOrder["refund"] }
   | { error: string };
 
 async function fetchItems(
   tabId: number,
   orderId: string,
   summaryResp:
-    | { items: RawItem[]; subtotalCents: number }
-    | { requiresItemmod: true; subtotalCents: number },
-): Promise<{ items: RawItem[] } | { error: string }> {
-  if (!("requiresItemmod" in summaryResp)) return { items: summaryResp.items };
+    | { items: RawItem[]; subtotalCents: number; refund: ScrapedOrder["refund"] }
+    | { requiresItemmod: true; subtotalCents: number; refund: ScrapedOrder["refund"] },
+): Promise<{ items: RawItem[]; refund: ScrapedOrder["refund"] } | { error: string }> {
+  if (!("requiresItemmod" in summaryResp)) {
+    return { items: summaryResp.items, refund: summaryResp.refund };
+  }
 
   await browser.tabs.update(tabId, { url: itemmodUrl(orderId) });
   await waitForTabLoad(tabId);
   const itemmodResp = (await browser.tabs.sendMessage(tabId, {
     type: "SCRAPE_ITEMS",
   })) as ItemmodResponse;
-  return "error" in itemmodResp
-    ? { error: amazonErrorMessage(itemmodResp.error) }
-    : { items: itemmodResp.items };
+  if ("error" in itemmodResp) {
+    return { error: amazonErrorMessage(itemmodResp.error) };
+  }
+  // Prefer itemmod's refund (has per-item markers) over the summary page's
+  // when both exist. They should be equivalent but itemmod is authoritative.
+  return { items: itemmodResp.items, refund: itemmodResp.refund ?? summaryResp.refund };
 }
 
 async function scrapeOrderItems(
   tabId: number,
   orderId: string,
 ): Promise<
-  | { items: ScrapedItem[]; subtotalCents: number }
+  | { items: ScrapedItem[]; subtotalCents: number; refund: ScrapedOrder["refund"] }
   | { error: string }
 > {
   await browser.tabs.update(tabId, { url: orderDetailUrl(orderId) });
@@ -245,9 +251,11 @@ async function scrapeOrderItems(
         imageUrl: raw.imageUrl,
         unitPriceCents: raw.priceCents,
         quantity: raw.quantity,
+        refundedAmountCents: raw.refundedAmountCents,
       }),
     ),
     subtotalCents: summaryResp.subtotalCents,
+    refund: itemsResp.refund,
   };
 }
 

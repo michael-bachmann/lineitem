@@ -18,6 +18,13 @@ export const SELECTORS = {
   priceFallback: ".a-text-price .a-offscreen, [class*='price']",
   quantityFallback: "[data-component='quantity'], [class*='quantity'], [class*='qty']",
 
+  // Shipment-level container on regular order detail. Each shipment is a
+  // `[data-component="shipmentsLeftGrid"]` block containing one
+  // `[data-component="shipmentStatus"]` (the status header) and one
+  // `[data-component="purchasedItems"]` (the items).
+  shipmentRoot: '[data-component="shipmentsLeftGrid"]',
+  shipmentStatusText: '[data-component="shipmentStatus"] .od-status-message',
+
   // Grocery order detection (on summary page)
   groceryProgressTracker: "#f3_food_ProgressTracker",
 
@@ -28,6 +35,16 @@ export const SELECTORS = {
   // elements (which end with `-item-grid-divider`).
   itemmodItemRow: "[id$='-item-grid-row']",
   itemmodLineTotal: "[id$='-item-total-price']",
+  // Per-item refund marker — present in the row when Amazon refunded
+  // some quantity of that item. Text content is the negative dollar
+  // amount, e.g. " -$15.00 ".
+  itemmodItemRefundPrice: ".ufpo-item-status-price",
+
+  // Refund summary popover. The trigger element carries the encoded
+  // breakdown in its `data-a-popover` JSON attribute. There are multiple
+  // popovers on the page; we identify ours by presence of "Refund Total"
+  // in the encoded content.
+  refundSummaryTrigger: "[data-a-popover]",
 } as const;
 
 export const ASIN_REGEX = /\/(?:dp|gp\/product)\/([A-Z0-9]{10})/;

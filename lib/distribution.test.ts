@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { sum } from "remeda";
-import { allocateProportional, assignItemsToCharges, distributeOrder } from "./distribution";
+import { allocateProportional, assignItemsToCharges, distributeOrder, matchRefundToItems } from "./distribution";
 import type { ScrapedOrder, YnabCharge } from "./types";
 
 describe("allocateProportional", () => {
@@ -140,6 +140,7 @@ const mkItem = (productId: string, unitPriceCents: number, quantity = 1) => ({
   imageUrl: "",
   unitPriceCents,
   quantity,
+  refundedAmountCents: 0,
 });
 
 const mkCharge = (
@@ -155,105 +156,348 @@ const mkCharge = (
   ...overrides,
 });
 
-const mkOrder = (orderId: string, items: ScrapedOrder["items"]): ScrapedOrder => ({
+const mkOrder = (items: ScrapedOrder["items"], orderId = "o1"): ScrapedOrder => ({
   retailer: "amazon",
   orderId,
   items,
   displayedItemsSubtotalCents: items.reduce((s, it) => s + it.unitPriceCents * it.quantity, 0),
+  refund: null,
 });
 
 describe("distributeOrder", () => {
   it("single charge: all items go to the one charge; allocations sum to chargeAmount", () => {
-    const order = mkOrder("o1", [mkItem("A", 5000), mkItem("B", 3000)]);
+    const order = mkOrder([mkItem("A", 5000), mkItem("B", 3000)]);
     const charges = [mkCharge("tx1", 8800)]; // includes $8 tax
     const result = distributeOrder(order, charges);
-    expect(result).toHaveLength(1);
-    expect(result[0].ynabTransactionId).toBe("tx1");
-    expect(result[0].amountCents).toBe(8800);
-    expect(sum(result[0].items.map((i) => i.allocatedCents))).toBe(8800);
-    expect(result[0].items.map((i) => i.productId).sort()).toEqual(["A", "B"]);
+    expect(result.allocated).toHaveLength(1);
+    expect(result.allocated[0].ynabTransactionId).toBe("tx1");
+    expect(result.allocated[0].amountCents).toBe(8800);
+    expect(result.allocated[0].isRefund).toBe(false);
+    expect(sum(result.allocated[0].items.map((i) => i.allocatedCents))).toBe(8800);
+    expect(result.allocated[0].items.map((i) => i.productId).sort()).toEqual(["A", "B"]);
+    expect(result.failures).toEqual([]);
   });
 
   it("split shipment (HEADLINE): partitions items, one AllocatedTransaction per charge", () => {
-    const order = mkOrder("o1", [mkItem("H", 5000), mkItem("C", 3000)]);
+    const order = mkOrder([mkItem("H", 5000), mkItem("C", 3000)]);
     const charges = [mkCharge("tx1", 5500), mkCharge("tx2", 3000)];
     const result = distributeOrder(order, charges);
-    expect(result).toHaveLength(2);
-    const tx1 = result.find((r) => r.ynabTransactionId === "tx1")!;
-    const tx2 = result.find((r) => r.ynabTransactionId === "tx2")!;
+    expect(result.allocated).toHaveLength(2);
+    const tx1 = result.allocated.find((r) => r.ynabTransactionId === "tx1")!;
+    const tx2 = result.allocated.find((r) => r.ynabTransactionId === "tx2")!;
     expect(tx1.items.map((i) => i.productId)).toEqual(["H"]);
     expect(tx1.items[0].allocatedCents).toBe(5500);
     expect(tx2.items.map((i) => i.productId)).toEqual(["C"]);
     expect(tx2.items[0].allocatedCents).toBe(3000);
+    expect(result.failures).toEqual([]);
   });
 
   it("invariant: every charge's allocations sum to exactly amountCents", () => {
-    const order = mkOrder("o1", [
+    const order = mkOrder([
       mkItem("A", 1234),
       mkItem("B", 5678),
       mkItem("C", 999),
     ]);
     const charges = [mkCharge("tx1", 5000), mkCharge("tx2", 3000)];
     const result = distributeOrder(order, charges);
-    for (const at of result) {
+    for (const at of result.allocated) {
       expect(sum(at.items.map((i) => i.allocatedCents))).toBe(at.amountCents);
     }
   });
 
   it("invariant: every item appears in exactly one AllocatedTransaction", () => {
-    const order = mkOrder("o1", [mkItem("A", 1000), mkItem("B", 2000), mkItem("C", 3000)]);
+    const order = mkOrder([mkItem("A", 1000), mkItem("B", 2000), mkItem("C", 3000)]);
     const charges = [mkCharge("tx1", 1500), mkCharge("tx2", 4500)];
     const result = distributeOrder(order, charges);
-    const seenIds = result.flatMap((at) => at.items.map((i) => i.productId));
+    const seenIds = result.allocated.flatMap((at) => at.items.map((i) => i.productId));
     expect(seenIds.sort()).toEqual(["A", "B", "C"]);
   });
 
   it("item quantity > 1: subtotal scales by quantity", () => {
     // $20 × 3 = $60 line; alone in a $66 charge (10% tax)
-    const order = mkOrder("o1", [mkItem("A", 2000, 3)]);
+    const order = mkOrder([mkItem("A", 2000, 3)]);
     const charges = [mkCharge("tx1", 6600)];
     const result = distributeOrder(order, charges);
-    expect(result[0].items[0].allocatedCents).toBe(6600);
-    expect(result[0].items[0].quantity).toBe(3);
-    expect(result[0].items[0].unitPriceCents).toBe(2000); // raw price preserved
-  });
-
-  it("refund: isRefund flag carried through; amountCents stays positive", () => {
-    const order = mkOrder("o1", [mkItem("A", 5000)]);
-    const charges = [mkCharge("tx1", 5000, { isRefund: true })];
-    const result = distributeOrder(order, charges);
-    expect(result[0].isRefund).toBe(true);
-    expect(result[0].amountCents).toBe(5000);
+    expect(result.allocated[0].items[0].allocatedCents).toBe(6600);
+    expect(result.allocated[0].items[0].quantity).toBe(3);
+    expect(result.allocated[0].items[0].unitPriceCents).toBe(2000); // raw price preserved
   });
 
   it("multi-charge proportional tax: clean partition, exact totals", () => {
     // Items $40, $60 = $100; Order total = $110 (10% tax); two charges sum $110
     // Charges: $44, $66
-    const order = mkOrder("o1", [mkItem("A", 4000), mkItem("B", 6000)]);
+    const order = mkOrder([mkItem("A", 4000), mkItem("B", 6000)]);
     const charges = [mkCharge("tx1", 4400), mkCharge("tx2", 6600)];
     const result = distributeOrder(order, charges);
-    expect(sum(result.find((r) => r.ynabTransactionId === "tx1")!.items.map((i) => i.allocatedCents))).toBe(4400);
-    expect(sum(result.find((r) => r.ynabTransactionId === "tx2")!.items.map((i) => i.allocatedCents))).toBe(6600);
+    expect(sum(result.allocated.find((r) => r.ynabTransactionId === "tx1")!.items.map((i) => i.allocatedCents))).toBe(4400);
+    expect(sum(result.allocated.find((r) => r.ynabTransactionId === "tx2")!.items.map((i) => i.allocatedCents))).toBe(6600);
   });
 
   it("metadata propagation: orderKey, retailer, date all set", () => {
-    const order = mkOrder("114-XYZ", [mkItem("A", 1000)]);
+    const order = mkOrder([mkItem("A", 1000)], "114-XYZ");
     const charges = [mkCharge("tx1", 1000, { date: "2026-05-20" })];
     const result = distributeOrder(order, charges);
-    expect(result[0].orderKey).toBe("amazon:114-XYZ");
-    expect(result[0].retailer).toBe("amazon");
-    expect(result[0].date).toBe("2026-05-20");
+    expect(result.allocated[0].orderKey).toBe("amazon:114-XYZ");
+    expect(result.allocated[0].retailer).toBe("amazon");
+    expect(result.allocated[0].date).toBe("2026-05-20");
   });
 
-  it("returns empty array when order has no items", () => {
-    const order = mkOrder("o1", []);
+  it("returns empty allocated + per-charge failures when order has no items", () => {
+    const order = mkOrder([]);
     const charges = [mkCharge("tx1", 1000)];
-    expect(distributeOrder(order, charges)).toEqual([]);
+    const result = distributeOrder(order, charges);
+    expect(result.allocated).toEqual([]);
+    expect(result.failures).toHaveLength(1);
+    expect(result.failures[0].ynabTransactionId).toBe("tx1");
   });
 
-  it("returns empty array when assignment fails (M > n)", () => {
-    const order = mkOrder("o1", [mkItem("A", 1000)]);
+  it("returns empty allocated + failures when assignment fails (M > n)", () => {
+    const order = mkOrder([mkItem("A", 1000)]);
     const charges = [mkCharge("tx1", 500), mkCharge("tx2", 500)];
-    expect(distributeOrder(order, charges)).toEqual([]);
+    const result = distributeOrder(order, charges);
+    expect(result.allocated).toEqual([]);
+    expect(result.failures).toHaveLength(2);
+  });
+});
+
+describe("distributeOrder with refunds", () => {
+  it("standalone refund: allocates only refunded items (single-item match)", () => {
+    const items = [
+      { ...mkItem("A", 1000), refundedAmountCents: 0 },
+      { ...mkItem("B", 1500), refundedAmountCents: 1500 }, // this one was refunded
+      { ...mkItem("C", 2000), refundedAmountCents: 0 },
+    ];
+    const order: ScrapedOrder = {
+      ...mkOrder(items),
+      refund: { itemCents: 1500, taxCents: 0, totalCents: 1500 },
+    };
+    const refundCharge: YnabCharge = {
+      ynabTransactionId: "yt-refund",
+      date: "2026-05-31",
+      amountCents: 1500,
+      payeeName: "Amazon",
+      isRefund: true,
+    };
+    const result = distributeOrder(order, [refundCharge]);
+    expect(result.allocated).toHaveLength(1);
+    expect(result.allocated[0].isRefund).toBe(true);
+    expect(result.allocated[0].items.map((i) => i.productId)).toEqual(["B"]);
+    expect(result.allocated[0].items[0].allocatedCents).toBe(1500);
+    expect(result.failures).toEqual([]);
+  });
+
+  it("standalone refund with tax: uses popover ratio to gross up item amount", () => {
+    const items = [
+      { ...mkItem("OOFOS", 5995), refundedAmountCents: 5995 },
+      { ...mkItem("OTHER", 1000), refundedAmountCents: 0 },
+    ];
+    const order: ScrapedOrder = {
+      ...mkOrder(items),
+      refund: { itemCents: 5995, taxCents: 585, totalCents: 6580 },
+    };
+    const refundCharge: YnabCharge = {
+      ynabTransactionId: "yt-refund",
+      date: "2026-05-31",
+      amountCents: 6580,
+      payeeName: "Amazon",
+      isRefund: true,
+    };
+    const result = distributeOrder(order, [refundCharge]);
+    expect(result.allocated).toHaveLength(1);
+    expect(result.allocated[0].items.map((i) => i.productId)).toEqual(["OOFOS"]);
+    expect(result.allocated[0].items[0].allocatedCents).toBe(6580);
+    expect(result.failures).toEqual([]);
+  });
+
+  it("ambiguous refund: fails the charge with a refund-specific reason", () => {
+    // Items: two refunded items at $10 each. YNAB refund $10 — could match either.
+    const items = [
+      { ...mkItem("A", 1000), refundedAmountCents: 1000 },
+      { ...mkItem("B", 1000), refundedAmountCents: 1000 },
+    ];
+    const order: ScrapedOrder = {
+      ...mkOrder(items),
+      refund: { itemCents: 2000, taxCents: 0, totalCents: 2000 },
+    };
+    const refundCharge: YnabCharge = {
+      ynabTransactionId: "yt-refund",
+      date: "2026-05-31",
+      amountCents: 1000,
+      payeeName: "Amazon",
+      isRefund: true,
+    };
+    const result = distributeOrder(order, [refundCharge]);
+    expect(result.allocated).toEqual([]);
+    expect(result.failures).toEqual([
+      { ynabTransactionId: "yt-refund", reason: expect.stringContaining("refund") },
+    ]);
+  });
+
+  it("refund with no matching subset: fails the charge", () => {
+    const items = [{ ...mkItem("A", 1000), refundedAmountCents: 1000 }];
+    const order: ScrapedOrder = {
+      ...mkOrder(items),
+      refund: { itemCents: 1000, taxCents: 0, totalCents: 1000 },
+    };
+    const refundCharge: YnabCharge = {
+      ynabTransactionId: "yt-refund",
+      date: "2026-05-31",
+      amountCents: 9999, // doesn't match anything
+      payeeName: "Amazon",
+      isRefund: true,
+    };
+    const result = distributeOrder(order, [refundCharge]);
+    expect(result.allocated).toEqual([]);
+    expect(result.failures).toHaveLength(1);
+  });
+
+  it("refund when order has no refund metadata: fails the charge", () => {
+    const items = [{ ...mkItem("A", 1000), refundedAmountCents: 0 }];
+    const order = mkOrder(items); // refund: null
+    const refundCharge: YnabCharge = {
+      ynabTransactionId: "yt-refund",
+      date: "2026-05-31",
+      amountCents: 1000,
+      payeeName: "Amazon",
+      isRefund: true,
+    };
+    const result = distributeOrder(order, [refundCharge]);
+    expect(result.allocated).toEqual([]);
+    expect(result.failures).toHaveLength(1);
+  });
+
+  it("mixed: purchase charge gets non-refunded items, refund gets refunded items", () => {
+    const items = [
+      { ...mkItem("A", 1000), refundedAmountCents: 0 }, // purchase
+      { ...mkItem("B", 2000), refundedAmountCents: 0 }, // purchase
+      { ...mkItem("C", 1500), refundedAmountCents: 1500 }, // refund target
+    ];
+    const order: ScrapedOrder = {
+      ...mkOrder(items),
+      refund: { itemCents: 1500, taxCents: 0, totalCents: 1500 },
+    };
+    const purchase: YnabCharge = {
+      ynabTransactionId: "yt-purchase",
+      date: "2026-05-31",
+      amountCents: 3000,
+      payeeName: "Amazon",
+      isRefund: false,
+    };
+    const refund: YnabCharge = {
+      ynabTransactionId: "yt-refund",
+      date: "2026-05-31",
+      amountCents: 1500,
+      payeeName: "Amazon",
+      isRefund: true,
+    };
+    const result = distributeOrder(order, [purchase, refund]);
+    expect(result.failures).toEqual([]);
+    expect(result.allocated).toHaveLength(2);
+    const byTx = new Map(result.allocated.map((a) => [a.ynabTransactionId, a]));
+    expect(byTx.get("yt-purchase")!.items.map((i) => i.productId).sort()).toEqual(["A", "B"]);
+    expect(byTx.get("yt-refund")!.items.map((i) => i.productId)).toEqual(["C"]);
+  });
+
+  it("pure-refund order with purchase charge: fails purchase with a specific reason", () => {
+    const items = [
+      { ...mkItem("A", 1000), refundedAmountCents: 1000 },
+      { ...mkItem("B", 1500), refundedAmountCents: 1500 },
+    ];
+    const order: ScrapedOrder = {
+      ...mkOrder(items),
+      refund: { itemCents: 2500, taxCents: 0, totalCents: 2500 },
+    };
+    const purchase: YnabCharge = {
+      ynabTransactionId: "yt-purchase",
+      date: "2026-05-31",
+      amountCents: 2500,
+      payeeName: "Amazon",
+      isRefund: false,
+    };
+    const result = distributeOrder(order, [purchase]);
+    expect(result.allocated).toEqual([]);
+    expect(result.failures).toHaveLength(1);
+    expect(result.failures[0].reason).toMatch(/refunded/i);
+  });
+
+  it("multiple sequential refunds: each consumes its matched items from the pool", () => {
+    const items = [
+      { ...mkItem("A", 500), refundedAmountCents: 500 },
+      { ...mkItem("B", 1500), refundedAmountCents: 1500 },
+    ];
+    const order: ScrapedOrder = {
+      ...mkOrder(items),
+      refund: { itemCents: 2000, taxCents: 0, totalCents: 2000 },
+    };
+    const refund1: YnabCharge = {
+      ynabTransactionId: "yt-r1",
+      date: "2026-05-31",
+      amountCents: 500,
+      payeeName: "Amazon",
+      isRefund: true,
+    };
+    const refund2: YnabCharge = {
+      ynabTransactionId: "yt-r2",
+      date: "2026-05-31",
+      amountCents: 1500,
+      payeeName: "Amazon",
+      isRefund: true,
+    };
+    const result = distributeOrder(order, [refund1, refund2]);
+    expect(result.failures).toEqual([]);
+    const byTx = new Map(result.allocated.map((a) => [a.ynabTransactionId, a]));
+    expect(byTx.get("yt-r1")!.items.map((i) => i.productId)).toEqual(["A"]);
+    expect(byTx.get("yt-r2")!.items.map((i) => i.productId)).toEqual(["B"]);
+  });
+});
+
+describe("matchRefundToItems", () => {
+  // Refunded items represented as (index, refundedAmountCents).
+  it("returns the unique single-item subset that matches", () => {
+    // YNAB refund $15.00, no tax; one refunded item of $15 → trivial match.
+    expect(matchRefundToItems([449, 279, 638, 1500, 739], 1500, 1.0)).toEqual([3]);
+  });
+
+  it("returns null when no subset matches", () => {
+    // Refunded items sum to $9 max but YNAB refund is $20.
+    expect(matchRefundToItems([200, 300, 400], 2000, 1.0)).toBeNull();
+  });
+
+  it("returns null when two distinct subsets both match (ambiguous)", () => {
+    // Items: 100, 100, 200; YNAB amount 200 — matches {200} OR {100, 100}.
+    expect(matchRefundToItems([100, 100, 200], 200, 1.0)).toBeNull();
+  });
+
+  it("matches a multi-item subset uniquely", () => {
+    // Items: 100, 200, 300. YNAB amount 500 → unique {200, 300}.
+    expect(matchRefundToItems([100, 200, 300], 500, 1.0)).toEqual([1, 2]);
+  });
+
+  it("applies the tax-grossed ratio when matching", () => {
+    // One refunded item of $59.95 item-only. Refund total $65.80 → ratio 65.80/59.95.
+    // YNAB refund $65.80 should match the single item.
+    const ratio = 6580 / 5995;
+    expect(matchRefundToItems([5995], 6580, ratio)).toEqual([0]);
+  });
+
+  it("matches within rounding tolerance (per-item-in-subset)", () => {
+    // Single refunded item of $5.00. ratio=1.002 → grossed = round(500 * 1.002) = 501.
+    // Charge is $5.00 → gap = 1 cent. Tolerance for a 1-item subset = 1 → match.
+    expect(matchRefundToItems([500], 500, 1.002)).toEqual([0]);
+  });
+
+  it("rejects when grossed sum exceeds tolerance from charge", () => {
+    // Single refunded item of $10.00. ratio=1.01 → grossed = 1010. Charge = $10.05.
+    // Gap = 5 cents, tolerance for a 1-item subset = 1 → no match.
+    expect(matchRefundToItems([1000], 1005, 1.01)).toBeNull();
+  });
+
+  it("returns null for an empty refunded-items pool", () => {
+    expect(matchRefundToItems([], 100, 1.0)).toBeNull();
+  });
+
+  it("ignores items with zero refundedAmountCents in subset enumeration", () => {
+    // Mixed: only indices 1 and 3 are refunded. YNAB 700 → unique {1, 3} = 200 + 500.
+    expect(matchRefundToItems([0, 200, 0, 500], 700, 1.0)).toEqual([1, 3]);
   });
 });

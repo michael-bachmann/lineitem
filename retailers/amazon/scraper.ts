@@ -18,6 +18,8 @@ export interface RawItem {
   priceCents: number;
   quantity: number;
   imageUrl: string;
+  /** Sum of refund markers on this item; 0 when not refunded. */
+  refundedAmountCents: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -163,7 +165,23 @@ function parseItemFromElement(item: Element): RawItem | null {
     }
   }
 
-  return { productId, title, priceCents, quantity, imageUrl };
+  // Shipment-level refund detection: walk up to the enclosing shipment
+  // container and look at its status header. Edge case noted on BAC-122:
+  // when only some items in a shipment are returned, Amazon's regular-order
+  // detail UI may not show per-item refund markers — this conservative
+  // "whole shipment is refunded" rule will over-mark in that case. The
+  // grocery itemmod path uses real per-item markers and is not affected.
+  let refundedAmountCents = 0;
+  const shipmentRoot = item.closest(SELECTORS.shipmentRoot);
+  if (shipmentRoot) {
+    const statusEl = shipmentRoot.querySelector(SELECTORS.shipmentStatusText);
+    const statusText = statusEl?.textContent?.trim() ?? "";
+    if (/^Refunded/i.test(statusText)) {
+      refundedAmountCents = priceCents * quantity;
+    }
+  }
+
+  return { productId, title, priceCents, quantity, imageUrl, refundedAmountCents };
 }
 
 export function parseItemsFromDocument(doc: Document): RawItem[] {
@@ -223,7 +241,21 @@ function parseItemmodElement(item: Element): RawItem | null {
   const priceCents = parseCents(lineTotalEl?.textContent ?? "0");
   if (priceCents === 0) return null;
 
-  return { productId, title, priceCents, quantity: 1, imageUrl };
+  // Per-item refund marker. Text reads e.g. " -$15.00 ". parseCents strips
+  // the sign and returns absolute cents, which is what we store.
+  const refundEl = item.querySelector(SELECTORS.itemmodItemRefundPrice);
+  const refundedAmountCents = refundEl
+    ? parseCents(refundEl.textContent ?? "0")
+    : 0;
+
+  return {
+    productId,
+    title,
+    priceCents,
+    quantity: 1,
+    imageUrl,
+    refundedAmountCents,
+  };
 }
 
 export function parseItemmodFromDocument(doc: Document): RawItem[] {
@@ -263,4 +295,51 @@ export function extractItemsSubtotal(doc: Document): number | null {
 
   const match = (row.textContent ?? "").match(DOLLAR_VALUE_REGEX);
   return match ? parseCents(match[0]) : null;
+}
+
+// ---------------------------------------------------------------------------
+// Refund summary popover
+// ---------------------------------------------------------------------------
+
+const REFUND_ITEM_REGEX = /Item\(s\)\s*refund[\s\S]*?\$([0-9,]+\.[0-9]{2})/i;
+const REFUND_TAX_REGEX = /Tax\s*refund[\s\S]*?\$([0-9,]+\.[0-9]{2})/i;
+const REFUND_TOTAL_REGEX = /Refund\s*Total[\s\S]*?\$([0-9,]+\.[0-9]{2})/i;
+
+/**
+ * Extract Amazon's refund-summary popover totals from an order detail page.
+ *
+ * Amazon emits a JSON-encoded popover via `data-a-popover` on the "Refund
+ * Total" trigger. Two field names occur in the wild: `inlineContent`
+ * (regular orders) and `content` (Whole Foods). Both wrap a small HTML
+ * fragment we regex over to pull out `Item(s) refund`, `Tax refund`
+ * (absent on grocery), and `Refund Total`.
+ *
+ * Returns null when no popover on the page mentions "Refund Total" — that's
+ * the signal that the order has no refunds.
+ */
+export function parseRefundSummary(
+  doc: Document,
+): { itemCents: number; taxCents: number; totalCents: number } | null {
+  const triggers = doc.querySelectorAll(SELECTORS.refundSummaryTrigger);
+  for (const trigger of triggers) {
+    const raw = trigger.getAttribute("data-a-popover");
+    if (!raw || !raw.includes("Refund Total")) continue;
+    let parsed: { inlineContent?: string; content?: string };
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      continue; // malformed; try next popover
+    }
+    const body = parsed.inlineContent ?? parsed.content ?? "";
+    const totalMatch = body.match(REFUND_TOTAL_REGEX);
+    if (!totalMatch) continue;
+    const itemMatch = body.match(REFUND_ITEM_REGEX);
+    const taxMatch = body.match(REFUND_TAX_REGEX);
+    return {
+      itemCents: itemMatch ? parseCents(itemMatch[1]) : 0,
+      taxCents: taxMatch ? parseCents(taxMatch[1]) : 0,
+      totalCents: parseCents(totalMatch[1]),
+    };
+  }
+  return null;
 }

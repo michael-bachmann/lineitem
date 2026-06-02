@@ -4,6 +4,7 @@ import {
   parseItemmodFromDocument,
   isGroceryOrder,
   extractItemsSubtotal,
+  parseRefundSummary,
   type RawTransaction,
   type RawItem,
 } from "@/retailers/amazon/scraper";
@@ -66,10 +67,12 @@ function scrapeTransactions(): { transactions: RawTransaction[] } | { error: str
   return { transactions: parseTransactionsFromDocument(document) };
 }
 
+type RefundSummary = { itemCents: number; taxCents: number; totalCents: number } | null;
+
 function scrapeItems():
-  | { items: RawItem[]; subtotalCents: number }
-  | { requiresItemmod: true; subtotalCents: number }
-  | { items: RawItem[] }
+  | { items: RawItem[]; subtotalCents: number; refund: RefundSummary }
+  | { requiresItemmod: true; subtotalCents: number; refund: RefundSummary }
+  | { items: RawItem[]; refund: RefundSummary }
   | { error: string }
 {
   if (AUTH_PAGE_REGEX.test(window.location.href)) {
@@ -78,7 +81,10 @@ function scrapeItems():
   // Itemmod page: items only — subtotal lives on the order summary page,
   // and was extracted on the prior SCRAPE_ITEMS request from the adapter.
   if (window.location.search.includes("page=itemmod")) {
-    return { items: parseItemmodFromDocument(document) };
+    return {
+      items: parseItemmodFromDocument(document),
+      refund: parseRefundSummary(document),
+    };
   }
   // Summary page: extract subtotal first. If we can't, the scrape isn't
   // verifiable and the adapter will surface this as a scrape error.
@@ -86,10 +92,11 @@ function scrapeItems():
   if (subtotalCents === null) {
     return { error: "missing_subtotal" };
   }
+  const refund = parseRefundSummary(document);
   if (isGroceryOrder(document)) {
-    return { requiresItemmod: true, subtotalCents };
+    return { requiresItemmod: true, subtotalCents, refund };
   }
-  return { items: parseItemsFromDocument(document), subtotalCents };
+  return { items: parseItemsFromDocument(document), subtotalCents, refund };
 }
 
 function randomDelay(min = 1000, max = 3000): Promise<void> {

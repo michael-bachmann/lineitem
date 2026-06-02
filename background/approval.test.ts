@@ -80,9 +80,9 @@ describe("buildSubtransactions", () => {
     const tx = makeTx({
       amountCents: 5000,
       items: [
-        { productId: "A", title: "Apple", imageUrl: "", unitPriceCents: 1000, quantity: 1, allocatedCents: 1000 },
-        { productId: "B", title: "Bread", imageUrl: "", unitPriceCents: 2000, quantity: 1, allocatedCents: 2000 },
-        { productId: "C", title: "Wine",  imageUrl: "", unitPriceCents: 2000, quantity: 1, allocatedCents: 2000 },
+        { productId: "A", title: "Apple", imageUrl: "", unitPriceCents: 1000, quantity: 1, refundedAmountCents: 0, allocatedCents: 1000 },
+        { productId: "B", title: "Bread", imageUrl: "", unitPriceCents: 2000, quantity: 1, refundedAmountCents: 0, allocatedCents: 2000 },
+        { productId: "C", title: "Wine",  imageUrl: "", unitPriceCents: 2000, quantity: 1, refundedAmountCents: 0, allocatedCents: 2000 },
       ],
     });
     const choices: ApprovalItem[] = [
@@ -112,7 +112,7 @@ describe("buildSubtransactions", () => {
     const tx = makeTx({
       isRefund: true,
       items: [
-        { productId: "A", title: "Apple", imageUrl: "", unitPriceCents: 500, quantity: 1, allocatedCents: 500 },
+        { productId: "A", title: "Apple", imageUrl: "", unitPriceCents: 500, quantity: 1, refundedAmountCents: 0, allocatedCents: 500 },
       ],
     });
     const result = buildSubtransactions(tx, [
@@ -130,6 +130,7 @@ describe("buildSubtransactions", () => {
       imageUrl: "",
       unitPriceCents: 100,
       quantity: 1,
+      refundedAmountCents: 0,
       allocatedCents: 100,
     }));
     const tx = makeTx({ items });
@@ -150,6 +151,7 @@ describe("buildSubtransactions", () => {
       imageUrl: "",
       unitPriceCents: 100,
       quantity: 1,
+      refundedAmountCents: 0,
       allocatedCents: 100,
     }));
     const tx = makeTx({ items });
@@ -170,8 +172,8 @@ describe("learnFromApproval writes both stores", () => {
       ynabTransactionId: "txn-1", orderKey: "amazon:O1", retailer: "amazon",
       date: "2026-05-20", amountCents: 5000, isRefund: false,
       items: [
-        { productId: "A", title: "Paper towels", imageUrl: "", unitPriceCents: 2500, quantity: 1, allocatedCents: 2500 },
-        { productId: "B", title: "Trash bags",  imageUrl: "", unitPriceCents: 2500, quantity: 1, allocatedCents: 2500 },
+        { productId: "A", title: "Paper towels", imageUrl: "", unitPriceCents: 2500, quantity: 1, refundedAmountCents: 0, allocatedCents: 2500 },
+        { productId: "B", title: "Trash bags",  imageUrl: "", unitPriceCents: 2500, quantity: 1, refundedAmountCents: 0, allocatedCents: 2500 },
       ],
     };
     allocatedStore.set("txn-1", tx);
@@ -208,7 +210,7 @@ describe("learnFromApproval writes both stores", () => {
       ynabTransactionId: "txn-2", orderKey: "amazon:O2", retailer: "amazon",
       date: "2026-05-20", amountCents: 1000, isRefund: false,
       items: [
-        { productId: "X", title: "Lightbulb", imageUrl: "", unitPriceCents: 1000, quantity: 1, allocatedCents: 1000 },
+        { productId: "X", title: "Lightbulb", imageUrl: "", unitPriceCents: 1000, quantity: 1, refundedAmountCents: 0, allocatedCents: 1000 },
       ],
     };
     allocatedStore.set("txn-2", tx);
@@ -227,7 +229,7 @@ describe("learnFromApproval writes both stores", () => {
       ynabTransactionId: "txn-3", orderKey: "amazon:O3", retailer: "amazon",
       date: "2026-05-20", amountCents: 100, isRefund: false,
       items: [
-        { productId: "Y", title: "Repeat", imageUrl: "", unitPriceCents: 100, quantity: 1, allocatedCents: 100 },
+        { productId: "Y", title: "Repeat", imageUrl: "", unitPriceCents: 100, quantity: 1, refundedAmountCents: 0, allocatedCents: 100 },
       ],
     };
     allocatedStore.set("txn-3", tx);
@@ -254,7 +256,7 @@ describe("learnFromApproval writes both stores", () => {
       ynabTransactionId: "txn-4", orderKey: "amazon:O4", retailer: "amazon",
       date: "2026-05-20", amountCents: 100, isRefund: false,
       items: [
-        { productId: "NEW", title: "New thing", imageUrl: "", unitPriceCents: 100, quantity: 1, allocatedCents: 100 },
+        { productId: "NEW", title: "New thing", imageUrl: "", unitPriceCents: 100, quantity: 1, refundedAmountCents: 0, allocatedCents: 100 },
       ],
     };
     allocatedStore.set("txn-4", tx);

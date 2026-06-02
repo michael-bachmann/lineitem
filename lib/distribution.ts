@@ -1,9 +1,10 @@
-import { sum } from "remeda";
+import { partition, sum } from "remeda";
 import type {
+  AllocatedItem,
+  AllocatedTransaction,
+  ScrapedItem,
   ScrapedOrder,
   YnabCharge,
-  AllocatedTransaction,
-  AllocatedItem,
 } from "./types";
 
 /**
@@ -171,62 +172,324 @@ function enumerateSubsets(
 }
 
 /**
- * The full distribution algorithm: take a scraped order and its YNAB
- * charges, return one AllocatedTransaction per charge with items
- * partitioned across charges and per-item allocated amounts that sum
- * exactly to each charge's amountCents.
+ * Tolerance per item for refund subset matching. Per-item refund amounts
+ * are integer cents; the tax-grossed ratio introduces sub-cent rounding.
+ * We allow ±1 cent per item summed.
+ */
+const REFUND_MATCH_TOLERANCE_CENTS_PER_ITEM = 1;
+
+/**
+ * Find the unique subset of refunded items whose grossed-up amounts match
+ * the YNAB refund charge.
  *
- * Returns an empty array if the partition cannot be computed (no items,
- * M > n, or n exceeds the cap). Callers should treat that as an error
- * for the affected charges.
+ * `refundedAmounts[i]` is the per-item refund in cents (0 means "not
+ * refunded"; such indices never appear in any returned subset). `ratio`
+ * is `refund.totalCents / refund.itemCents` from the order's popover,
+ * which grosses item-only refund amounts up to include tax. Use 1.0 when
+ * there is no tax line.
+ *
+ * Returns the matching subset (as item indices in ascending order) when
+ * exactly one subset matches the charge amount within tolerance. Returns
+ * null when no subset matches, more than one matches, or the pool is
+ * empty. The DFS short-circuits as soon as two matches are seen — we only
+ * need to distinguish "exactly one" from "zero or many". Capped at
+ * MAX_ITEMS = 20.
+ */
+export function matchRefundToItems(
+  refundedAmounts: number[],
+  chargeAmountCents: number,
+  ratio: number,
+): number[] | null {
+  const eligible = refundedAmounts.flatMap((amt, i) => (amt > 0 ? [i] : []));
+  if (eligible.length === 0 || eligible.length > MAX_ITEMS) return null;
+
+  const matches = findMatchingSubsets(
+    eligible,
+    refundedAmounts,
+    chargeAmountCents,
+    ratio,
+  );
+  return matches.length === 1 ? matches[0] : null;
+}
+
+/**
+ * Pure recursive DFS returning up to two matching subsets. Two is the cap
+ * because callers only need uniqueness — anything past one rules out a
+ * unique match. Each recursion returns its own results; nothing mutates a
+ * shared accumulator.
+ */
+function findMatchingSubsets(
+  eligible: readonly number[],
+  refundedAmounts: readonly number[],
+  chargeAmountCents: number,
+  ratio: number,
+): number[][] {
+  function recurse(i: number, current: number[], currentSum: number): number[][] {
+    if (i === eligible.length) {
+      if (current.length === 0) return [];
+      const grossed = Math.round(currentSum * ratio);
+      const tolerance = REFUND_MATCH_TOLERANCE_CENTS_PER_ITEM * current.length;
+      return Math.abs(grossed - chargeAmountCents) <= tolerance ? [current] : [];
+    }
+    const idx = eligible[i];
+    const include = recurse(i + 1, [...current, idx], currentSum + refundedAmounts[idx]);
+    if (include.length >= 2) return include.slice(0, 2);
+    const exclude = recurse(i + 1, current, currentSum);
+    return [...include, ...exclude].slice(0, 2);
+  }
+  return recurse(0, [], 0);
+}
+
+/**
+ * Per-charge outcomes from `distributeOrder`. Either the charge was
+ * allocated (entry in `allocated`) or it failed for a specific reason
+ * (entry in `failures`). A charge appears in exactly one list.
+ */
+export interface DistributionResult {
+  allocated: AllocatedTransaction[];
+  failures: { ynabTransactionId: string; reason: string }[];
+}
+
+/**
+ * Take a scraped order and its YNAB charges, return per-charge outcomes.
+ *
+ * The dispatch splits charges by sign:
+ *  - Purchase charges (isRefund=false) run through `assignItemsToCharges`
+ *    against the order's non-refunded items, exactly as before.
+ *  - Refund charges (isRefund=true) run through `matchRefundToItems`
+ *    against the refunded items pool, with the order's popover ratio.
+ *    Each refund consumes its matched items so a later refund can't
+ *    re-use them.
+ *
+ * A refund that can't be matched cleanly never falls back to "all items
+ * on the refund" — it returns a per-charge failure so the user sees the
+ * ambiguity rather than wrong attribution.
  */
 export function distributeOrder(
   order: ScrapedOrder,
   charges: YnabCharge[],
-): AllocatedTransaction[] {
-  if (order.items.length === 0) return [];
+): DistributionResult {
+  if (order.items.length === 0) {
+    return {
+      allocated: [],
+      failures: charges.map((c) => ({
+        ynabTransactionId: c.ynabTransactionId,
+        reason: "Order has no scraped items",
+      })),
+    };
+  }
 
-  const itemSubtotals = order.items.map((item) => item.unitPriceCents * item.quantity);
-  const chargeAmounts = charges.map((c) => c.amountCents);
-  const orderTotal = sum(chargeAmounts);
-  const itemsSubtotal = sum(itemSubtotals);
+  const [refundCharges, purchaseCharges] = partition(charges, (c) => c.isRefund);
 
-  const partition = assignItemsToCharges(
-    itemSubtotals,
-    chargeAmounts,
-    orderTotal,
-    itemsSubtotal,
+  const refundedAmounts = order.items.map((it) => it.refundedAmountCents);
+  const ratio =
+    order.refund && order.refund.itemCents > 0
+      ? order.refund.totalCents / order.refund.itemCents
+      : 1;
+
+  const outcomes = [
+    ...allocateRefundCharges(refundCharges, order, refundedAmounts, ratio),
+    ...allocatePurchaseCharges(purchaseCharges, order),
+  ];
+
+  return collectOutcomes(outcomes);
+}
+
+// ---------------------------------------------------------------------------
+// Per-charge outcomes — internal helpers
+// ---------------------------------------------------------------------------
+
+type ChargeOutcome =
+  | { kind: "allocated"; tx: AllocatedTransaction }
+  | { kind: "failure"; ynabTransactionId: string; reason: string };
+
+const allocated = (tx: AllocatedTransaction): ChargeOutcome => ({
+  kind: "allocated",
+  tx,
+});
+
+const failed = (charge: YnabCharge, reason: string): ChargeOutcome => ({
+  kind: "failure",
+  ynabTransactionId: charge.ynabTransactionId,
+  reason,
+});
+
+function collectOutcomes(outcomes: ChargeOutcome[]): DistributionResult {
+  return {
+    allocated: outcomes.flatMap((o) => (o.kind === "allocated" ? [o.tx] : [])),
+    failures: outcomes.flatMap((o) =>
+      o.kind === "failure"
+        ? [{ ynabTransactionId: o.ynabTransactionId, reason: o.reason }]
+        : [],
+    ),
+  };
+}
+
+function buildAllocatedTx(
+  order: ScrapedOrder,
+  charge: YnabCharge,
+  items: AllocatedItem[],
+): AllocatedTransaction {
+  return {
+    ynabTransactionId: charge.ynabTransactionId,
+    orderKey: `${order.retailer}:${order.orderId}`,
+    retailer: order.retailer,
+    date: charge.date,
+    amountCents: charge.amountCents,
+    isRefund: charge.isRefund,
+    items,
+  };
+}
+
+function allocateItems(
+  items: ScrapedItem[],
+  subtotals: number[],
+  total: number,
+): AllocatedItem[] {
+  const amounts = allocateProportional(subtotals, total);
+  return items.map((item, i) => ({ ...item, allocatedCents: amounts[i] }));
+}
+
+// ---------------------------------------------------------------------------
+// Refund path
+// ---------------------------------------------------------------------------
+
+/**
+ * Reduce over refund charges with a running set of consumed item indices.
+ * Each successful match adds its indices to the set so the next charge
+ * can't reuse them. The accumulator is rebuilt immutably each step.
+ */
+function allocateRefundCharges(
+  charges: YnabCharge[],
+  order: ScrapedOrder,
+  refundedAmounts: number[],
+  ratio: number,
+): ChargeOutcome[] {
+  type Step = { outcomes: ChargeOutcome[]; consumed: ReadonlySet<number> };
+  const initial: Step = { outcomes: [], consumed: new Set() };
+  return charges.reduce<Step>((acc, charge) => {
+    const { outcome, newlyConsumed } = matchOneRefund(
+      charge,
+      order,
+      refundedAmounts,
+      acc.consumed,
+      ratio,
+    );
+    const consumed =
+      newlyConsumed.length === 0
+        ? acc.consumed
+        : new Set([...acc.consumed, ...newlyConsumed]);
+    return { outcomes: [...acc.outcomes, outcome], consumed };
+  }, initial).outcomes;
+}
+
+function matchOneRefund(
+  charge: YnabCharge,
+  order: ScrapedOrder,
+  refundedAmounts: number[],
+  alreadyConsumed: ReadonlySet<number>,
+  ratio: number,
+): { outcome: ChargeOutcome; newlyConsumed: readonly number[] } {
+  if (!order.refund) {
+    return {
+      outcome: failed(
+        charge,
+        "Couldn't match refund to specific items (order has no refund data)",
+      ),
+      newlyConsumed: [],
+    };
+  }
+
+  // Mask consumed items as 0 — matchRefundToItems already ignores zeros.
+  const available = refundedAmounts.map((amt, i) =>
+    alreadyConsumed.has(i) ? 0 : amt,
   );
-  if (partition === null) return [];
+  const subset = matchRefundToItems(available, charge.amountCents, ratio);
+  if (subset === null) {
+    return {
+      outcome: failed(charge, "Couldn't unambiguously match refund to specific items"),
+      newlyConsumed: [],
+    };
+  }
 
-  // Log per-charge distance for debugging — not persisted.
-  const totalDist = sum(partition.distanceCentsPerCharge);
-  if (totalDist > 0) {
-    console.debug(
-      `[distributeOrder] order=${order.orderId} total_distance_cents=${totalDist} ` +
-        `per_charge=${partition.distanceCentsPerCharge.join(",")}`,
+  const matchedItems = subset.map((i) => order.items[i]);
+  const matchedSubtotals = subset.map((i) => refundedAmounts[i]);
+  const items = allocateItems(matchedItems, matchedSubtotals, charge.amountCents);
+  return {
+    outcome: allocated(buildAllocatedTx(order, charge, items)),
+    newlyConsumed: subset,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Purchase path
+// ---------------------------------------------------------------------------
+
+/**
+ * Partition non-refunded items across purchase charges, then map each
+ * charge to its allocation. No state carried between charges — once the
+ * partition is computed, the per-charge step is pure.
+ */
+function allocatePurchaseCharges(
+  charges: YnabCharge[],
+  order: ScrapedOrder,
+): ChargeOutcome[] {
+  if (charges.length === 0) return [];
+
+  const nonRefundedItems = order.items.filter(
+    (it) => it.refundedAmountCents === 0,
+  );
+
+  // All items refunded — can happen with split tx where everything came back.
+  // assignItemsToCharges would also fail here, but with a confusing reason.
+  if (nonRefundedItems.length === 0) {
+    return charges.map((c) =>
+      failed(
+        c,
+        "All items in this order have been refunded — purchase charge has nothing to allocate to.",
+      ),
     );
   }
 
+  const itemSubtotals = nonRefundedItems.map(
+    (it) => it.unitPriceCents * it.quantity,
+  );
+  const chargeAmounts = charges.map((c) => c.amountCents);
+  const assignment = assignItemsToCharges(
+    itemSubtotals,
+    chargeAmounts,
+    sum(chargeAmounts),
+    sum(itemSubtotals),
+  );
+
+  if (assignment === null) {
+    return charges.map((c) =>
+      failed(
+        c,
+        "Could not partition items across purchase charges (too many items or charges > items)",
+      ),
+    );
+  }
+
+  logAssignmentDistance(order, assignment);
+
   return charges.map((charge, chargeIdx) => {
-    const itemIndices = partition.indicesPerCharge[chargeIdx];
-    const subsetItems = itemIndices.map((i) => order.items[i]);
-    const subsetSubtotals = itemIndices.map((i) => itemSubtotals[i]);
-    const allocatedAmounts = allocateProportional(subsetSubtotals, charge.amountCents);
-
-    const items: AllocatedItem[] = subsetItems.map((item, i) => ({
-      ...item,
-      allocatedCents: allocatedAmounts[i],
-    }));
-
-    return {
-      ynabTransactionId: charge.ynabTransactionId,
-      orderKey: `${order.retailer}:${order.orderId}`,
-      retailer: order.retailer,
-      date: charge.date,
-      amountCents: charge.amountCents,
-      isRefund: charge.isRefund,
-      items,
-    };
+    const localIndices = assignment.indicesPerCharge[chargeIdx];
+    const subsetItems = localIndices.map((i) => nonRefundedItems[i]);
+    const subsetSubtotals = localIndices.map((i) => itemSubtotals[i]);
+    const items = allocateItems(subsetItems, subsetSubtotals, charge.amountCents);
+    return allocated(buildAllocatedTx(order, charge, items));
   });
+}
+
+function logAssignmentDistance(
+  order: ScrapedOrder,
+  assignment: { distanceCentsPerCharge: number[] },
+): void {
+  const totalDist = sum(assignment.distanceCentsPerCharge);
+  if (totalDist === 0) return;
+  console.debug(
+    `[distributeOrder] order=${order.orderId} total_distance_cents=${totalDist} ` +
+      `per_charge=${assignment.distanceCentsPerCharge.join(",")}`,
+  );
 }

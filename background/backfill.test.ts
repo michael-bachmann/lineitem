@@ -64,10 +64,11 @@ function order(overrides: Partial<ScrapedOrder> = {}): ScrapedOrder {
     retailer: "amazon",
     orderId: "111-2222222-3333333",
     items: [
-      { productId: "A1", title: "Paper towels", imageUrl: "", unitPriceCents: 500, quantity: 1 },
-      { productId: "A2", title: "Trash bags", imageUrl: "", unitPriceCents: 500, quantity: 1 },
+      { productId: "A1", title: "Paper towels", imageUrl: "", unitPriceCents: 500, quantity: 1, refundedAmountCents: 0 },
+      { productId: "A2", title: "Trash bags", imageUrl: "", unitPriceCents: 500, quantity: 1, refundedAmountCents: 0 },
     ],
     displayedItemsSubtotalCents: 1000,
+    refund: null,
     ...overrides,
   };
 }
@@ -100,14 +101,17 @@ beforeEach(() => {
   // Defaults: verify passes, distribute echoes one allocation per charge.
   verifyScrapeMock.mockReturnValue({ ok: true });
   distributeOrderMock.mockImplementation(
-    (order: import("@/lib/types").ScrapedOrder, charges: YnabCharge[]) =>
-      charges.map((c) =>
+    (order: import("@/lib/types").ScrapedOrder, charges: YnabCharge[]) => ({
+      allocated: charges.map((c) =>
         allocatedTx({
           ynabTransactionId: c.ynabTransactionId,
           orderKey: `${order.retailer}:${order.orderId}`,
           amountCents: c.amountCents,
+          items: order.items.map((it) => ({ ...it, allocatedCents: 0 })),
         }),
       ),
+      failures: [],
+    }),
   );
   // Default: every Amazon-looking payee maps to amazon/scrape.
   getRetailerForPayeeMock.mockImplementation((payee: string) =>

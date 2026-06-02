@@ -229,6 +229,17 @@ export interface ScrapedOrder {
    * rather than fabricate a value.
    */
   displayedItemsSubtotalCents: number;
+  /**
+   * Order-level refund totals from Amazon's "Refund Total" popover.
+   * Null when the order has no refunds. `itemCents` is the item-only
+   * portion (sum of per-item refund markers); `taxCents` is the tax
+   * portion (0 on grocery orders); `totalCents` = itemCents + taxCents
+   * and is what posts as YNAB refund transaction(s) for this order.
+   *
+   * Distribution uses `totalCents / itemCents` as the tax-grossed
+   * ratio when matching YNAB refund amounts back to per-item markers.
+   */
+  refund: { itemCents: number; taxCents: number; totalCents: number } | null;
 }
 
 /** A line item as scraped — raw per-unit price, no allocation yet. */
@@ -240,6 +251,11 @@ export interface ScrapedItem {
   /** Raw per-unit price in cents. */
   unitPriceCents: number;
   quantity: number;
+  /** Sum of refund markers in cents for this item across the order; 0 when
+   *  not refunded. Same currency as unitPriceCents. For grocery, comes from
+   *  the per-item `ufpo-item-status-price` span. For regular Amazon, comes
+   *  from a shipment-level "Refunded" status (full line total). */
+  refundedAmountCents: number;
 }
 
 /** A persisted transaction with per-item allocated amounts. */
