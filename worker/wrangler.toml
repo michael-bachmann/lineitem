@@ -2,6 +2,11 @@ name = "lineitem-oauth"
 main = "src/index.ts"
 compatibility_date = "2026-06-01"
 
+# Only serve on the custom domain (auth.lineitem.dev). Without these, deploy
+# re-enables the workers.dev URL and per-deploy preview URLs by default.
+workers_dev = false
+preview_urls = false
+
 # Secrets set via `wrangler secret put YNAB_CLIENT_ID` / `YNAB_CLIENT_SECRET`
 # Do NOT add them as plaintext vars here.
 
