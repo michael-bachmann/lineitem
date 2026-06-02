@@ -4,3 +4,15 @@ compatibility_date = "2026-06-01"
 
 # Secrets set via `wrangler secret put YNAB_CLIENT_ID` / `YNAB_CLIENT_SECRET`
 # Do NOT add them as plaintext vars here.
+
+# Per-IP rate limit on the /oauth/* endpoints. `period` must be 10 or 60 (seconds).
+# 20 requests / 60s per IP is generous for real use (one exchange at connect,
+# a refresh every ~2h) while capping abuse. namespace_id is an arbitrary id
+# unique to this limiter within the account.
+[[ratelimits]]
+name = "RATE_LIMITER"
+namespace_id = "1001"
+
+  [ratelimits.simple]
+  limit = 20
+  period = 60
