@@ -93,7 +93,7 @@ function allocatedTx(
 }
 
 beforeEach(() => {
-  getSettingsMock.mockResolvedValue({ ynabToken: "tok", planId: "plan" });
+  getSettingsMock.mockResolvedValue({ accessToken: "tok", planId: "plan" });
   getAllocatedTransactionMock.mockResolvedValue(undefined);
   putAllocatedTransactionsMock.mockClear();
   getTransactionsSinceMock.mockReset();
@@ -354,7 +354,7 @@ describe("runBackfill — failure handling", () => {
   });
 
   it("throws if YNAB credentials are missing", async () => {
-    getSettingsMock.mockResolvedValueOnce({ ynabToken: null, planId: null });
+    getSettingsMock.mockResolvedValueOnce({ accessToken: null, planId: null });
     await expect(runBackfill({ fromDate: "2025-01-01" })).rejects.toThrow("Not connected to YNAB");
   });
 });

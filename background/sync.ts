@@ -31,12 +31,12 @@ export async function performSync(): Promise<{ queue: QueueEntry[] } | { error: 
 async function performSyncInner(): Promise<{ queue: QueueEntry[] } | { error: string }> {
   try {
     const settings = await getSettings();
-    if (!settings.ynabToken || !settings.planId) {
+    if (!settings.accessToken || !settings.planId) {
       return { error: "Not connected to YNAB" };
     }
 
     // 1. IDENTIFY: fetch YNAB charges, group by retailer
-    const ynabTxs = await getUnapprovedTransactions(settings.ynabToken, settings.planId);
+    const ynabTxs = await getUnapprovedTransactions(settings.accessToken, settings.planId);
 
     const taggedCharges = ynabTxs
       .filter((tx) => tx.payee_name !== null)

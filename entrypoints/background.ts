@@ -1,4 +1,4 @@
-import { getSettings, saveSettings, clearSettings } from "@/lib/settings";
+import { getSettings, clearSettings } from "@/lib/settings";
 import { getPlans, getCategories } from "@/lib/ynab";
 import { putCategories, getAllCategories } from "@/lib/db";
 import { performSync } from "@/background/sync";
@@ -53,28 +53,16 @@ async function handleMessage(message: MessageRequest): Promise<unknown> {
       }
     }
 
-    case "SAVE_SETTINGS": {
-      try {
-        await saveSettings({
-          ynabToken: message.token,
-          planId: message.planId,
-          planName: message.planName,
-        });
-        const categories = await getCategories(message.token, message.planId);
-        await putCategories(categories);
-        return { ok: true };
-      } catch (e) {
-        return { error: e instanceof Error ? e.message : "Failed to save settings" };
-      }
-    }
+    case "SAVE_SETTINGS":
+      return { error: "Use START_OAUTH to connect — PAT setup is no longer supported" };
 
     case "REFRESH_CATEGORIES": {
       try {
         const settings = await getSettings();
-        if (!settings.ynabToken || !settings.planId) {
+        if (!settings.accessToken || !settings.planId) {
           return { error: "Not connected to YNAB" };
         }
-        const categories = await getCategories(settings.ynabToken, settings.planId);
+        const categories = await getCategories(settings.accessToken, settings.planId);
         await putCategories(categories);
         return { ok: true };
       } catch (e) {
