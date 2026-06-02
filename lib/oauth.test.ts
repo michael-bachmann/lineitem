@@ -75,3 +75,46 @@ describe("getValidAccessToken", () => {
     await expect(getValidAccessToken()).rejects.toBeInstanceOf(NeedsReauthError);
   });
 });
+
+describe("exchangeCodeForTokens", () => {
+  it("POSTs code + redirect_uri to the Worker and persists returned tokens", async () => {
+    fetchSpy.mockResolvedValue(
+      new Response(JSON.stringify({
+        access_token: "at",
+        refresh_token: "rt",
+        token_type: "Bearer",
+        expires_in: 7200,
+      }), { status: 200 }),
+    );
+
+    const { exchangeCodeForTokens } = await import("./oauth");
+    const before = Date.now();
+    await exchangeCodeForTokens("CODE", "https://ext.example/");
+    const after = Date.now();
+
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    const [url, init] = fetchSpy.mock.calls[0];
+    expect(String(url)).toContain("/oauth/exchange");
+    expect(JSON.parse(init!.body as string)).toEqual({
+      code: "CODE",
+      redirect_uri: "https://ext.example/",
+    });
+
+    expect(saveSettingsMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        accessToken: "at",
+        refreshToken: "rt",
+        accessTokenExpiresAt: expect.any(Number),
+      }),
+    );
+    const { accessTokenExpiresAt } = saveSettingsMock.mock.calls[0][0];
+    expect(accessTokenExpiresAt).toBeGreaterThanOrEqual(before + 7200_000);
+    expect(accessTokenExpiresAt).toBeLessThanOrEqual(after + 7200_000);
+  });
+
+  it("throws on 4xx", async () => {
+    fetchSpy.mockResolvedValue(new Response('{"error":"invalid_grant"}', { status: 400 }));
+    const { exchangeCodeForTokens } = await import("./oauth");
+    await expect(exchangeCodeForTokens("bad", "https://ext/")).rejects.toThrow();
+  });
+});

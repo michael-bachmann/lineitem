@@ -51,3 +51,21 @@ export async function getValidAccessToken(): Promise<string> {
   });
   return tokens.access_token;
 }
+
+export async function exchangeCodeForTokens(code: string, redirectUri: string): Promise<void> {
+  const body: OAuthExchangeRequest = { code, redirect_uri: redirectUri };
+  const r = await fetch(`${WORKER_URL}/oauth/exchange`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) {
+    throw new Error(`OAuth exchange failed: ${r.status} ${await r.text()}`);
+  }
+  const tokens = (await r.json()) as OAuthTokenResponse;
+  await saveSettings({
+    accessToken: tokens.access_token,
+    refreshToken: tokens.refresh_token,
+    accessTokenExpiresAt: Date.now() + tokens.expires_in * 1000,
+  });
+}
