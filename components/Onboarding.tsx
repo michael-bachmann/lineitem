@@ -30,6 +30,15 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
       setPhase("connect");
       return;
     }
+
+    // YNAB's "default plan selection" scopes the token to the plan the user
+    // picked at consent — so /plans returns just that one. Skip the picker
+    // when there's nothing to pick from. Fall back to the picker for the
+    // rare 0-plan and multi-plan cases.
+    if (plansResp.plans.length === 1) {
+      await handleSelectPlan(plansResp.plans[0]);
+      return;
+    }
     setPlans(plansResp.plans);
     setPhase("selecting_plan");
   }
