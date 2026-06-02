@@ -1,0 +1,6 @@
+name = "lineitem-oauth"
+main = "src/index.ts"
+compatibility_date = "2026-06-01"
+
+# Secrets set via `wrangler secret put YNAB_CLIENT_ID` / `YNAB_CLIENT_SECRET`
+# Do NOT add them as plaintext vars here.

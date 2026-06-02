@@ -24,7 +24,7 @@ export default function App() {
     browser.runtime
       .sendMessage({ type: "GET_SETTINGS" })
       .then((response) => {
-        if (response.ynabToken && response.planId) {
+        if (response.accessToken && response.planId) {
           setPlanName(response.planName ?? "");
           setView("queue");
         } else {

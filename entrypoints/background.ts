@@ -1,4 +1,5 @@
 import { getSettings, saveSettings, clearSettings } from "@/lib/settings";
+import { runOAuthFlow } from "@/lib/oauth";
 import { getPlans, getCategories } from "@/lib/ynab";
 import { putCategories, getAllCategories } from "@/lib/db";
 import { performSync } from "@/background/sync";
@@ -46,35 +47,40 @@ async function handleMessage(message: MessageRequest): Promise<unknown> {
 
     case "GET_PLANS": {
       try {
-        const plans = await getPlans(message.token);
+        const plans = await getPlans();
         return { plans };
       } catch (e) {
         return { error: e instanceof Error ? e.message : "Failed to fetch plans" };
       }
     }
 
-    case "SAVE_SETTINGS": {
+    case "START_OAUTH": {
       try {
-        await saveSettings({
-          ynabToken: message.token,
-          planId: message.planId,
-          planName: message.planName,
-        });
-        const categories = await getCategories(message.token, message.planId);
+        await runOAuthFlow();
+        return { ok: true };
+      } catch (e) {
+        return { error: e instanceof Error ? e.message : "OAuth failed" };
+      }
+    }
+
+    case "SAVE_PLAN": {
+      try {
+        await saveSettings({ planId: message.planId, planName: message.planName });
+        const categories = await getCategories(message.planId);
         await putCategories(categories);
         return { ok: true };
       } catch (e) {
-        return { error: e instanceof Error ? e.message : "Failed to save settings" };
+        return { error: e instanceof Error ? e.message : "Failed to save plan" };
       }
     }
 
     case "REFRESH_CATEGORIES": {
       try {
         const settings = await getSettings();
-        if (!settings.ynabToken || !settings.planId) {
+        if (!settings.accessToken || !settings.planId) {
           return { error: "Not connected to YNAB" };
         }
-        const categories = await getCategories(settings.ynabToken, settings.planId);
+        const categories = await getCategories(settings.planId);
         await putCategories(categories);
         return { ok: true };
       } catch (e) {

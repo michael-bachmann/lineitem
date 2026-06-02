@@ -8,6 +8,7 @@ export default defineConfig({
       "lib/**/*.test.ts",
       "retailers/**/*.test.ts",
       "background/**/*.test.ts",
+      "worker/**/*.test.ts",
     ],
   },
   resolve: {

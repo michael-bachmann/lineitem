@@ -26,7 +26,7 @@ vi.mock("@/lib/ynab", () => ({
 // Mock settings to bypass the "Not connected" guard:
 vi.mock("@/lib/settings", () => ({
   getSettings: vi.fn(async () => ({
-    ynabToken: "fake-token",
+    accessToken: "fake-token",
     planId: "fake-plan",
     planName: null,
   })),

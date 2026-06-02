@@ -59,11 +59,11 @@ export async function runBackfill(options: BackfillOptions): Promise<BackfillRes
   const { fromDate, signal, onProgress } = options;
 
   const settings = await getSettings();
-  if (!settings.ynabToken || !settings.planId) throw new Error("Not connected to YNAB");
+  if (!settings.accessToken || !settings.planId) throw new Error("Not connected to YNAB");
 
   signal?.throwIfAborted();
   onProgress?.({ status: "preparing" });
-  const allTxs = await getTransactionsSince(settings.ynabToken, settings.planId, fromDate);
+  const allTxs = await getTransactionsSince(settings.planId, fromDate);
 
   const assessment = await assessCandidates(allTxs);
   const byRetailer = groupBy(assessment.pending, (e) => e.retailer);
