@@ -65,7 +65,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
 
   return (
     <div className="min-h-screen bg-gray-950 text-gray-100 p-4">
-      <h1 className="text-lg font-semibold">Itemize</h1>
+      <h1 className="text-lg font-semibold">lineitem</h1>
       <p className="text-sm text-gray-400 mt-4">
         Connect your YNAB account to get started.
       </p>

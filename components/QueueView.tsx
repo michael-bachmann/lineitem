@@ -32,7 +32,7 @@ export default function QueueView({
     <div className="min-h-screen bg-gray-950 text-gray-100 p-4">
       {/* Header row */}
       <div className="flex items-center justify-between">
-        <h1 className="text-lg font-semibold">Itemize</h1>
+        <h1 className="text-lg font-semibold">lineitem</h1>
         <div className="flex items-center gap-2">
           <button
             onClick={onSettings}

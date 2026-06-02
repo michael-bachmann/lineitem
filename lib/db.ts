@@ -5,7 +5,7 @@ import type {
   ProductEmbedding,
 } from "./types";
 
-const DB_NAME = "itemize";
+const DB_NAME = "lineitem";
 const DB_VERSION = 1;
 
 let dbPromise: Promise<IDBDatabase> | null = null;

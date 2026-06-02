@@ -1,5 +1,5 @@
 {
-  "name": "itemize",
+  "name": "lineitem",
   "description": "Match YNAB transactions to Amazon orders and categorize line items",
   "private": true,
   "version": "0.0.0",
