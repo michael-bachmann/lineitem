@@ -26,8 +26,7 @@ web-ext.config.ts
 *.sw?
 .superpowers/
 
-# Per-feature design + planning docs that we keep locally only (in-flight
-# session artifacts — committed feature docs live alongside without matching
-# this pattern).
-docs/superpowers/specs/2026-05-26-embedding-classification-design.md
-docs/superpowers/plans/2026-05-27-embedding-classification.md
+# Per-feature design + planning docs kept locally only (in-flight session
+# artifacts; not committed). README documents anything that needs to be
+# accessible to future-self / collaborators.
+docs/superpowers/
