@@ -1,16 +1,14 @@
 import { useState } from "react";
 import { browser } from "wxt/browser";
-import type { YnabPlan } from "@/lib/ynab";
 
 interface OnboardingProps {
   onComplete: (planName: string) => void;
 }
 
-type Phase = "connect" | "connecting" | "selecting_plan" | "saving";
+type Phase = "connect" | "connecting" | "saving";
 
 export default function Onboarding({ onComplete }: OnboardingProps) {
   const [phase, setPhase] = useState<Phase>("connect");
-  const [plans, setPlans] = useState<YnabPlan[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   async function handleConnect() {
@@ -32,28 +30,25 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
     }
 
     // YNAB's "default plan selection" scopes the token to the plan the user
-    // picked at consent — so /plans returns just that one. Skip the picker
-    // when there's nothing to pick from. Fall back to the picker for the
-    // rare 0-plan and multi-plan cases.
-    if (plansResp.plans.length === 1) {
-      await handleSelectPlan(plansResp.plans[0]);
+    // picked at consent, so /plans returns that one plan. We don't surface
+    // multi-plan UX — if a user wanted a different plan they'd disconnect
+    // and reconnect, picking it at consent instead.
+    const plan = plansResp.plans[0];
+    if (!plan) {
+      setError("No plans found in your YNAB account. Create one in YNAB, then reconnect.");
+      setPhase("connect");
       return;
     }
-    setPlans(plansResp.plans);
-    setPhase("selecting_plan");
-  }
 
-  async function handleSelectPlan(plan: YnabPlan) {
-    setError(null);
     setPhase("saving");
-    const resp = await browser.runtime.sendMessage({
+    const saveResp = await browser.runtime.sendMessage({
       type: "SAVE_PLAN",
       planId: plan.id,
       planName: plan.name,
     });
-    if (resp?.error) {
-      setError(resp.error);
-      setPhase("selecting_plan");
+    if (saveResp?.error) {
+      setError(saveResp.error);
+      setPhase("connect");
       return;
     }
     onComplete(plan.name);
@@ -80,26 +75,8 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
         <p className="mt-6 text-sm text-gray-400">Waiting for YNAB authorization…</p>
       )}
 
-      {phase === "selecting_plan" && plans && (
-        <div className="mt-6 space-y-2">
-          <p className="text-sm font-medium text-gray-300">Select a plan:</p>
-          {plans.length === 0 && (
-            <p className="text-sm text-gray-400">No plans found. Create a plan in YNAB first.</p>
-          )}
-          {plans.map((plan) => (
-            <button
-              key={plan.id}
-              onClick={() => handleSelectPlan(plan)}
-              className="w-full rounded-md border border-gray-700 bg-gray-900 px-4 py-3 text-left text-sm text-gray-100 hover:bg-gray-800 hover:border-gray-600"
-            >
-              {plan.name}
-            </button>
-          ))}
-        </div>
-      )}
-
       {phase === "saving" && (
-        <p className="mt-6 text-sm text-gray-400">Saving…</p>
+        <p className="mt-6 text-sm text-gray-400">Setting up…</p>
       )}
 
       {error && <p className="mt-4 text-sm text-red-400">{error}</p>}
