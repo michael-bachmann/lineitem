@@ -69,3 +69,41 @@ export async function exchangeCodeForTokens(code: string, redirectUri: string): 
     accessTokenExpiresAt: Date.now() + tokens.expires_in * 1000,
   });
 }
+
+/** Build the YNAB authorize URL for Authorization Code Grant. */
+export function buildAuthorizeUrl(): string {
+  const redirectUri = browser.identity.getRedirectURL();
+  const params = new URLSearchParams({
+    client_id: YNAB_CLIENT_ID,
+    redirect_uri: redirectUri,
+    response_type: "code",
+  });
+  return `${YNAB_AUTHORIZE_URL}?${params}`;
+}
+
+/** Parse the `code` query parameter from a redirect URL like
+ *  `https://<id>.chromiumapp.org/?code=ABC`. */
+export function parseCodeFromRedirect(redirectUrl: string): string {
+  const code = new URL(redirectUrl).searchParams.get("code");
+  if (!code) throw new Error(`No code in redirect: ${redirectUrl}`);
+  return code;
+}
+
+/** Run the full OAuth consent flow: launch the consent popup, wait for the
+ *  redirect, exchange the code for tokens, persist them. Throws if the user
+ *  cancels the popup or the exchange fails. */
+export async function runOAuthFlow(): Promise<void> {
+  const authorizeUrl = buildAuthorizeUrl();
+  const redirectUri = browser.identity.getRedirectURL();
+
+  // `interactive: true` shows the consent popup; required for the first
+  // grant. Resolves with the final redirect URL or undefined on user cancel.
+  const resultUrl = await browser.identity.launchWebAuthFlow({
+    url: authorizeUrl,
+    interactive: true,
+  });
+  if (!resultUrl) throw new Error("Sign-in cancelled");
+
+  const code = parseCodeFromRedirect(resultUrl);
+  await exchangeCodeForTokens(code, redirectUri);
+}

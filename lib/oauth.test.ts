@@ -118,3 +118,16 @@ describe("exchangeCodeForTokens", () => {
     await expect(exchangeCodeForTokens("bad", "https://ext/")).rejects.toThrow();
   });
 });
+
+describe("parseCodeFromRedirect", () => {
+  it("extracts the code query parameter", async () => {
+    const { parseCodeFromRedirect } = await import("./oauth");
+    expect(parseCodeFromRedirect("https://abc.chromiumapp.org/?code=XYZ")).toBe("XYZ");
+  });
+
+  it("throws when code is missing", async () => {
+    const { parseCodeFromRedirect } = await import("./oauth");
+    expect(() => parseCodeFromRedirect("https://abc.chromiumapp.org/?error=denied"))
+      .toThrow(/No code/);
+  });
+});
