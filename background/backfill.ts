@@ -63,7 +63,7 @@ export async function runBackfill(options: BackfillOptions): Promise<BackfillRes
 
   signal?.throwIfAborted();
   onProgress?.({ status: "preparing" });
-  const allTxs = await getTransactionsSince(settings.accessToken, settings.planId, fromDate);
+  const allTxs = await getTransactionsSince(settings.planId, fromDate);
 
   const assessment = await assessCandidates(allTxs);
   const byRetailer = groupBy(assessment.pending, (e) => e.retailer);

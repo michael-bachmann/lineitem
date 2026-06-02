@@ -192,7 +192,7 @@ export async function approveTransaction(
       ? { category_id: items[0].categoryId, approved: true }
       : { subtransactions: buildSubtransactions(tx, items), approved: true };
 
-    await updateTransaction(settings.accessToken, settings.planId, ynabTransactionId, update);
+    await updateTransaction(settings.planId, ynabTransactionId, update);
 
     // Join each approved item's category choice with its title from the
     // persisted transaction. ApprovalItem only has (productId, categoryId);

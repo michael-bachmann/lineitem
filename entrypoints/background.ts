@@ -46,7 +46,7 @@ async function handleMessage(message: MessageRequest): Promise<unknown> {
 
     case "GET_PLANS": {
       try {
-        const plans = await getPlans(message.token);
+        const plans = await getPlans();
         return { plans };
       } catch (e) {
         return { error: e instanceof Error ? e.message : "Failed to fetch plans" };
@@ -62,7 +62,7 @@ async function handleMessage(message: MessageRequest): Promise<unknown> {
         if (!settings.accessToken || !settings.planId) {
           return { error: "Not connected to YNAB" };
         }
-        const categories = await getCategories(settings.accessToken, settings.planId);
+        const categories = await getCategories(settings.planId);
         await putCategories(categories);
         return { ok: true };
       } catch (e) {

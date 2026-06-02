@@ -36,7 +36,7 @@ async function performSyncInner(): Promise<{ queue: QueueEntry[] } | { error: st
     }
 
     // 1. IDENTIFY: fetch YNAB charges, group by retailer
-    const ynabTxs = await getUnapprovedTransactions(settings.accessToken, settings.planId);
+    const ynabTxs = await getUnapprovedTransactions(settings.planId);
 
     const taggedCharges = ynabTxs
       .filter((tx) => tx.payee_name !== null)
