@@ -246,7 +246,11 @@ async function runForRetailer(
     // AllocatedTransaction is the dedup marker for re-runs — writing it
     // before learn would let a learn failure leave a tx marked "processed"
     // with nothing actually learned.
-    if (entries.length > 0) await learnFromApproval(retailerId, entries);
+    if (entries.length > 0) {
+      await learnFromApproval(retailerId, entries, ({ index, total }) =>
+        ctx.onProgress?.({ status: "learning", index, total }),
+      );
+    }
     if (allocations.length > 0) await putAllocatedTransactions(allocations);
 
     return {

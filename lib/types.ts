@@ -136,10 +136,13 @@ export type MessageBroadcast =
 /** What backfill is doing right now. "preparing" covers fetching YNAB
  *  transactions plus the retailer's transaction-list pagination — phases
  *  where we don't yet know how many orders we'll scrape. Once detail-page
- *  scrapes start, each event reports the order index + total. */
+ *  scrapes start, each event reports the order index + total. "learning"
+ *  follows the last scrape: embeddings run on CPU and can take minutes for
+ *  large batches, so the UI surfaces item-level progress through that phase. */
 export type BackfillProgress =
   | { status: "preparing" }
-  | { status: "scraping"; index: number; total: number };
+  | { status: "scraping"; index: number; total: number }
+  | { status: "learning"; index: number; total: number };
 
 export interface BackfillResult {
   /** Cumulative count of eligible transactions in the window that now have
