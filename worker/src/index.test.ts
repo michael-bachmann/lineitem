@@ -45,3 +45,30 @@ describe("POST /oauth/exchange", () => {
     expect(await res.text()).toBe('{"error":"invalid_grant"}');
   });
 });
+
+describe("POST /oauth/refresh", () => {
+  it("forwards refresh_token to YNAB with the secret + grant_type=refresh_token", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ access_token: "at2", refresh_token: "rt2", token_type: "Bearer", expires_in: 7200 }), { status: 200 }),
+    );
+    const res = await worker.fetch(req("/oauth/refresh", { refresh_token: "RT" }), env);
+    expect(res.status).toBe(200);
+    const params = new URLSearchParams(fetchSpy.mock.calls[0][1]!.body as string);
+    expect(params.get("client_id")).toBe("cid");
+    expect(params.get("client_secret")).toBe("csec");
+    expect(params.get("refresh_token")).toBe("RT");
+    expect(params.get("grant_type")).toBe("refresh_token");
+  });
+});
+
+describe("routing", () => {
+  it("404s unknown paths", async () => {
+    const res = await worker.fetch(req("/bogus", {}), env);
+    expect(res.status).toBe(404);
+  });
+
+  it("404s on non-POST methods", async () => {
+    const res = await worker.fetch(new Request("https://w.example/oauth/exchange"), env);
+    expect(res.status).toBe(404);
+  });
+});
