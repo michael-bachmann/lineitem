@@ -1,6 +1,10 @@
 import { browser } from "wxt/browser";
 import { getSettings, saveSettings } from "./settings";
-import type { OAuthExchangeRequest, OAuthRefreshRequest, OAuthTokenResponse } from "./types";
+import type {
+  OAuthExchangeRequest,
+  OAuthRefreshRequest,
+  OAuthTokenResponse,
+} from "./types";
 
 /** Deployed Cloudflare Worker URL — custom domain `auth.lineitem.dev`
  *  attached via the Cloudflare dashboard (Task A5). Must match the entry
@@ -8,7 +12,7 @@ import type { OAuthExchangeRequest, OAuthRefreshRequest, OAuthTokenResponse } fr
 const WORKER_URL = "https://auth.lineitem.dev";
 
 /** YNAB's public OAuth client_id — safe to ship in extension code. */
-const YNAB_CLIENT_ID = "PASTE_FROM_YNAB_DEV_SETTINGS";
+const YNAB_CLIENT_ID = "HVQTSNosfeLUsiPdrUMs-tYpM6GOVXqMWCw6e1XYu_4";
 
 const YNAB_AUTHORIZE_URL = "https://app.ynab.com/oauth/authorize";
 
@@ -27,9 +31,14 @@ const EXPIRY_BUFFER_MS = 30_000;
 /** Returns a valid access token, refreshing via the Worker if needed.
  *  Throws NeedsReauthError when refresh fails or no refresh token exists. */
 export async function getValidAccessToken(): Promise<string> {
-  const { accessToken, refreshToken, accessTokenExpiresAt } = await getSettings();
+  const { accessToken, refreshToken, accessTokenExpiresAt } =
+    await getSettings();
 
-  if (accessToken && accessTokenExpiresAt && accessTokenExpiresAt - EXPIRY_BUFFER_MS > Date.now()) {
+  if (
+    accessToken &&
+    accessTokenExpiresAt &&
+    accessTokenExpiresAt - EXPIRY_BUFFER_MS > Date.now()
+  ) {
     return accessToken;
   }
 
@@ -52,7 +61,10 @@ export async function getValidAccessToken(): Promise<string> {
   return tokens.access_token;
 }
 
-export async function exchangeCodeForTokens(code: string, redirectUri: string): Promise<void> {
+export async function exchangeCodeForTokens(
+  code: string,
+  redirectUri: string,
+): Promise<void> {
   const body: OAuthExchangeRequest = { code, redirect_uri: redirectUri };
   const r = await fetch(`${WORKER_URL}/oauth/exchange`, {
     method: "POST",
