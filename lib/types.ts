@@ -326,3 +326,31 @@ export interface RetailerAdapter {
     unmatched: { charge: YnabCharge; reason: string }[];
   }>;
 }
+
+// ---------------------------------------------------------------------------
+// OAuth proxy contract — shared between the extension and the Cloudflare
+// Worker that holds the client_secret. The extension never knows the secret;
+// it asks the Worker to do token exchanges on its behalf.
+// ---------------------------------------------------------------------------
+
+/** Body the extension POSTs to the Worker's `/oauth/exchange` endpoint after
+ *  the consent leg returns an authorization code. */
+export interface OAuthExchangeRequest {
+  code: string;
+  redirect_uri: string;
+}
+
+/** Body the extension POSTs to the Worker's `/oauth/refresh` endpoint when
+ *  an access token has expired. */
+export interface OAuthRefreshRequest {
+  refresh_token: string;
+}
+
+/** YNAB's token response shape — passed through by the Worker unchanged.
+ *  `expires_in` is seconds-until-access-token-expiry (YNAB documents 7200). */
+export interface OAuthTokenResponse {
+  access_token: string;
+  refresh_token: string;
+  token_type: "Bearer";
+  expires_in: number;
+}
