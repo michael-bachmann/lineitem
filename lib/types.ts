@@ -120,8 +120,9 @@ export type MessageRequest =
   | { type: "APPROVE_TRANSACTION"; ynabTransactionId: string; items: ApprovalItem[] }
   | { type: "APPROVE_BATCH"; ynabTransactionIds: string[] }
   | { type: "GET_SETTINGS" }
-  | { type: "SAVE_SETTINGS"; token: string; planId: string; planName: string }
-  | { type: "GET_PLANS"; token: string }
+  | { type: "START_OAUTH" }
+  | { type: "GET_PLANS" }
+  | { type: "SAVE_PLAN"; planId: string; planName: string }
   | { type: "REFRESH_CATEGORIES" }
   | { type: "GET_CATEGORIES" }
   | { type: "CLEAR_SETTINGS" }

@@ -1,4 +1,5 @@
-import { getSettings, clearSettings } from "@/lib/settings";
+import { getSettings, saveSettings, clearSettings } from "@/lib/settings";
+import { runOAuthFlow } from "@/lib/oauth";
 import { getPlans, getCategories } from "@/lib/ynab";
 import { putCategories, getAllCategories } from "@/lib/db";
 import { performSync } from "@/background/sync";
@@ -53,8 +54,25 @@ async function handleMessage(message: MessageRequest): Promise<unknown> {
       }
     }
 
-    case "SAVE_SETTINGS":
-      return { error: "Use START_OAUTH to connect — PAT setup is no longer supported" };
+    case "START_OAUTH": {
+      try {
+        await runOAuthFlow();
+        return { ok: true };
+      } catch (e) {
+        return { error: e instanceof Error ? e.message : "OAuth failed" };
+      }
+    }
+
+    case "SAVE_PLAN": {
+      try {
+        await saveSettings({ planId: message.planId, planName: message.planName });
+        const categories = await getCategories(message.planId);
+        await putCategories(categories);
+        return { ok: true };
+      } catch (e) {
+        return { error: e instanceof Error ? e.message : "Failed to save plan" };
+      }
+    }
 
     case "REFRESH_CATEGORIES": {
       try {
