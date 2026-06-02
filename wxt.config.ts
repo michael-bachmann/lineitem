@@ -11,6 +11,12 @@ export default defineConfig({
     // or fresh installs. Safe to commit; this is the public half of the keypair.
     key: "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAtkJGQ2J6/qiSlDdRHLrauLgKxTeGx2W68jpk+0TPcebtbtdS7OaHxaN+CKTY8a5EUfFdpv/8LDfQC+L7xAjwsKihbagaWiOpe/dKsdzUYi3dUllzIJlDLlEhz9jEqumG6JyQVP6fq1S22+5bXLNCXRNM0vNDDTiq/2m8sytxCN9D5ufv0556uklIBJ/wQvqcCnp107gdYGs3x0ooVwxXZu035YJBLDoIriB/zmwsDoim1koahf9TKV1VqgzdlIt7Jx+sHIUvNA9IA1KGyvwE6Zp2eE6voT3haO2iInwj8QuEvDYmovW7piun5kXPICGXWqNQcjv3HPKhZxXSt3G+8wIDAQAB",
     permissions: ["storage", "sidePanel", "tabs", "identity"],
+    // transformers.js runs the embedding model via WebAssembly, which Chrome
+    // MV3 blocks unless we explicitly opt in. `wasm-unsafe-eval` allows WASM
+    // compilation only — it does NOT re-enable arbitrary eval().
+    content_security_policy: {
+      extension_pages: "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'",
+    },
     host_permissions: [
       "https://*.amazon.com/*",
       "https://api.ynab.com/*",
