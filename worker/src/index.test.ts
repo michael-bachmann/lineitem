@@ -1,7 +1,16 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import worker from "./index";
 
-const env = { YNAB_CLIENT_ID: "cid", YNAB_CLIENT_SECRET: "csec" };
+/** Build an env with a mocked rate limiter (permissive by default). */
+function makeEnv(limitSuccess = true) {
+  return {
+    YNAB_CLIENT_ID: "cid",
+    YNAB_CLIENT_SECRET: "csec",
+    RATE_LIMITER: { limit: vi.fn().mockResolvedValue({ success: limitSuccess }) },
+  };
+}
+
+const env = makeEnv();
 
 function req(path: string, body: unknown): Request {
   return new Request(`https://w.example${path}`, {
@@ -40,9 +49,38 @@ describe("POST /oauth/exchange", () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response('{"error":"invalid_grant"}', { status: 400 }),
     );
-    const res = await worker.fetch(req("/oauth/exchange", { code: "bad", redirect_uri: "x" }), env);
+    const res = await worker.fetch(
+      req("/oauth/exchange", { code: "bad", redirect_uri: "https://ext.chromiumapp.org/" }),
+      env,
+    );
     expect(res.status).toBe(400);
     expect(await res.text()).toBe('{"error":"invalid_grant"}');
+  });
+
+  it("400s on malformed JSON without calling YNAB", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const bad = new Request("https://w.example/oauth/exchange", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{not json",
+    });
+    const res = await worker.fetch(bad, env);
+    expect(res.status).toBe(400);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("400s when code is missing", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const res = await worker.fetch(req("/oauth/exchange", { redirect_uri: "https://ext.chromiumapp.org/" }), env);
+    expect(res.status).toBe(400);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("400s when redirect_uri is not an https URL", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const res = await worker.fetch(req("/oauth/exchange", { code: "x", redirect_uri: "notaurl" }), env);
+    expect(res.status).toBe(400);
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 });
 
@@ -59,6 +97,37 @@ describe("POST /oauth/refresh", () => {
     expect(params.get("refresh_token")).toBe("RT");
     expect(params.get("grant_type")).toBe("refresh_token");
   });
+
+  it("400s when refresh_token is missing", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const res = await worker.fetch(req("/oauth/refresh", {}), env);
+    expect(res.status).toBe(400);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe("rate limiting", () => {
+  it("429s when the limiter rejects, without calling YNAB", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const res = await worker.fetch(
+      req("/oauth/exchange", { code: "x", redirect_uri: "https://ext.chromiumapp.org/" }),
+      makeEnv(false),
+    );
+    expect(res.status).toBe(429);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("keys the limiter by the client IP", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}", { status: 200 }));
+    const limiterEnv = makeEnv();
+    const request = new Request("https://w.example/oauth/refresh", {
+      method: "POST",
+      headers: { "content-type": "application/json", "CF-Connecting-IP": "203.0.113.7" },
+      body: JSON.stringify({ refresh_token: "RT" }),
+    });
+    await worker.fetch(request, limiterEnv);
+    expect(limiterEnv.RATE_LIMITER.limit).toHaveBeenCalledWith({ key: "203.0.113.7" });
+  });
 });
 
 describe("routing", () => {
@@ -70,5 +139,11 @@ describe("routing", () => {
   it("404s on non-POST methods", async () => {
     const res = await worker.fetch(new Request("https://w.example/oauth/exchange"), env);
     expect(res.status).toBe(404);
+  });
+
+  it("does not rate-limit unknown paths", async () => {
+    const limiterEnv = makeEnv();
+    await worker.fetch(req("/bogus", {}), limiterEnv);
+    expect(limiterEnv.RATE_LIMITER.limit).not.toHaveBeenCalled();
   });
 });
