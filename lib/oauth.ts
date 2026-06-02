@@ -28,6 +28,12 @@ export class NeedsReauthError extends Error {
  *  seconds doesn't land with a just-expired token. */
 const EXPIRY_BUFFER_MS = 30_000;
 
+/** Shared in-flight refresh promise. Concurrent getValidAccessToken callers
+ *  race-condition into both POSTing /oauth/refresh, each rotating the
+ *  refresh token, and the second call sees `invalid_grant`. We dedupe by
+ *  caching the active refresh; followers await the same Promise. */
+let inflightRefresh: Promise<string> | null = null;
+
 /** Returns a valid access token, refreshing via the Worker if needed.
  *  Throws NeedsReauthError when refresh fails or no refresh token exists. */
 export async function getValidAccessToken(): Promise<string> {
@@ -44,6 +50,15 @@ export async function getValidAccessToken(): Promise<string> {
 
   if (!refreshToken) throw new NeedsReauthError();
 
+  inflightRefresh ??= refreshAndPersist(refreshToken);
+  try {
+    return await inflightRefresh;
+  } finally {
+    inflightRefresh = null;
+  }
+}
+
+async function refreshAndPersist(refreshToken: string): Promise<string> {
   const body: OAuthRefreshRequest = { refresh_token: refreshToken };
   const r = await fetch(`${WORKER_URL}/oauth/refresh`, {
     method: "POST",
@@ -83,8 +98,7 @@ export async function exchangeCodeForTokens(
 }
 
 /** Build the YNAB authorize URL for Authorization Code Grant. */
-export function buildAuthorizeUrl(): string {
-  const redirectUri = browser.identity.getRedirectURL();
+export function buildAuthorizeUrl(redirectUri: string): string {
   const params = new URLSearchParams({
     client_id: YNAB_CLIENT_ID,
     redirect_uri: redirectUri,
@@ -105,8 +119,8 @@ export function parseCodeFromRedirect(redirectUrl: string): string {
  *  redirect, exchange the code for tokens, persist them. Throws if the user
  *  cancels the popup or the exchange fails. */
 export async function runOAuthFlow(): Promise<void> {
-  const authorizeUrl = buildAuthorizeUrl();
   const redirectUri = browser.identity.getRedirectURL();
+  const authorizeUrl = buildAuthorizeUrl(redirectUri);
 
   // `interactive: true` shows the consent popup; required for the first
   // grant. Resolves with the final redirect URL or undefined on user cancel.
