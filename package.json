@@ -20,6 +20,7 @@
     "worker:test": "vitest run worker"
   },
   "dependencies": {
+    "@fontsource-variable/hanken-grotesk": "^5.2.8",
     "@huggingface/transformers": "^3.8.1",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
