@@ -6,7 +6,7 @@ import type {
   PayeeMapping,
 } from "@/lib/types";
 import { matchByAmountAndDate, cutoffDateFor } from "@/lib/matcher";
-import { openRetailerTab, waitForTabLoad } from "@/background/tabs";
+import { openRetailerTab, navigateTab } from "@/background/tabs";
 import { orderDetailUrl, itemmodUrl } from "@/retailers/amazon/selectors";
 import type { RawTransaction, RawItem } from "@/retailers/amazon/scraper";
 import { groupBy } from "remeda";
@@ -209,8 +209,7 @@ async function fetchItems(
     return { items: summaryResp.items, refund: summaryResp.refund };
   }
 
-  await browser.tabs.update(tabId, { url: itemmodUrl(orderId) });
-  await waitForTabLoad(tabId);
+  await navigateTab(tabId, itemmodUrl(orderId));
   const itemmodResp = (await browser.tabs.sendMessage(tabId, {
     type: "SCRAPE_ITEMS",
   })) as ItemmodResponse;
@@ -229,8 +228,7 @@ async function scrapeOrderItems(
   | { items: ScrapedItem[]; subtotalCents: number; refund: ScrapedOrder["refund"] }
   | { error: string }
 > {
-  await browser.tabs.update(tabId, { url: orderDetailUrl(orderId) });
-  await waitForTabLoad(tabId);
+  await navigateTab(tabId, orderDetailUrl(orderId));
 
   const summaryResp = (await browser.tabs.sendMessage(tabId, {
     type: "SCRAPE_ITEMS",

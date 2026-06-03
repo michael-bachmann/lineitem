@@ -1,4 +1,6 @@
-import { pipeline, type FeatureExtractionPipeline } from "@huggingface/transformers";
+import { pipeline, env, type FeatureExtractionPipeline } from "@huggingface/transformers";
+import { browser } from "wxt/browser";
+import type { PublicPath } from "wxt/browser";
 
 /**
  * Hugging Face model used for item-title embeddings. bge-small-en-v1.5 is a
@@ -17,8 +19,38 @@ const EMBEDDING_DIMS = 384;
  */
 let extractorPromise: Promise<FeatureExtractionPipeline> | null = null;
 
+/** Configure ONNX Runtime Web for the extension before the first `pipeline()`
+ *  call. Idempotent. numThreads=1 because extension contexts aren't
+ *  cross-origin-isolated, so there's no SharedArrayBuffer for ORT's threaded
+ *  build to use.
+ *
+ *  wasmPaths is set on FIREFOX ONLY, and the asymmetry is load-bearing:
+ *  - Setting wasmPaths makes ORT load its glue via a dynamic `import()`.
+ *  - Firefox's classic background page allows that, and needs the explicit path
+ *    because otherwise ORT can't resolve its own script URL and falls back to
+ *    the jsDelivr CDN, which the extension CSP blocks.
+ *  - Chrome's MV3 background is a service worker, where `import()` is forbidden
+ *    ("import() is disallowed on ServiceWorkerGlobalScope"). So on Chrome we
+ *    leave wasmPaths unset and let ORT use its statically-bundled glue, which
+ *    fetches the .wasm from /ort/ (see the de-inline base in wxt.config.ts).
+ *    Leaving it unset is safe because transformers.js skips its own jsDelivr
+ *    wasmPaths default when it detects a service worker. */
+let runtimeConfigured = false;
+function configureOnnxRuntime(): void {
+  if (runtimeConfigured) return;
+  // env.backends.onnx.wasm is typed as possibly undefined by @huggingface/transformers.
+  const wasm = env.backends.onnx.wasm!;
+  wasm.numThreads = 1;
+  if (import.meta.env.BROWSER === "firefox") {
+    // Cast: `/ort/` is a dynamic path not in WXT's generated PublicPath union.
+    wasm.wasmPaths = browser.runtime.getURL("/ort/" as unknown as PublicPath);
+  }
+  runtimeConfigured = true;
+}
+
 function getExtractor(): Promise<FeatureExtractionPipeline> {
   if (!extractorPromise) {
+    configureOnnxRuntime();
     // `pipeline()`'s overloaded generic over every task expands to a union
     // TS can't resolve in one shot; the cast narrows to the task we asked for.
     extractorPromise = pipeline("feature-extraction", MODEL_ID, {
@@ -56,4 +88,5 @@ export async function embedBatch(texts: string[]): Promise<Float32Array[]> {
 /** @internal — for tests only. */
 export function _resetForTest(): void {
   extractorPromise = null;
+  runtimeConfigured = false;
 }

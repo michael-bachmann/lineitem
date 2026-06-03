@@ -1,9 +1,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Mock the transformers package before importing the module under test.
-const { pipelineMock } = vi.hoisted(() => ({ pipelineMock: vi.fn() }));
+const { pipelineMock, envMock } = vi.hoisted(() => ({
+  pipelineMock: vi.fn(),
+  envMock: {
+    backends: { onnx: { wasm: {} as { wasmPaths?: string; numThreads?: number } } },
+  },
+}));
 vi.mock("@huggingface/transformers", () => ({
   pipeline: pipelineMock,
+  env: envMock,
+}));
+vi.mock("wxt/browser", () => ({
+  browser: { runtime: { getURL: (p: string) => `chrome-extension://test${p}` } },
 }));
 
 import { embed, embedBatch, _resetForTest } from "./embedder";
@@ -19,12 +28,14 @@ function makePipelineFn() {
 
 beforeEach(() => {
   _resetForTest();
+  envMock.backends.onnx.wasm = {};
   const pipeFn = makePipelineFn();
   pipelineMock.mockResolvedValue(pipeFn);
 });
 
 afterEach(() => {
   vi.clearAllMocks();
+  vi.unstubAllEnvs();
 });
 
 describe("embedder", () => {
@@ -54,5 +65,19 @@ describe("embedder", () => {
     const vs = await embedBatch([]);
     expect(vs).toEqual([]);
     expect(pipelineMock).not.toHaveBeenCalled();
+  });
+
+  it("sets wasmPaths to the extension /ort/ dir on Firefox", async () => {
+    vi.stubEnv("BROWSER", "firefox");
+    await embed("paper towels");
+    expect(envMock.backends.onnx.wasm.wasmPaths).toBe("chrome-extension://test/ort/");
+    expect(envMock.backends.onnx.wasm.numThreads).toBe(1);
+  });
+
+  it("does NOT set wasmPaths on Chrome — its MV3 service worker forbids the dynamic import() that wasmPaths triggers", async () => {
+    vi.stubEnv("BROWSER", "chrome");
+    await embed("paper towels");
+    expect(envMock.backends.onnx.wasm.wasmPaths).toBeUndefined();
+    expect(envMock.backends.onnx.wasm.numThreads).toBe(1);
   });
 });
