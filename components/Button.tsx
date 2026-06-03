@@ -48,8 +48,13 @@ export default function Button({
   return (
     <button
       {...rest}
-      disabled={disabled || busy}
-      className={`${BASE} ${sm ? SIZE.sm : SIZE.default} ${VARIANT[variant]} ${className}`}
+      // `busy` must NOT set `disabled`: the disabled-primary style is a light
+      // greyed surface (correct for a truly-disabled button), which would wash
+      // out the dark "Syncing…" pill. Keep it visually active; just block
+      // re-clicks while the action runs.
+      disabled={disabled}
+      aria-busy={busy || undefined}
+      className={`${BASE} ${sm ? SIZE.sm : SIZE.default} ${VARIANT[variant]} ${busy ? "pointer-events-none cursor-default" : ""} ${className}`}
     >
       {busy && <Spinner size={15} onAccent={variant === "primary"} />}
       {busy && busyLabel ? busyLabel : children}
