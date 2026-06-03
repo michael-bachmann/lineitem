@@ -52,10 +52,11 @@ export default defineConfig({
       "https://*.huggingface.co/*",     // model file CDN (cdn-lfs.huggingface.co)
     ],
   }),
-  // Copy the ONNX runtime files into the build at /ort/ for BOTH browsers. The
-  // embedder points env.backends.onnx.wasm.wasmPaths here so Firefox (MV2
-  // classic background script) stops falling back to the jsDelivr CDN, which the
-  // extension CSP `script-src 'self'` blocks.
+  // Copy the ONNX runtime files into the build at /ort/ for BOTH browsers.
+  // Firefox loads them via env.backends.onnx.wasm.wasmPaths (set in the
+  // embedder); Chrome's bundled glue fetches the .wasm from here via the
+  // de-inline base below. Either way ORT loads locally instead of from the
+  // jsDelivr CDN, which the extension CSP `script-src 'self'` blocks.
   hooks: {
     "build:publicAssets"(_wxt, assets) {
       for (const f of ORT_FILES) {
@@ -68,9 +69,13 @@ export default defineConfig({
       tailwindcss(),
       // De-inline the 21 MB ORT wasm. The glue locates its binary with
       // `new URL("...jsep.wasm", import.meta.url)`, which Vite resolves and
-      // inlines as a ~28.8 MB data: URI. We load the wasm from /ort/ via
-      // wasmPaths instead, so neutralize the pattern (enforce:"pre", before
-      // Vite's asset plugin) so the binary is never inlined.
+      // inlines as a ~28.8 MB data: URI. Neutralize the pattern (enforce:"pre",
+      // before Vite's asset plugin) so the binary is never inlined, and point
+      // the lookup at the /ort/ files copied above. This base is what Chrome's
+      // statically-bundled glue uses to FETCH the wasm (Chrome can't set
+      // wasmPaths — that would force a service-worker-illegal dynamic import).
+      // Firefox doesn't reach this line at runtime (it sets wasmPaths and loads
+      // the standalone /ort/ .mjs instead), but the expression stays valid there.
       {
         name: "ort-no-inline-wasm",
         enforce: "pre" as const,
@@ -82,7 +87,7 @@ export default defineConfig({
             return null;
           return code.replaceAll(
             'new URL("ort-wasm-simd-threaded.jsep.wasm",import.meta.url)',
-            'new URL("ort-wasm-simd-threaded.jsep.wasm",globalThis.location?.href??"https://invalid.invalid/")',
+            'new URL("ort-wasm-simd-threaded.jsep.wasm",(globalThis.chrome??globalThis.browser).runtime.getURL("ort/"))',
           );
         },
       },

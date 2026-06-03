@@ -28,12 +28,14 @@ function makePipelineFn() {
 
 beforeEach(() => {
   _resetForTest();
+  envMock.backends.onnx.wasm = {};
   const pipeFn = makePipelineFn();
   pipelineMock.mockResolvedValue(pipeFn);
 });
 
 afterEach(() => {
   vi.clearAllMocks();
+  vi.unstubAllEnvs();
 });
 
 describe("embedder", () => {
@@ -65,9 +67,17 @@ describe("embedder", () => {
     expect(pipelineMock).not.toHaveBeenCalled();
   });
 
-  it("configures onnxruntime to load wasm from the extension origin", async () => {
+  it("sets wasmPaths to the extension /ort/ dir on Firefox", async () => {
+    vi.stubEnv("BROWSER", "firefox");
     await embed("paper towels");
     expect(envMock.backends.onnx.wasm.wasmPaths).toBe("chrome-extension://test/ort/");
+    expect(envMock.backends.onnx.wasm.numThreads).toBe(1);
+  });
+
+  it("does NOT set wasmPaths on Chrome — its MV3 service worker forbids the dynamic import() that wasmPaths triggers", async () => {
+    vi.stubEnv("BROWSER", "chrome");
+    await embed("paper towels");
+    expect(envMock.backends.onnx.wasm.wasmPaths).toBeUndefined();
     expect(envMock.backends.onnx.wasm.numThreads).toBe(1);
   });
 });

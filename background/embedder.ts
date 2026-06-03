@@ -19,20 +19,32 @@ const EMBEDDING_DIMS = 384;
  */
 let extractorPromise: Promise<FeatureExtractionPipeline> | null = null;
 
-/** Configure ONNX Runtime Web to load its wasm/glue from the extension's own
- *  /ort/ directory instead of the jsDelivr CDN. Required for Firefox: its MV2
- *  classic background script can't satisfy ORT's same-origin script-URL check,
- *  so ORT would fetch from the CDN, which the extension CSP blocks. Idempotent;
- *  must run before the first `pipeline()` call. numThreads=1 because extension
- *  contexts aren't cross-origin-isolated (no SharedArrayBuffer threads). */
+/** Configure ONNX Runtime Web for the extension before the first `pipeline()`
+ *  call. Idempotent. numThreads=1 because extension contexts aren't
+ *  cross-origin-isolated, so there's no SharedArrayBuffer for ORT's threaded
+ *  build to use.
+ *
+ *  wasmPaths is set on FIREFOX ONLY, and the asymmetry is load-bearing:
+ *  - Setting wasmPaths makes ORT load its glue via a dynamic `import()`.
+ *  - Firefox's classic background page allows that, and needs the explicit path
+ *    because otherwise ORT can't resolve its own script URL and falls back to
+ *    the jsDelivr CDN, which the extension CSP blocks.
+ *  - Chrome's MV3 background is a service worker, where `import()` is forbidden
+ *    ("import() is disallowed on ServiceWorkerGlobalScope"). So on Chrome we
+ *    leave wasmPaths unset and let ORT use its statically-bundled glue, which
+ *    fetches the .wasm from /ort/ (see the de-inline base in wxt.config.ts).
+ *    Leaving it unset is safe because transformers.js skips its own jsDelivr
+ *    wasmPaths default when it detects a service worker. */
 let runtimeConfigured = false;
 function configureOnnxRuntime(): void {
   if (runtimeConfigured) return;
-  // Cast: (1) `/ort/` is a dynamic path not in WXT's generated PublicPath union;
-  //       (2) env.backends.onnx.wasm is typed as possibly undefined by @huggingface/transformers.
+  // env.backends.onnx.wasm is typed as possibly undefined by @huggingface/transformers.
   const wasm = env.backends.onnx.wasm!;
-  wasm.wasmPaths = browser.runtime.getURL("/ort/" as unknown as PublicPath);
   wasm.numThreads = 1;
+  if (import.meta.env.BROWSER === "firefox") {
+    // Cast: `/ort/` is a dynamic path not in WXT's generated PublicPath union.
+    wasm.wasmPaths = browser.runtime.getURL("/ort/" as unknown as PublicPath);
+  }
   runtimeConfigured = true;
 }
 
