@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import Button from "./Button";
+import { Icon } from "./icons";
 
 const meta = {
   title: "Primitives/Button",
@@ -22,10 +23,22 @@ export const Primary: Story = { args: { variant: "primary", children: "Approve 1
 export const Secondary: Story = { args: { variant: "secondary", children: "Refresh Categories from YNAB" } };
 export const Ghost: Story = { args: { variant: "ghost", children: "Cancel" } };
 export const Danger: Story = { args: { variant: "danger", children: "Disconnect YNAB" } };
-export const Busy: Story = {
-  args: { variant: "primary", busy: true, busyLabel: "Syncing…", children: "Sync" },
-};
 export const DisabledPrimary: Story = {
   args: { variant: "primary", disabled: true, children: "2 items still need a category" },
 };
-export const Small: Story = { args: { sm: true, variant: "secondary", children: "Run again" } };
+
+// The `sm` (compact, auto-width) variant exists for the top-bar Sync button.
+export const Sync: Story = {
+  args: {
+    variant: "primary",
+    sm: true,
+    children: (
+      <>
+        <Icon.sync width={15} height={15} /> Sync
+      </>
+    ),
+  },
+};
+export const SyncBusy: Story = {
+  args: { variant: "primary", sm: true, busy: true, busyLabel: "Syncing…", children: "Sync" },
+};
