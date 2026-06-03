@@ -12,8 +12,11 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   busyLabel?: ReactNode;
 }
 
+// Pill radius: the design's light theme overrides buttons to a full pill
+// (.li-app[data-mode="light"] .li-btn { border-radius: 999px }). We ship
+// light-only, so buttons are always pills. (Tiles/thumbs stay rounded-control.)
 const BASE =
-  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-control border font-semibold tracking-[-0.005em] transition active:translate-y-px disabled:cursor-default";
+  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-pill border font-semibold tracking-[-0.005em] transition active:translate-y-px disabled:cursor-default";
 
 const SIZE = {
   default: "min-h-[44px] w-full px-4 py-[11px] text-[14.5px]",
@@ -24,7 +27,7 @@ const VARIANT: Record<ButtonVariant, string> = {
   secondary:
     "bg-surface-2 text-text border-line-strong hover:bg-surface-3 disabled:opacity-55",
   primary:
-    "bg-ink text-ink-fg border-transparent hover:[filter:brightness(1.06)] disabled:opacity-100 disabled:bg-surface-2 disabled:text-faint disabled:border-line",
+    "bg-ink text-ink-fg border-transparent hover:[filter:brightness(1.4)] disabled:opacity-100 disabled:bg-surface-2 disabled:text-faint disabled:border-line",
   ghost:
     "bg-transparent text-muted border-line hover:bg-surface hover:text-text disabled:opacity-55",
   danger:
