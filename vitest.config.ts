@@ -6,6 +6,7 @@ export default defineConfig({
     environment: "node",
     include: [
       "lib/**/*.test.ts",
+      "components/**/*.test.{ts,tsx}",
       "retailers/**/*.test.ts",
       "background/**/*.test.ts",
       "worker/**/*.test.ts",
