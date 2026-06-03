@@ -30,3 +30,6 @@ web-ext.config.ts
 # artifacts; not committed). README documents anything that needs to be
 # accessible to future-self / collaborators.
 docs/superpowers/
+
+# Storybook build output
+storybook-static/
