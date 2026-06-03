@@ -15,7 +15,12 @@ let backfillController: AbortController | null = null;
 
 /** Service worker entry point — routes messages from the side panel to domain handlers. */
 export default defineBackground(() => {
-  chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
+  // Chrome opens the side panel when its toolbar icon is clicked. Firefox has
+  // no sidePanel API — its sidebar_action provides a toolbar toggle button
+  // natively — so skip this there to avoid a startup TypeError.
+  if (chrome.sidePanel) {
+    chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
+  }
 
   // Pre-warm the embedder model cache on every SW startup so the first sync
   // doesn't pay a download tax. Fire-and-forget; errors are non-fatal.
