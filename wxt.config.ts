@@ -86,10 +86,22 @@ export default defineConfig({
             !id.includes("ort.bundle.min.mjs")
           )
             return null;
-          return code.replaceAll(
-            'new URL("ort-wasm-simd-threaded.jsep.wasm",import.meta.url)',
+          const PATTERN = 'new URL("ort-wasm-simd-threaded.jsep.wasm",import.meta.url)';
+          const out = code.replaceAll(
+            PATTERN,
             'new URL("ort-wasm-simd-threaded.jsep.wasm",(globalThis.chrome??globalThis.browser).runtime.getURL("ort/"))',
           );
+          // Fail loudly if the upstream string drifts (e.g. an onnxruntime-web
+          // bump changes whitespace/quoting): a silent no-op here re-inlines the
+          // 21 MB wasm as a data: URI and balloons background.js back to ~56 MB
+          // with no build error. Better a broken build than a 60x bundle.
+          if (out === code) {
+            throw new Error(
+              `[ort-no-inline-wasm] expected ORT wasm-URL pattern not found in ${id}; ` +
+                `onnxruntime-web likely changed — update PATTERN or the wasm will be re-inlined.`,
+            );
+          }
+          return out;
         },
       },
     ],

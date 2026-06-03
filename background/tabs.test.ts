@@ -47,8 +47,10 @@ describe("navigateTab", () => {
 
     await flush();
     // Even though browser.tabs.get reports "complete" (the OLD page), navigateTab
-    // must still be pending — this is the Firefox regression guard.
+    // must still be pending — this is the Firefox regression guard. It also must
+    // not consult tabs.get at all; doing so is what re-introduces the stale-read.
     expect(resolved).toBe(false);
+    expect(tabs.get).not.toHaveBeenCalled();
     expect(tabs.update).toHaveBeenCalledWith(7, { url: "https://example.com/" });
 
     tabs.fireUpdated(7, { status: "complete" });

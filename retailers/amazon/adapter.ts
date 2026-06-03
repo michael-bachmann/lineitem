@@ -168,17 +168,13 @@ async function paginateAndMatch(
     remaining = stillUnmatched;
     candidates = allCandidates.filter((c) => !matchedRaws.has(c));
 
-    if (remaining.length === 0) {
-      break;
-    }
+    if (remaining.length === 0) break;
 
     const oldestOnPage = txResponse.transactions.reduce(
       (min, t) => (t.date < min ? t.date : min),
       txResponse.transactions[0].date,
     );
-    if (oldestOnPage < cutoffIso) {
-      break;
-    }
+    if (oldestOnPage < cutoffIso) break;
 
     const pageResult = (await browser.tabs.sendMessage(tabId, {
       type: "NEXT_PAGE",
