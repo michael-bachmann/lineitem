@@ -16,11 +16,57 @@ export async function openRetailerTab(
   if (!tab.id) return null;
 
   if (tab.url !== startUrl || tab.status !== "complete") {
-    await browser.tabs.update(tab.id, { url: startUrl });
-    await waitForTabLoad(tab.id);
+    await navigateTab(tab.id, startUrl);
   }
 
   return { tabId: tab.id, weOpenedTab: false };
+}
+
+/**
+ * Navigate an existing tab to `url` and resolve once the NEW page finishes
+ * loading. The load listener is attached BEFORE the navigation is issued, and
+ * there is deliberately no "already complete?" short-circuit — right after
+ * `tabs.update` a tab can still report the previous page's `status: "complete"`
+ * (consistently on Firefox), which would otherwise resolve immediately and let
+ * us scrape the old page. We only resolve on a `complete` event that arrives
+ * after we start navigating.
+ */
+export function navigateTab(tabId: number, url: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      clearTimeout(timer);
+      browser.tabs.onUpdated.removeListener(updateListener);
+      browser.tabs.onRemoved.removeListener(removeListener);
+    };
+
+    const timer = setTimeout(() => {
+      cleanup();
+      reject(new Error(`Tab ${tabId} did not finish loading ${url} within 30 seconds`));
+    }, 30_000);
+
+    const updateListener = (updatedTabId: number, changeInfo: { status?: string }) => {
+      if (updatedTabId === tabId && changeInfo.status === "complete") {
+        cleanup();
+        resolve();
+      }
+    };
+
+    const removeListener = (removedTabId: number) => {
+      if (removedTabId === tabId) {
+        cleanup();
+        reject(new Error(`Tab ${tabId} was closed while waiting for it to load`));
+      }
+    };
+
+    // Attach BEFORE navigating: the new page's "complete" can't be missed, and
+    // the old page's lingering "complete" is never observed.
+    browser.tabs.onUpdated.addListener(updateListener);
+    browser.tabs.onRemoved.addListener(removeListener);
+    browser.tabs.update(tabId, { url }).catch((err) => {
+      cleanup();
+      reject(err);
+    });
+  });
 }
 
 /**
