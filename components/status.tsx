@@ -1,4 +1,3 @@
-import type { ReactNode } from "react";
 import { Icon, type IconComponent, type IconName } from "./icons";
 import { Spinner } from "./Spinner";
 
@@ -99,55 +98,5 @@ export function StatusTile({ status, size = 40 }: { status: string; size?: numbe
     >
       {info.spin ? <Spinner size={16} /> : Glyph ? <Glyph width={19} height={19} /> : null}
     </div>
-  );
-}
-
-const CHIP: Record<TileKind, string> = {
-  neutral: "bg-surface-3 text-muted border-line",
-  ready: "bg-surface-3 text-muted border-line [&_svg]:text-ok-text",
-  ok: "bg-ok-weak text-ok-text border-ok-line",
-  warn: "bg-attention-weak text-attention border-attention-line",
-  err: "bg-danger-weak text-danger border-danger-line",
-};
-
-export function Chip({
-  kind = "neutral",
-  spin = false,
-  children,
-}: {
-  kind?: TileKind;
-  spin?: boolean;
-  children: ReactNode;
-}) {
-  return (
-    <span
-      className={`inline-flex items-center gap-[5px] whitespace-nowrap rounded-pill border px-[9px] py-[2px] text-[11.5px] font-semibold leading-[1.55] ${CHIP[kind]}`}
-    >
-      {spin && <Spinner size={11} />}
-      {children}
-    </span>
-  );
-}
-
-/** Inline classification-source icon for an item (✓ history / ✦ suggested / ⚠ needs). */
-export function SourceIcon({ source }: { source: "ok" | "embed" | "needs" }) {
-  if (source === "ok") {
-    return (
-      <span className="inline-flex flex-none items-center justify-center text-ok" title="Previously categorized">
-        <Icon.check width={15} height={15} />
-      </span>
-    );
-  }
-  if (source === "embed") {
-    return (
-      <span className="inline-flex flex-none items-center justify-center text-link" title="Suggested from similar items">
-        <Icon.sparkle width={15} height={15} />
-      </span>
-    );
-  }
-  return (
-    <span className="inline-flex flex-none items-center justify-center text-attention" title="Needs a category">
-      <Icon.warnTri width={15} height={15} />
-    </span>
   );
 }
