@@ -1,1 +1,95 @@
 @import "tailwindcss";
+
+/* ---- 1. Raw themeable values -------------------------------------- */
+:root {
+  --bg: #f4f1ec;
+  --surface: #ffffff;
+  --surface-2: #f6f3ee;
+  --surface-3: #ece7df;
+
+  --border: #e4ded4;
+  --border-strong: #d6cfc3;
+
+  --text: #2f2a33;
+  --muted: #6d6875;
+  --faint: #9a939d;
+
+  --brand: #b5838d;
+  --ink: #3a3440;
+  --ink-fg: #ffffff;
+  --link: #5c7c86;
+
+  --ok: #84a98c;
+  --ok-text: #5d8068;
+  --attention: #b5838d;
+  --attention-text: #9c5f6c;
+  --danger: #a4524a;
+
+  --shadow-card: 0 1px 2px rgba(47, 42, 51, .05);
+  --shadow-pop: 0 14px 34px -10px rgba(47, 42, 51, .2), 0 3px 10px -3px rgba(47, 42, 51, .12);
+
+  --radius-card: 13px;
+  --radius-sm: 8px;
+  --radius-pill: 999px;
+
+  --font-sans: "Hanken Grotesk Variable", "Hanken Grotesk", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+/* ---- 2. Soft tints derived from the roles ------------------------- */
+:root {
+  --brand-weak: color-mix(in oklab, var(--brand) 16%, transparent);
+  --brand-line: color-mix(in oklab, var(--brand) 42%, transparent);
+  --ok-weak: color-mix(in oklab, var(--ok) 15%, transparent);
+  --ok-line: color-mix(in oklab, var(--ok) 40%, transparent);
+  --attention-weak: color-mix(in oklab, var(--attention) 15%, transparent);
+  --attention-line: color-mix(in oklab, var(--attention) 42%, transparent);
+  --danger-weak: color-mix(in oklab, var(--danger) 16%, transparent);
+  --danger-line: color-mix(in oklab, var(--danger) 45%, transparent);
+}
+
+/* ---- 3. Register tokens with Tailwind (utilities) ----------------- */
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-line: var(--border);
+  --color-line-strong: var(--border-strong);
+
+  --color-ink: var(--ink);
+  --color-ink-fg: var(--ink-fg);
+  --color-text: var(--text);
+  --color-muted: var(--muted);
+  --color-faint: var(--faint);
+
+  --color-brand: var(--brand);
+  --color-link: var(--link);
+  --color-ok: var(--ok);
+  --color-ok-text: var(--ok-text);
+  --color-ok-weak: var(--ok-weak);
+  --color-ok-line: var(--ok-line);
+  --color-attention: var(--attention);
+  --color-attention-text: var(--attention-text);
+  --color-attention-weak: var(--attention-weak);
+  --color-attention-line: var(--attention-line);
+  --color-danger: var(--danger);
+  --color-danger-weak: var(--danger-weak);
+  --color-danger-line: var(--danger-line);
+
+  --radius-card: var(--radius-card);
+  --radius-pill: var(--radius-pill);
+
+  --shadow-card: var(--shadow-card);
+  --shadow-pop: var(--shadow-pop);
+
+  --font-sans: var(--font-sans);
+}
+
+/* ---- 4. Base ------------------------------------------------------ */
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+.tabular { font-variant-numeric: tabular-nums; }
