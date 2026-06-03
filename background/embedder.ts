@@ -1,4 +1,6 @@
-import { pipeline, type FeatureExtractionPipeline } from "@huggingface/transformers";
+import { pipeline, env, type FeatureExtractionPipeline } from "@huggingface/transformers";
+import { browser } from "wxt/browser";
+import type { PublicPath } from "wxt/browser";
 
 /**
  * Hugging Face model used for item-title embeddings. bge-small-en-v1.5 is a
@@ -17,8 +19,26 @@ const EMBEDDING_DIMS = 384;
  */
 let extractorPromise: Promise<FeatureExtractionPipeline> | null = null;
 
+/** Configure ONNX Runtime Web to load its wasm/glue from the extension's own
+ *  /ort/ directory instead of the jsDelivr CDN. Required for Firefox: its MV2
+ *  classic background script can't satisfy ORT's same-origin script-URL check,
+ *  so ORT would fetch from the CDN, which the extension CSP blocks. Idempotent;
+ *  must run before the first `pipeline()` call. numThreads=1 because extension
+ *  contexts aren't cross-origin-isolated (no SharedArrayBuffer threads). */
+let runtimeConfigured = false;
+function configureOnnxRuntime(): void {
+  if (runtimeConfigured) return;
+  // Cast: (1) `/ort/` is a dynamic path not in WXT's generated PublicPath union;
+  //       (2) env.backends.onnx.wasm is typed as possibly undefined by @huggingface/transformers.
+  const wasm = env.backends.onnx.wasm!;
+  wasm.wasmPaths = browser.runtime.getURL("/ort/" as unknown as PublicPath);
+  wasm.numThreads = 1;
+  runtimeConfigured = true;
+}
+
 function getExtractor(): Promise<FeatureExtractionPipeline> {
   if (!extractorPromise) {
+    configureOnnxRuntime();
     // `pipeline()`'s overloaded generic over every task expands to a union
     // TS can't resolve in one shot; the cast narrows to the task we asked for.
     extractorPromise = pipeline("feature-extraction", MODEL_ID, {
@@ -56,4 +76,5 @@ export async function embedBatch(texts: string[]): Promise<Float32Array[]> {
 /** @internal — for tests only. */
 export function _resetForTest(): void {
   extractorPromise = null;
+  runtimeConfigured = false;
 }

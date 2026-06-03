@@ -1,9 +1,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Mock the transformers package before importing the module under test.
-const { pipelineMock } = vi.hoisted(() => ({ pipelineMock: vi.fn() }));
+const { pipelineMock, envMock } = vi.hoisted(() => ({
+  pipelineMock: vi.fn(),
+  envMock: {
+    backends: { onnx: { wasm: {} as { wasmPaths?: string; numThreads?: number } } },
+  },
+}));
 vi.mock("@huggingface/transformers", () => ({
   pipeline: pipelineMock,
+  env: envMock,
+}));
+vi.mock("wxt/browser", () => ({
+  browser: { runtime: { getURL: (p: string) => `chrome-extension://test${p}` } },
 }));
 
 import { embed, embedBatch, _resetForTest } from "./embedder";
@@ -54,5 +63,11 @@ describe("embedder", () => {
     const vs = await embedBatch([]);
     expect(vs).toEqual([]);
     expect(pipelineMock).not.toHaveBeenCalled();
+  });
+
+  it("configures onnxruntime to load wasm from the extension origin", async () => {
+    await embed("paper towels");
+    expect(envMock.backends.onnx.wasm.wasmPaths).toBe("chrome-extension://test/ort/");
+    expect(envMock.backends.onnx.wasm.numThreads).toBe(1);
   });
 });
