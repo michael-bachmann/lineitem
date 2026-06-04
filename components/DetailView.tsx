@@ -89,6 +89,7 @@ export default function DetailView({ entry, categories, onBack, onApprove }: Det
   const { order, classifiedItems } = matchStatus;
   const totalCents = millunitsToCents(ynabTransaction.amount);
   const orderId = parseOrderId(order.orderKey);
+  const isRefund = ynabTransaction.amount > 0;
 
   const handleCategoryChange = (index: number, categoryId: string) => {
     setSelectedCategories((prev) => {
@@ -146,6 +147,7 @@ export default function DetailView({ entry, categories, onBack, onApprove }: Det
               {ynabTransaction.payee_name ?? "Unknown payee"}
             </span>
             <span className="tabular flex-none text-[18px] font-bold tracking-[-0.01em] text-text">
+              {isRefund ? "+" : ""}
               {formatCents(totalCents)}
             </span>
           </div>
@@ -185,7 +187,12 @@ export default function DetailView({ entry, categories, onBack, onApprove }: Det
         ))}
       </div>
 
-      <SplitBreakdown items={splitItems} totalAmountCents={totalCents} categories={categories} />
+      <SplitBreakdown
+        items={splitItems}
+        totalAmountCents={totalCents}
+        categories={categories}
+        refund={isRefund}
+      />
 
       <div className="sticky bottom-0 -mx-4 -mb-4 px-4 pt-3 [background:linear-gradient(180deg,transparent,var(--bg)_38%)]">
         <Button

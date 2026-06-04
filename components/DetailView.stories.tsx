@@ -63,12 +63,12 @@ const matched = (items: ClassifiedItem[]): OrderMatchStatus => ({
   classifiedItems: items,
 });
 
-function entry(matchStatus: OrderMatchStatus): QueueEntry {
+function entry(matchStatus: OrderMatchStatus, amount = -42990): QueueEntry {
   return {
     ynabTransaction: {
       id: "t1",
       payee_name: "AMAZON GROCERY",
-      amount: -42990,
+      amount,
       date: "2026-05-20",
     } as QueueEntry["ynabTransaction"],
     retailer: "amazon",
@@ -95,6 +95,7 @@ type Story = StoryObj<typeof DetailView>;
 
 export const MatchedPartial: Story = { args: { entry: entry(matched(PARTIAL)) } };
 export const MatchedReady: Story = { args: { entry: entry(matched(READY)) } };
+export const MatchedRefund: Story = { args: { entry: entry(matched(READY), 42990) } };
 export const Loading: Story = { args: { entry: entry({ status: "loading" }) } };
 export const NoMatch: Story = { args: { entry: entry({ status: "no_match" }) } };
 export const AuthRequired: Story = { args: { entry: entry({ status: "auth_required" }) } };
