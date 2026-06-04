@@ -1,8 +1,6 @@
-// Help & About copy + links. Placeholders from the design handoff — swap in the
-// real URLs (and wire VERSION to the manifest) before shipping the Help screen.
-
-export const VERSION = "1.4.0";
-
+// Help & About copy + links.
+// TODO: these URLs are design-handoff placeholders — swap in the real ones
+// before shipping the Help screen.
 export const LINKS = {
   coffee: "https://buymeacoffee.com/lineitem",
   retailer: "https://lineitem.app/request-retailer",

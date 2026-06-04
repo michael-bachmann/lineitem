@@ -11,6 +11,7 @@ interface RowProps {
   href?: string;
   /** Internal navigation → renders a <button> with a › trailing icon. */
   onClick?: () => void;
+  className?: string;
 }
 
 const BASE =
@@ -18,7 +19,7 @@ const BASE =
 
 /** A settings/help list row: tinted icon badge + title/sub + trailing chevron
  *  (internal) or external-link glyph. */
-export function Row({ icon, title, sub, accent = false, href, onClick }: RowProps) {
+export function Row({ icon, title, sub, accent = false, href, onClick, className = "" }: RowProps) {
   const content = (
     <>
       <span
@@ -44,13 +45,19 @@ export function Row({ icon, title, sub, accent = false, href, onClick }: RowProp
 
   if (href) {
     return (
-      <a href={href} target="_blank" rel="noreferrer" className={`${BASE} no-underline`}>
+      <a
+        href={href}
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label={`${title} (opens in new tab)`}
+        className={`${BASE} no-underline ${className}`}
+      >
         {content}
       </a>
     );
   }
   return (
-    <button type="button" onClick={onClick} className={BASE}>
+    <button type="button" onClick={onClick} className={`${BASE} ${className}`}>
       {content}
     </button>
   );

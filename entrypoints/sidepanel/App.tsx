@@ -70,7 +70,9 @@ export default function App() {
   }
 
   if (view === "help") {
-    return <Help onBack={() => setView("settings")} />;
+    return (
+      <Help onBack={() => setView("settings")} version={browser.runtime.getManifest().version} />
+    );
   }
 
   // Handlers for the queue view

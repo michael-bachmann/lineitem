@@ -1,5 +1,5 @@
 import { useId, useState } from "react";
-import { FAQ, LINKS, VERSION } from "@/lib/help-content";
+import { FAQ, LINKS } from "@/lib/help-content";
 import { BackLink } from "./BackLink";
 import { Button } from "./Button";
 import { Row } from "./Row";
@@ -8,11 +8,13 @@ import { Icon } from "./icons";
 
 interface HelpProps {
   onBack: () => void;
+  /** Extension version for the footer (passed from the manifest). */
+  version?: string;
 }
 
 /** Help & About — coffee hero, FAQ accordion, get-involved/links rows, footer.
  *  No IO; the accordion is local UI state. */
-export default function Help({ onBack }: HelpProps) {
+export default function Help({ onBack, version = "0.0.0" }: HelpProps) {
   const [open, setOpen] = useState(0);
   const faqId = useId();
 
@@ -38,7 +40,7 @@ export default function Help({ onBack }: HelpProps) {
             </div>
           </div>
         </div>
-        <a href={LINKS.coffee} target="_blank" rel="noreferrer" className="no-underline">
+        <a href={LINKS.coffee} target="_blank" rel="noopener noreferrer" className="no-underline">
           <Button variant="primary">
             <Icon.coffee aria-hidden width={16} height={16} /> Buy me a coffee
           </Button>
@@ -118,11 +120,11 @@ export default function Help({ onBack }: HelpProps) {
       </div>
 
       <div className="py-[6px] text-center text-[11.5px] leading-[1.7] text-faint">
-        LineItem v{VERSION} ·{" "}
+        LineItem v{version} ·{" "}
         <a
           href={LINKS.website}
           target="_blank"
-          rel="noreferrer"
+          rel="noopener noreferrer"
           className="text-muted no-underline hover:text-link"
         >
           lineitem.app

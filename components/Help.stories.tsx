@@ -12,7 +12,7 @@ const meta = {
       </div>
     ),
   ],
-  args: { onBack: () => {} },
+  args: { onBack: () => {}, version: "1.4.0" },
 } satisfies Meta<typeof Help>;
 
 export default meta;
