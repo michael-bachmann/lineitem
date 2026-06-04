@@ -1,0 +1,44 @@
+/* =============================================================================
+   LineItem — shipping light theme · resolved design tokens
+   Every value is the final, resolved output (no var() chains, no calc(),
+   no Tweaks / dark-mode / accent-preset variations). Drop onto :root.
+   ============================================================================= */
+:root {
+  /* ── Surfaces / backgrounds ─────────────────────────────────────────── */
+  --bg: #f4f1ec;              /* app page — warm greige paper */
+  --surface: #ffffff;         /* cards */
+  --surface-2: #f6f3ee;       /* subtle inset (dropdown trigger, header gradient) */
+  --surface-3: #ece7df;       /* deeper inset (thumbnails, skeleton) */
+
+  /* ── Borders ────────────────────────────────────────────────────────── */
+  --border: #e4ded4;
+  --border-strong: #d6cfc3;
+
+  /* ── Text ───────────────────────────────────────────────────────────── */
+  --text: #2f2a33;            /* primary — deep warm plum-charcoal */
+  --muted: #6d6875;           /* secondary — mauve-grey */
+  --faint: #9a939d;           /* tertiary / meta */
+
+  /* ── Roles (one meaning per color) ──────────────────────────────────── */
+  --ink: #3a3440;             /* primary button background — deep plum */
+  --ink-fg: #ffffff;          /* text/icon on primary button */
+  --brand: #b5838d;           /* logo mark + "needs you" attention accent — dusty rose */
+  --brand-text: #9c5f6c;      /* deeper rose for legible attention text on light */
+  --link: #5c7c86;            /* links — muted teal-blue */
+  --ok: #84a98c;              /* ready / success — sage */
+  --ok-text: #5d8068;         /* deeper sage for legible success text */
+  --danger: #a4524a;          /* hard errors only — earthy brick */
+
+  /* ── Radii ──────────────────────────────────────────────────────────── */
+  --radius-card: 13px;        /* cards / primary surfaces */
+  --radius-sm: 8.32px;        /* buttons, inputs, chips */
+  --radius-pill: 999px;       /* pills, dots, round chips */
+
+  /* ── Elevation ──────────────────────────────────────────────────────── */
+  --shadow-card: 0 1px 2px rgba(47, 42, 51, 0.05);
+  --shadow-pop: 0 14px 34px -10px rgba(47, 42, 51, 0.2), 0 3px 10px -3px rgba(47, 42, 51, 0.12);
+
+  /* ── Product thumbnail swatch ───────────────────────────────────────── */
+  --swatch-bg: linear-gradient(180deg, #faf8f5, #efebe4);  /* frame fill */
+  --swatch-ring: rgba(47, 42, 51, 0.1);                    /* inset ring */
+}
