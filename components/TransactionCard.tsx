@@ -7,7 +7,7 @@ export interface TransactionVM {
   id: string;
   /** Merchant / payee, shown as stored (often uppercase). */
   payee: string;
-  /** Amount in dollars (display magnitude — see QueueView for the refund TODO). */
+  /** Amount in dollars (magnitude; `refund` adds the +/“Refund ·” treatment). */
   amount: number;
   /** Compact date, e.g. "May 20". */
   dateShort: string;
@@ -15,6 +15,8 @@ export interface TransactionVM {
   status: QueueDisplayStatus;
   /** Uncategorized item count, for the `partial` status text. */
   needs?: number;
+  /** YNAB inflow (refund) — shows a + amount and a "Refund ·" status prefix. */
+  refund?: boolean;
 }
 
 // The card is intentionally quiet: a single status dot carries the color, the
@@ -52,11 +54,15 @@ export default function TransactionCard({
         <span className="min-w-0 flex-1 truncate text-[14.5px] font-semibold tracking-[-0.006em] text-text">
           {txn.payee}
         </span>
-        <Money value={txn.amount} className="flex-none text-[15px] font-semibold text-text" />
+        <Money
+          value={txn.amount}
+          refund={txn.refund}
+          className="flex-none text-[15px] font-semibold text-text"
+        />
       </div>
       <div className="flex items-baseline gap-2 pl-[17px]">
         <span className={`min-w-0 flex-1 truncate text-[13px] font-medium ${STATUS_TEXT[info.kind]}`}>
-          {info.text}
+          {txn.refund ? `Refund · ${info.text}` : info.text}
         </span>
         <span className="flex-none text-[12.5px] text-faint">{txn.dateShort}</span>
       </div>

@@ -14,9 +14,16 @@ interface SplitBreakdownProps {
   /** The YNAB transaction amount (always positive cents). */
   totalAmountCents: number;
   categories: Category[];
+  /** Refund (inflow) — prefixes "+" on the total. */
+  refund?: boolean;
 }
 
-export default function SplitBreakdown({ items, totalAmountCents, categories }: SplitBreakdownProps) {
+export default function SplitBreakdown({
+  items,
+  totalAmountCents,
+  categories,
+  refund = false,
+}: SplitBreakdownProps) {
   const nameById = new Map(categories.map((c) => [c.id, c.name]));
 
   const totals = new Map<string, number>();
@@ -59,7 +66,10 @@ export default function SplitBreakdown({ items, totalAmountCents, categories }: 
             <Icon.warnTri aria-hidden /> Allocations don’t match total
           </span>
         )}
-        <span className="tabular flex-none font-[750] text-text">{formatCents(totalAmountCents)}</span>
+        <span className="tabular flex-none font-[750] text-text">
+          {refund ? "+" : ""}
+          {formatCents(totalAmountCents)}
+        </span>
       </div>
     </div>
   );
