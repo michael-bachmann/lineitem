@@ -50,6 +50,13 @@
   --danger-weak: color-mix(in oklab, var(--danger) 16%, transparent);
   --danger-line: color-mix(in oklab, var(--danger) 45%, transparent);
 
+  /* Ink (primary) accent tints — dropdown focus ring / active+selected option. */
+  --ink-weak: color-mix(in oklab, var(--ink) 18%, transparent);
+  --ink-line: color-mix(in oklab, var(--ink) 42%, transparent);
+
+  /* Category-dropdown trigger fill — a subtle inset between bg and surface. */
+  --dd-trigger-bg: color-mix(in oklab, var(--bg) 60%, var(--surface));
+
   /* Danger button — mixed over the opaque surface (distinct from the
      -weak/-line tints above, which mix over transparent). */
   --btn-danger-bg: color-mix(in oklab, var(--danger) 14%, var(--surface));
@@ -69,6 +76,8 @@
 
   --color-ink: var(--ink);
   --color-ink-fg: var(--ink-fg);
+  --color-ink-weak: var(--ink-weak);
+  --color-ink-line: var(--ink-line);
   --color-text: var(--text);
   --color-muted: var(--muted);
   --color-faint: var(--faint);
