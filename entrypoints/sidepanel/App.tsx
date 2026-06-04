@@ -147,7 +147,6 @@ export default function App() {
   return (
     <QueueView
       queue={queue}
-      categories={categories}
       syncing={syncing}
       approving={approving}
       error={error}
