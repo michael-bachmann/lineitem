@@ -20,16 +20,21 @@ const CATEGORIES: Category[] = [
 
 function Demo({ initial = null, needs = false }: { initial?: string | null; needs?: boolean }) {
   const [value, setValue] = useState<string | null>(initial);
-  return (
-    <div style={{ width: 340 }}>
-      <CategorySelect categories={CATEGORIES} value={value} onChange={setValue} needs={needs} />
-    </div>
-  );
+  return <CategorySelect categories={CATEGORIES} value={value} onChange={setValue} needs={needs} />;
 }
 
 const meta = {
   title: "Primitives/CategorySelect",
   component: CategorySelect,
+  // In the app this sits inside a white item card, not on the bare page canvas —
+  // render it that way so the trigger reads with real contrast.
+  decorators: [
+    (Story) => (
+      <div className="rounded-card border border-line bg-surface p-4 shadow-card" style={{ width: 360 }}>
+        <Story />
+      </div>
+    ),
+  ],
 } satisfies Meta<typeof CategorySelect>;
 export default meta;
 type Story = StoryObj;

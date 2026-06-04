@@ -34,3 +34,6 @@ docs/design/
 
 # Storybook build output
 storybook-static/
+
+# Local Storybook screenshots (visual verification)
+/cs-*.png
