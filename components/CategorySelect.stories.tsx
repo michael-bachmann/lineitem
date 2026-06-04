@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { Meta, StoryObj } from "@storybook/react-vite";
+import { expect, userEvent, within } from "storybook/test";
 import { CategorySelect } from "./CategorySelect";
 import type { Category } from "@/lib/types";
 
@@ -42,6 +43,16 @@ type Story = StoryObj;
 export const Empty: Story = { render: () => <Demo /> };
 export const Selected: Story = { render: () => <Demo initial="n1" /> };
 export const NeedsCategory: Story = { render: () => <Demo needs /> };
+
+// Opens the popover so the filter + grouped list + keyboard nav are visible.
+export const Open: Story = {
+  render: () => <Demo initial="n1" />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(canvas.getByRole("button", { name: "Category" }));
+    await expect(canvas.getByRole("listbox")).toBeInTheDocument();
+  },
+};
 
 // Trigger sits near the viewport bottom → opening flips the popover upward.
 export const NearBottomEdge: Story = {

@@ -27,6 +27,8 @@ interface CategorySelectProps {
   value: string | null;
   onChange: (id: string) => void;
   placeholder?: string;
+  /** Accessible name for the control. */
+  label?: string;
   /** Attention-ring the trigger (item still needs a category). */
   needs?: boolean;
   className?: string;
@@ -37,14 +39,17 @@ const FLIP_THRESHOLD = 240;
 
 /**
  * Custom category dropdown — a styled trigger + filterable popover. Replaces a
- * native `<select>` (which can't be styled). Type-to-filter, keyboard nav
- * (↑/↓/Enter/Esc), click-outside dismiss, and flips above near the panel edge.
+ * native `<select>` (which can't be styled). The popover is an editable
+ * combobox: type-to-filter, keyboard nav (↑/↓/Home/End/Enter/Esc), click-outside
+ * dismiss, and it flips above near the panel edge. Focus returns to the trigger
+ * on close.
  */
 export function CategorySelect({
   categories,
   value,
   onChange,
   placeholder = "— Select category —",
+  label = "Category",
   needs = false,
   className = "",
 }: CategorySelectProps) {
@@ -53,39 +58,71 @@ export function CategorySelect({
   const [up, setUp] = useState(false);
   const [active, setActive] = useState(-1);
   const wrapRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const listId = useId();
 
   const groups = groupCategories(categories, query);
   const flat = groups.flatMap((g) => g.items);
+  const indexById = new Map(flat.map((c, i) => [c.id, i]));
   const selected = categories.find((c) => c.id === value) ?? null;
+
+  // Read live values inside the [open]-only listener effect without re-binding.
+  const activeRef = useRef(active);
+  activeRef.current = active;
+  const flatRef = useRef(flat);
+  flatRef.current = flat;
+
+  function close(refocus: boolean) {
+    setOpen(false);
+    setQuery("");
+    if (refocus) triggerRef.current?.focus();
+  }
 
   function choose(id: string) {
     onChange(id);
-    setOpen(false);
-    setQuery("");
+    close(true);
   }
 
-  // Close on outside click; keyboard nav while open.
+  // Outside-click + keyboard nav while open. Depends on [open] only — live
+  // `active`/`flat` are read via refs so we don't re-bind on every keystroke.
   useEffect(() => {
     if (!open) return;
     const onDoc = (e: MouseEvent) => {
-      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false);
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) close(false);
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        setOpen(false);
-      } else if (e.key === "ArrowDown") {
-        e.preventDefault();
-        setActive((i) => Math.min(flat.length - 1, i + 1));
-      } else if (e.key === "ArrowUp") {
-        e.preventDefault();
-        setActive((i) => Math.max(0, i - 1));
-      } else if (e.key === "Enter") {
-        e.preventDefault();
-        const c = flat[active];
-        if (c) choose(c.id);
+      const items = flatRef.current;
+      switch (e.key) {
+        case "Escape":
+          close(true);
+          break;
+        case "Tab":
+          close(false); // let focus move naturally out of the popover
+          break;
+        case "ArrowDown":
+          e.preventDefault();
+          setActive((i) => Math.min(items.length - 1, i + 1));
+          break;
+        case "ArrowUp":
+          e.preventDefault();
+          setActive((i) => Math.max(0, i - 1));
+          break;
+        case "Home":
+          e.preventDefault();
+          setActive(0);
+          break;
+        case "End":
+          e.preventDefault();
+          setActive(items.length - 1);
+          break;
+        case "Enter": {
+          e.preventDefault();
+          const c = items[activeRef.current];
+          if (c) choose(c.id);
+          break;
+        }
       }
     };
     document.addEventListener("mousedown", onDoc);
@@ -94,7 +131,8 @@ export function CategorySelect({
       document.removeEventListener("mousedown", onDoc);
       document.removeEventListener("keydown", onKey);
     };
-  }, [open, active, flat]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- bind once per open
+  }, [open]);
 
   // On open: pick flip direction, seed the active row to the selection, focus filter.
   useLayoutEffect(() => {
@@ -122,21 +160,24 @@ export function CategorySelect({
       : "border-attention-line"
     : open
       ? "border-ink ring-[3px] ring-ink-weak"
-      : "border-line-strong enabled:hover:border-ink-line";
+      : "border-line-strong hover:border-ink-line";
 
   return (
     <div ref={wrapRef} className={`relative w-full ${className}`}>
       <button
+        ref={triggerRef}
         type="button"
         onClick={() => setOpen((o) => !o)}
         aria-haspopup="listbox"
         aria-expanded={open}
+        aria-label={label}
         className={`flex min-h-[40px] w-full items-center gap-2 rounded-control border bg-[var(--dd-trigger-bg)] px-3 py-[9px] text-left text-[13.5px] text-text transition-[border-color,box-shadow] ${triggerState}`}
       >
         <span className={`min-w-0 flex-1 truncate ${selected ? "" : "text-faint"}`}>
           {selected ? selected.name : placeholder}
         </span>
         <span
+          aria-hidden
           className={`flex flex-none text-faint transition-transform ${open ? "rotate-180" : ""}`}
         >
           <Icon.chevD width={14} height={14} />
@@ -150,16 +191,23 @@ export function CategorySelect({
           }`}
         >
           <div className="flex flex-none items-center gap-2 border-b border-line px-[11px] py-[9px]">
-            <Icon.search width={14} height={14} className="flex-none text-faint" />
+            <Icon.search aria-hidden width={14} height={14} className="flex-none text-faint" />
             <input
               ref={inputRef}
+              role="combobox"
+              aria-expanded
+              aria-controls={listId}
+              aria-autocomplete="list"
+              aria-activedescendant={active >= 0 ? `${listId}-opt-${active}` : undefined}
+              aria-label={`Filter ${label.toLowerCase()} options`}
+              autoComplete="off"
+              spellCheck={false}
               value={query}
               onChange={(e) => {
                 setQuery(e.target.value);
                 setActive(0);
               }}
               placeholder="Filter categories…"
-              spellCheck={false}
               className="min-w-0 flex-1 border-none bg-transparent text-[13.5px] text-text outline-none placeholder:text-faint"
             />
           </div>
@@ -168,7 +216,6 @@ export function CategorySelect({
             ref={listRef}
             id={listId}
             role="listbox"
-            aria-activedescendant={active >= 0 ? `${listId}-${active}` : undefined}
             className="overflow-y-auto overflow-x-hidden p-[5px]"
           >
             {flat.length === 0 && (
@@ -180,13 +227,13 @@ export function CategorySelect({
                   {g.group}
                 </div>
                 {g.items.map((c) => {
-                  const idx = flat.indexOf(c);
+                  const idx = indexById.get(c.id)!;
                   const isActive = idx === active;
                   const isSelected = c.id === value;
                   return (
                     <button
                       key={c.id}
-                      id={`${listId}-${idx}`}
+                      id={`${listId}-opt-${idx}`}
                       type="button"
                       data-idx={idx}
                       role="option"
@@ -199,7 +246,7 @@ export function CategorySelect({
                     >
                       <span className="min-w-0 flex-1 truncate">{c.name}</span>
                       {isSelected && (
-                        <span className="flex flex-none text-ink">
+                        <span aria-hidden className="flex flex-none text-ink">
                           <Icon.check width={14} height={14} />
                         </span>
                       )}
