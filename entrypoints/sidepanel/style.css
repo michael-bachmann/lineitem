@@ -29,8 +29,12 @@
   --shadow-pop: 0 14px 34px -10px rgba(47, 42, 51, .2), 0 3px 10px -3px rgba(47, 42, 51, .12);
 
   --radius-card: 13px;
-  --radius-sm: 8px;
+  --radius-sm: 8.32px;
   --radius-pill: 999px;
+
+  /* Product-thumbnail swatch (warm neutral frame) */
+  --swatch-bg: linear-gradient(180deg, #faf8f5, #efebe4);
+  --swatch-ring: rgba(47, 42, 51, .1);
 
   --font-sans: "Hanken Grotesk Variable", "Hanken Grotesk", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
 }
