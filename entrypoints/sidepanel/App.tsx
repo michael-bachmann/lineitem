@@ -7,6 +7,13 @@ import Help from "@/components/Help";
 import QueueView from "@/components/QueueView";
 import DetailView from "@/components/DetailView";
 import { isFullyClassified } from "@/lib/queue";
+import {
+  approveBatch,
+  approveTransaction,
+  getCategories,
+  getSettings,
+  sync,
+} from "@/lib/messaging";
 import type { QueueEntry, Category, ApprovalItem } from "@/lib/types";
 
 type View = "loading" | "onboarding" | "backfill_prompt" | "queue" | "settings" | "detail" | "help";
@@ -22,8 +29,7 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    browser.runtime
-      .sendMessage({ type: "GET_SETTINGS" })
+    getSettings()
       .then((response) => {
         if (response.accessToken && response.planId) {
           setPlanName(response.planName ?? "");
@@ -80,14 +86,14 @@ export default function App() {
     setSyncing(true);
     setError(null);
     try {
-      const catResponse = await browser.runtime.sendMessage({ type: "GET_CATEGORIES" });
+      const catResponse = await getCategories();
       if (catResponse?.error) {
         setError(catResponse.error);
         return;
       }
       setCategories(catResponse?.categories ?? []);
 
-      const result = await browser.runtime.sendMessage({ type: "SYNC" });
+      const result = await sync();
       if (result?.error) {
         setError(result.error);
         return;
@@ -109,10 +115,7 @@ export default function App() {
     setApproving(true);
     setError(null);
     try {
-      const result = await browser.runtime.sendMessage({
-        type: "APPROVE_BATCH",
-        ynabTransactionIds: idsToApprove,
-      });
+      const result = await approveBatch(idsToApprove);
       if (result?.error) {
         setError(result.error);
         return;
@@ -129,11 +132,7 @@ export default function App() {
   // Detail view
   if (view === "detail" && selectedEntry !== null) {
     const handleApprove = async (ynabTransactionId: string, items: ApprovalItem[]) => {
-      const result = await browser.runtime.sendMessage({
-        type: "APPROVE_TRANSACTION",
-        ynabTransactionId,
-        items,
-      });
+      const result = await approveTransaction(ynabTransactionId, items);
       if (result?.error) throw new Error(result.error);
       setQueue((prev) => prev.filter((e) => e.ynabTransaction.id !== ynabTransactionId));
     };
