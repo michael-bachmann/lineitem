@@ -1,8 +1,16 @@
 import { useState } from "react";
-import type { QueueEntry, Category, ApprovalItem } from "@/lib/types";
+import type { ApprovalItem, Category, QueueEntry } from "@/lib/types";
 import { formatCents, millunitsToCents } from "@/lib/money";
 import ItemCard from "@/components/ItemCard";
 import SplitBreakdown from "@/components/SplitBreakdown";
+import { BackLink } from "@/components/BackLink";
+import { Button } from "@/components/Button";
+import { SectionLabel } from "@/components/SectionLabel";
+import { StatusMessage } from "@/components/StatusMessage";
+import { StatusTile, statusInfo } from "@/components/status";
+import { Spinner } from "@/components/Spinner";
+import { CategorySelect } from "@/components/CategorySelect";
+import { Icon } from "@/components/icons";
 
 interface DetailViewProps {
   entry: QueueEntry;
@@ -11,25 +19,13 @@ interface DetailViewProps {
   onApprove: (ynabTransactionId: string, items: ApprovalItem[]) => Promise<void>;
 }
 
-// Show the bulk-apply row whenever there are at least two items, so even
-// small multi-item orders benefit from a single-tap "all same category" pick.
-const BULK_PICKER_THRESHOLD = 1;
-
-// Parse the order ID from an orderKey like "amazon:112-1234567-1234567"
+/** Parse the order id from an orderKey like "amazon:112-1234567-1234567". */
 function parseOrderId(orderKey: string): string {
-  const colonIndex = orderKey.indexOf(":");
-  return colonIndex >= 0 ? orderKey.slice(colonIndex + 1) : orderKey;
+  const i = orderKey.indexOf(":");
+  return i >= 0 ? orderKey.slice(i + 1) : orderKey;
 }
 
-function categoryOptions(categories: Category[]) {
-  const groups = categories.reduce<Map<string, Category[]>>((acc, cat) => {
-    const group = acc.get(cat.groupName) ?? [];
-    group.push(cat);
-    acc.set(cat.groupName, group);
-    return acc;
-  }, new Map());
-  return [...groups.entries()];
-}
+const STATUS_OF = { no_match: "nomatch", auth_required: "auth", error: "error" } as const;
 
 export default function DetailView({ entry, categories, onBack, onApprove }: DetailViewProps) {
   const { ynabTransaction, matchStatus } = entry;
@@ -37,49 +33,63 @@ export default function DetailView({ entry, categories, onBack, onApprove }: Det
   const [selectedCategories, setSelectedCategories] = useState<Map<number, string>>(() => {
     if (matchStatus.status !== "matched") return new Map();
     return matchStatus.classifiedItems.reduce((acc, item, i) => {
-      if (item.suggestedCategoryId !== null) {
-        acc.set(i, item.suggestedCategoryId);
-      }
+      if (item.suggestedCategoryId !== null) acc.set(i, item.suggestedCategoryId);
       return acc;
     }, new Map<number, string>());
   });
-
   const [approving, setApproving] = useState(false);
 
-  // Non-matched states: show back button + status message
+  // ---- non-matched states ----
   if (matchStatus.status !== "matched") {
-    const message =
-      matchStatus.status === "loading"
-        ? "Loading order match..."
-        : matchStatus.status === "no_match"
-        ? "No matching order found."
-        : matchStatus.status === "auth_required"
-        ? "Authentication required to fetch order."
-        : matchStatus.message;
+    if (matchStatus.status === "loading") {
+      return (
+        <div className="flex min-h-screen flex-col gap-3 bg-bg p-4 text-text">
+          <BackLink onClick={onBack} />
+          <StatusMessage kind="muted">
+            <Spinner size={16} /> Loading order match…
+          </StatusMessage>
+        </div>
+      );
+    }
 
+    const info = statusInfo({ status: STATUS_OF[matchStatus.status] });
+    const ActionIcon = info.action ? Icon[info.action.icon] : null;
     return (
-      <div className="min-h-screen bg-gray-950 text-gray-100 p-4 flex flex-col gap-4">
-        <button
-          onClick={onBack}
-          className="text-sm text-blue-400 hover:text-blue-300 text-left w-fit"
-        >
-          ← Back to queue
-        </button>
-        <p className="text-sm text-gray-400">{message}</p>
+      <div className="flex min-h-screen flex-col gap-3 bg-bg p-4 text-text">
+        <BackLink onClick={onBack} />
+        <div className="flex flex-col gap-[11px] px-[2px] pt-[14px]">
+          <div className="flex items-center gap-[11px]">
+            <StatusTile status={STATUS_OF[matchStatus.status]} size={38} />
+            <span className="text-[15.5px] font-semibold tracking-[-0.01em] text-text">
+              {info.text}
+            </span>
+          </div>
+          {info.reason && (
+            <p className="m-0 text-[13.5px] leading-[1.55] text-muted">{info.reason}</p>
+          )}
+          {info.action && (
+            <Button
+              variant={matchStatus.status === "auth_required" ? "primary" : "secondary"}
+              onClick={onBack}
+            >
+              {ActionIcon && <ActionIcon aria-hidden width={15} height={15} />} {info.action.label}
+            </Button>
+          )}
+        </div>
       </div>
     );
   }
 
+  // ---- matched ----
   const { order, classifiedItems } = matchStatus;
+  const totalCents = millunitsToCents(ynabTransaction.amount);
+  const orderId = parseOrderId(order.orderKey);
 
   const handleCategoryChange = (index: number, categoryId: string) => {
     setSelectedCategories((prev) => {
       const next = new Map(prev);
-      if (categoryId) {
-        next.set(index, categoryId);
-      } else {
-        next.delete(index);
-      }
+      if (categoryId) next.set(index, categoryId);
+      else next.delete(index);
       return next;
     });
   };
@@ -95,16 +105,12 @@ export default function DetailView({ entry, categories, onBack, onApprove }: Det
     });
   };
 
-  const uncategorizedCount = classifiedItems.filter((_, i) => !selectedCategories.has(i)).length;
-  const allCategorized = uncategorizedCount === 0;
-  const showBulkPicker =
-    classifiedItems.length > BULK_PICKER_THRESHOLD && uncategorizedCount > 0;
+  const uncats = classifiedItems.filter((_, i) => !selectedCategories.has(i)).length;
 
   const handleApprove = async () => {
-    if (!allCategorized || approving) return;
+    if (uncats > 0 || approving) return;
     const items: ApprovalItem[] = classifiedItems.map((item, i) => ({
       productId: item.productId,
-      // allCategorized guarantees every index is present
       categoryId: selectedCategories.get(i)!,
     }));
     setApproving(true);
@@ -116,115 +122,96 @@ export default function DetailView({ entry, categories, onBack, onApprove }: Det
     }
   };
 
-  const totalCents = millunitsToCents(ynabTransaction.amount);
-  const orderId = parseOrderId(order.orderKey);
-
-  // Build SplitBreakdown items from current selections
-  const splitItems = order.items.map((item, i) => ({
+  const splitItems = classifiedItems.map((item, i) => ({
     allocatedCents: item.allocatedCents,
     categoryId: selectedCategories.get(i) ?? null,
   }));
 
-  const optionGroups = categoryOptions(categories);
-
   return (
-    <div className="min-h-screen bg-gray-950 text-gray-100 p-4 flex flex-col gap-4">
-      {/* Back link */}
-      <button
-        onClick={onBack}
-        className="text-sm text-blue-400 hover:text-blue-300 text-left w-fit"
-      >
-        ← Back to queue
-      </button>
+    <div className="flex min-h-screen flex-col gap-3 bg-bg p-4 text-text">
+      <BackLink onClick={onBack} />
 
-      {/* Transaction header */}
-      <div className="rounded-md bg-gray-900 border border-gray-700 px-3 py-2.5 flex flex-col gap-1">
-        <div className="flex items-center justify-between gap-2">
-          <span className="text-base font-semibold text-gray-100">
-            {formatCents(totalCents)}
-          </span>
-          <span className="text-xs text-gray-400">{ynabTransaction.date}</span>
+      <div className="flex items-start gap-3 rounded-card border border-line bg-surface px-[14px] py-[13px] shadow-card">
+        <StatusTile status="matched" size={44} />
+        <div className="flex min-w-0 flex-1 flex-col gap-1 pt-[2px]">
+          <div className="flex items-baseline gap-[10px]">
+            <span className="min-w-0 flex-1 truncate text-[15px] font-semibold tracking-[-0.008em] text-text">
+              {ynabTransaction.payee_name ?? "Unknown payee"}
+            </span>
+            <span className="tabular flex-none text-[18px] font-bold tracking-[-0.01em] text-text">
+              {formatCents(totalCents)}
+            </span>
+          </div>
+          <div className="flex items-baseline gap-[10px]">
+            <span className="tabular min-w-0 flex-1 truncate text-[12px] text-faint">
+              Order {orderId}
+            </span>
+            <span className="tabular flex-none text-[12px] text-faint">{ynabTransaction.date}</span>
+          </div>
         </div>
-        {ynabTransaction.payee_name && (
-          <span className="text-sm text-gray-300">{ynabTransaction.payee_name}</span>
-        )}
-        <span className="text-xs text-gray-500">Order {orderId}</span>
       </div>
 
-      {/* Items section */}
-      <div className="flex flex-col gap-2">
-        <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">Items</p>
+      <SectionLabel>Items</SectionLabel>
 
-        {showBulkPicker && (
-          <div className="flex flex-col gap-1.5 px-3 py-2 rounded-md bg-gray-900 border border-gray-700">
-            <span className="text-xs text-gray-400">
-              Apply to uncategorized ({uncategorizedCount}):
+      {uncats > 0 && (
+        <div className="flex flex-col gap-[9px] rounded-card border border-[var(--bulk-line)] bg-[var(--bulk-bg)] px-3 py-[11px]">
+          <div className="flex items-center gap-[9px]">
+            <span className="flex h-[25px] w-[25px] flex-none items-center justify-center rounded-[calc(var(--radius-sm)*0.8)] bg-attention text-white">
+              <Icon.wand aria-hidden width={14} height={14} />
             </span>
-            <select
-              aria-label="Apply category to uncategorized items"
-              value=""
-              onChange={(e) => {
-                handleBulkApply(e.target.value);
-              }}
-              className="w-full rounded bg-gray-950 border border-gray-600 px-2 py-1 text-xs text-gray-200 focus:outline-none focus:ring-1 focus:ring-blue-500"
-            >
-              <option value="" disabled>— Select category —</option>
-              {optionGroups.map(([groupName, groupCategories]) => (
-                <optgroup key={groupName} label={groupName}>
-                  {groupCategories.map((cat) => (
-                    <option key={cat.id} value={cat.id}>
-                      {cat.name}
-                    </option>
-                  ))}
-                </optgroup>
-              ))}
-            </select>
+            <span className="min-w-0 flex-1 truncate text-[12.5px] font-semibold tracking-[-0.003em] text-text">
+              Apply to all remaining
+            </span>
+            <span className="tabular min-w-5 flex-none rounded-full border border-attention-line bg-attention-weak px-[6px] py-px text-center text-[11px] font-semibold text-attention">
+              {uncats}
+            </span>
           </div>
-        )}
+          <CategorySelect
+            categories={categories}
+            value={null}
+            placeholder="Choose a category…"
+            label="Bulk category"
+            onChange={handleBulkApply}
+          />
+        </div>
+      )}
 
+      <div className="flex flex-col gap-3">
         {classifiedItems.map((item, i) => (
-          <div key={item.productId} className="flex flex-col gap-1">
-            <ItemCard
-              title={item.title}
-              imageUrl={item.imageUrl}
-              price={item.unitPriceCents}
-              quantity={item.quantity}
-              selectedCategoryId={selectedCategories.get(i) ?? null}
-              classificationSource={item.classificationSource}
-              categories={categories}
-              onCategoryChange={(categoryId) => handleCategoryChange(i, categoryId)}
-            />
-            {item.classificationSource === "embedding" && item.matchedSource && (
-              <p className="text-xs text-gray-500 italic pl-2">
-                Suggested based on similarity to your past “{item.matchedSource.title}”.
-              </p>
-            )}
-          </div>
+          <ItemCard
+            key={item.productId}
+            title={item.title}
+            imageUrl={item.imageUrl}
+            unitPriceCents={item.unitPriceCents}
+            quantity={item.quantity}
+            selectedCategoryId={selectedCategories.get(i) ?? null}
+            classificationSource={item.classificationSource}
+            categories={categories}
+            onCategoryChange={(id) => handleCategoryChange(i, id)}
+            hint={
+              item.classificationSource === "embedding" && item.matchedSource
+                ? `Suggested based on similarity to your past “${item.matchedSource.title}”.`
+                : undefined
+            }
+          />
         ))}
       </div>
 
-      {/* Split breakdown */}
-      <SplitBreakdown
-        items={splitItems}
-        totalAmountCents={totalCents}
-        categories={categories}
-      />
+      <SplitBreakdown items={splitItems} totalAmountCents={totalCents} categories={categories} />
 
-      {/* Approve button */}
-      <button
-        onClick={handleApprove}
-        disabled={!allCategorized || approving}
-        className="w-full rounded-md px-4 py-2.5 text-sm font-medium transition-colors
-          disabled:opacity-50 disabled:cursor-not-allowed
-          bg-blue-600 hover:bg-blue-500 text-white
-          disabled:bg-blue-600"
-      >
-        {approving
-          ? "Approving..."
-          : allCategorized
-          ? "Approve"
-          : `Approve (${uncategorizedCount} item${uncategorizedCount !== 1 ? "s" : ""} uncategorized)`}
-      </button>
+      <div className="sticky bottom-0 -mx-4 -mb-4 px-4 pt-3 [background:linear-gradient(180deg,transparent,var(--bg)_38%)]">
+        <Button
+          variant="primary"
+          disabled={uncats > 0}
+          busy={approving}
+          busyLabel="Approving…"
+          onClick={handleApprove}
+        >
+          {uncats > 0
+            ? `${uncats} item${uncats === 1 ? "" : "s"} still need${uncats === 1 ? "s" : ""} a category`
+            : "Approve & write split"}
+        </Button>
+      </div>
     </div>
   );
 }

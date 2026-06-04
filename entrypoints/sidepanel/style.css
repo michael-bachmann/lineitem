@@ -57,6 +57,10 @@
   /* Category-dropdown trigger fill — a subtle inset between bg and surface. */
   --dd-trigger-bg: color-mix(in oklab, var(--bg) 60%, var(--surface));
 
+  /* Bulk-apply helper — soft attention-tinted row over the surface. */
+  --bulk-bg: color-mix(in oklab, var(--attention) 8%, var(--surface));
+  --bulk-line: color-mix(in oklab, var(--attention) 24%, var(--border));
+
   /* Danger button — mixed over the opaque surface (distinct from the
      -weak/-line tints above, which mix over transparent). */
   --btn-danger-bg: color-mix(in oklab, var(--danger) 14%, var(--surface));
