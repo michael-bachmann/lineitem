@@ -35,5 +35,7 @@ docs/design/
 # Storybook build output
 storybook-static/
 
-# Local Storybook screenshots (visual verification)
+# Local Storybook screenshots + the headless-shot tool (visual verification,
+# not a project dependency — playwright-core is installed ad hoc, not committed)
 /cs-*.png
+/scripts/shot.mjs
