@@ -1,92 +1,80 @@
 import type { Category, ClassifiedItem } from "@/lib/types";
 import { formatCents } from "@/lib/money";
-import { ClassificationIndicator } from "@/components/ClassificationIndicator";
+import { Thumb } from "./Thumb";
+import { SourceTag, type SourceKind } from "./SourceTag";
+import { CategorySelect } from "./CategorySelect";
 
 interface ItemCardProps {
   title: string;
-  imageUrl: string;
-  price: number; // cents per unit
+  imageUrl?: string | null;
+  unitPriceCents: number;
   quantity: number;
   selectedCategoryId: string | null;
   classificationSource: ClassifiedItem["classificationSource"];
   categories: Category[];
-  onCategoryChange: (categoryId: string) => void;
+  onCategoryChange: (id: string) => void;
+  /** Optional "suggested based on similarity" hint. */
+  hint?: string;
+}
+
+function sourceKind(
+  selected: string | null,
+  src: ItemCardProps["classificationSource"],
+): SourceKind {
+  if (selected === null) return "needs";
+  if (src === "embedding") return "embed";
+  return "ok";
 }
 
 export default function ItemCard({
   title,
   imageUrl,
-  price,
+  unitPriceCents,
   quantity,
   selectedCategoryId,
   classificationSource,
   categories,
   onCategoryChange,
+  hint,
 }: ItemCardProps) {
-  const uncategorized = selectedCategoryId === null;
-
-  // Build a map of groupName → categories for rendering <optgroup> elements.
-  const groups = categories.reduce<Map<string, Category[]>>((acc, cat) => {
-    const group = acc.get(cat.groupName) ?? [];
-    group.push(cat);
-    acc.set(cat.groupName, group);
-    return acc;
-  }, new Map());
-
-  const cardBorderClass = uncategorized ? "border-yellow-500" : "border-gray-700";
-  const dropdownBorderClass = uncategorized ? "border-yellow-500" : "border-gray-600";
+  const needs = selectedCategoryId === null;
 
   return (
-    <div className={`flex gap-3 rounded-md bg-gray-900 border ${cardBorderClass} px-3 py-2.5`}>
-      {/* Thumbnail */}
-      <div className="shrink-0 w-12 h-12 rounded bg-gray-800 flex items-center justify-center overflow-hidden">
-        {imageUrl ? (
-          <img src={imageUrl} alt={title} className="w-full h-full object-cover" />
-        ) : (
-          <span className="text-2xl" role="img" aria-label="product">📦</span>
-        )}
+    <div
+      className={`flex flex-col gap-[11px] rounded-card border bg-surface p-[14px] shadow-card ${
+        needs ? "border-attention-line" : "border-line"
+      }`}
+    >
+      <div className="flex items-start gap-[11px]">
+        <Thumb src={imageUrl} alt={title} />
+        <div className="flex min-w-0 flex-1 flex-col gap-[5px]">
+          <div className="line-clamp-2 text-[14px] font-semibold leading-[1.32] tracking-[-0.006em] text-text [text-wrap:pretty]">
+            {title}
+          </div>
+          <div className="flex flex-wrap items-center justify-between gap-[10px]">
+            <span className="tabular text-[13px] text-muted">
+              {formatCents(unitPriceCents)}
+              {quantity > 1 && (
+                <>
+                  {" "}
+                  <span className="text-faint">× {quantity}</span>{" "}
+                  <span className="text-faint">= {formatCents(unitPriceCents * quantity)}</span>
+                </>
+              )}
+            </span>
+            <SourceTag source={sourceKind(selectedCategoryId, classificationSource)} />
+          </div>
+        </div>
       </div>
 
-      {/* Content */}
-      <div className="flex flex-col gap-1.5 min-w-0 flex-1">
-        {/* Title */}
-        <div className="flex items-center gap-1 min-w-0">
-          <ClassificationIndicator source={classificationSource} />
-          <span className="text-sm font-medium text-gray-100 truncate">{title}</span>
-        </div>
+      <CategorySelect
+        categories={categories}
+        value={selectedCategoryId}
+        needs={needs}
+        onChange={onCategoryChange}
+      />
 
-        {/* Price */}
-        <div className="text-xs text-gray-400">
-          {quantity > 1 ? (
-            <>
-              {formatCents(price)}{" "}
-              <span className="text-gray-500">
-                × {quantity} = {formatCents(price * quantity)}
-              </span>
-            </>
-          ) : (
-            formatCents(price)
-          )}
-        </div>
-
-        {/* Category dropdown */}
-        <select
-          value={selectedCategoryId ?? ""}
-          onChange={(e) => onCategoryChange(e.target.value)}
-          className={`w-full rounded bg-gray-950 border ${dropdownBorderClass} px-2 py-1 text-xs text-gray-200 focus:outline-none focus:ring-1 focus:ring-blue-500`}
-        >
-          <option value="" disabled>— Select category —</option>
-          {[...groups.entries()].map(([groupName, groupCategories]) => (
-            <optgroup key={groupName} label={groupName}>
-              {groupCategories.map((cat) => (
-                <option key={cat.id} value={cat.id}>
-                  {cat.name}
-                </option>
-              ))}
-            </optgroup>
-          ))}
-        </select>
-      </div>
+      {hint && <p className="m-0 pl-px text-[12px] leading-[1.5] text-faint">{hint}</p>}
     </div>
   );
 }
