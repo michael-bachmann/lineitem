@@ -1,5 +1,5 @@
 import type { QueueEntry } from "@/lib/types";
-import { entryStatus, isFullyClassified } from "@/lib/queue";
+import { entryStatus, isFullyClassified, type QueueDisplayStatus } from "@/lib/queue";
 import { millunitsToCents } from "@/lib/money";
 import TransactionCard, { type TransactionVM } from "@/components/TransactionCard";
 import { BrandRow } from "@/components/Mark";
@@ -19,7 +19,7 @@ interface QueueViewProps {
   onSettings: () => void;
 }
 
-const GROUPS: { key: string; label: string; has: (s: string) => boolean }[] = [
+const GROUPS: { key: string; label: string; has: (s: QueueDisplayStatus) => boolean }[] = [
   { key: "review", label: "Needs review", has: (s) => s === "partial" },
   { key: "ready", label: "Ready to approve", has: (s) => s === "classified" },
   { key: "working", label: "Checking", has: (s) => s === "loading" },
@@ -47,6 +47,8 @@ export default function QueueView({
     return {
       id: entry.ynabTransaction.id,
       payee: entry.ynabTransaction.payee_name ?? "Unknown payee",
+      // Magnitude only for now — refund/inflow sign display needs the design's
+      // negative-card treatment (ui-shots/txn-card-negative). TODO: handle sign.
       amount: Math.abs(millunitsToCents(entry.ynabTransaction.amount)) / 100,
       dateShort: formatDate(entry.ynabTransaction.date),
       status,
@@ -69,16 +71,19 @@ export default function QueueView({
           <BrandRow />
         </div>
         <IconButton aria-label="Settings" onClick={onSettings}>
-          <Icon.gear width={18} height={18} />
+          <Icon.gear aria-hidden width={18} height={18} />
         </IconButton>
         <Button variant="primary" sm busy={syncing} busyLabel="Syncing…" onClick={onSync}>
-          {!syncing && <Icon.sync width={15} height={15} />} Sync
+          {!syncing && <Icon.sync aria-hidden width={15} height={15} />} Sync
         </Button>
       </div>
 
       {error && (
-        <div className="flex items-start gap-[9px] rounded-card border border-danger-line bg-danger-weak px-[13px] py-[11px] text-[13px] leading-[1.5] text-danger [&_svg]:mt-px [&_svg]:h-4 [&_svg]:w-4 [&_svg]:flex-none">
-          <Icon.alertCircle />
+        <div
+          role="alert"
+          className="flex items-start gap-[9px] rounded-card border border-danger-line bg-danger-weak px-[13px] py-[11px] text-[13px] leading-[1.5] text-danger [&_svg]:mt-px [&_svg]:h-4 [&_svg]:w-4 [&_svg]:flex-none"
+        >
+          <Icon.alertCircle aria-hidden />
           <span>Sync failed: {error}</span>
         </div>
       )}
@@ -86,7 +91,7 @@ export default function QueueView({
       {empty ? (
         <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 py-10 text-center text-faint">
           <span className="flex h-[52px] w-[52px] items-center justify-center rounded-full border border-line bg-surface">
-            <Icon.inbox width={24} height={24} />
+            <Icon.inbox aria-hidden width={24} height={24} />
           </span>
           <p className="m-0 max-w-[230px] text-[13.5px] leading-[1.5]">
             No transactions to review. Tap <b className="font-semibold text-muted">Sync</b> to check

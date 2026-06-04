@@ -1,3 +1,5 @@
+import type { ReactNode } from "react";
+import type { QueueDisplayStatus } from "@/lib/queue";
 import { Money } from "./Money";
 import { statusInfo, type StatusKind } from "./status";
 
@@ -5,12 +7,12 @@ export interface TransactionVM {
   id: string;
   /** Merchant / payee, shown as stored (often uppercase). */
   payee: string;
-  /** Amount in dollars (display magnitude). */
+  /** Amount in dollars (display magnitude — see QueueView for the refund TODO). */
   amount: number;
   /** Compact date, e.g. "May 20". */
   dateShort: string;
   /** Presentational status (see lib/queue `entryStatus`). */
-  status: string;
+  status: QueueDisplayStatus;
   /** Uncategorized item count, for the `partial` status text. */
   needs?: number;
 }
@@ -30,6 +32,9 @@ const STATUS_TEXT: Record<StatusKind, string> = {
   neutral: "text-muted",
 };
 
+const CARD =
+  "flex w-full flex-col gap-[5px] rounded-card border border-line bg-surface px-[14px] py-3 text-left shadow-card transition enabled:hover:border-line-strong enabled:hover:bg-surface-2 enabled:active:translate-y-px";
+
 export default function TransactionCard({
   txn,
   onOpen,
@@ -38,17 +43,12 @@ export default function TransactionCard({
   onOpen?: () => void;
 }) {
   const info = statusInfo({ status: txn.status, needs: txn.needs });
-  const openable = txn.status !== "loading";
+  const loading = txn.status === "loading";
 
-  return (
-    <button
-      type="button"
-      disabled={!openable}
-      onClick={() => openable && onOpen?.()}
-      className="flex w-full flex-col gap-[5px] rounded-card border border-line bg-surface px-[14px] py-3 text-left shadow-card transition enabled:hover:border-line-strong enabled:hover:bg-surface-2 enabled:active:translate-y-px disabled:cursor-default"
-    >
+  const body: ReactNode = (
+    <>
       <div className="flex items-center gap-[9px]">
-        <span className={`h-2 w-2 flex-none rounded-full ${DOT[info.kind]}`} />
+        <span aria-hidden className={`h-2 w-2 flex-none rounded-full ${DOT[info.kind]}`} />
         <span className="min-w-0 flex-1 truncate text-[14.5px] font-semibold tracking-[-0.006em] text-text">
           {txn.payee}
         </span>
@@ -60,6 +60,22 @@ export default function TransactionCard({
         </span>
         <span className="flex-none text-[12.5px] text-faint">{txn.dateShort}</span>
       </div>
+    </>
+  );
+
+  // A still-resolving row isn't a disabled action — render it as a non-interactive
+  // element marked aria-busy, not a <button disabled> (which AT skips).
+  if (loading) {
+    return (
+      <div className={CARD} aria-busy="true">
+        {body}
+      </div>
+    );
+  }
+
+  return (
+    <button type="button" onClick={() => onOpen?.()} className={CARD}>
+      {body}
     </button>
   );
 }
