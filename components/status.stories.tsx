@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { StatusTile, statusInfo } from "./status";
+import { SectionLabel } from "./SectionLabel";
 
 const STATUSES = ["classified", "partial", "loading", "nomatch", "auth", "error", "matched"];
 
@@ -7,7 +8,7 @@ function StatusKit() {
   return (
     <div className="flex flex-col gap-6 text-text" style={{ width: 384 }}>
       <section>
-        <h3 className="mb-2 text-[11px] font-bold uppercase tracking-[0.055em] text-faint">Status tiles</h3>
+        <SectionLabel className="mb-2">Status tiles</SectionLabel>
         <div className="flex flex-wrap gap-3">
           {STATUSES.map((s) => (
             <div key={s} className="flex flex-col items-center gap-1">
@@ -19,7 +20,7 @@ function StatusKit() {
       </section>
 
       <section>
-        <h3 className="mb-2 text-[11px] font-bold uppercase tracking-[0.055em] text-faint">statusInfo() copy</h3>
+        <SectionLabel className="mb-2">statusInfo() copy</SectionLabel>
         <div className="flex flex-col gap-1">
           {STATUSES.map((s) => {
             const info = statusInfo({ status: s, needs: 2 });

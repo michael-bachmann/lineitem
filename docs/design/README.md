@@ -21,6 +21,14 @@ Authoritative spec for the side-panel redesign. Read this before any UI PR.
 
 Only remaining primitive: **`CategorySelect`** (PR 4).
 
+### Kit conventions (follow these in new components)
+
+- **Named exports** for every component (no `default` exports).
+- **Every presentational leaf accepts `className`** and merges it last (so callers can position it). Follow the existing `` `${BASE} ${className}` `` pattern.
+- **Tailwind utilities + tokens by default.** Inline `style` is allowed **only** for runtime-dynamic values (e.g. `Spinner` `size`) or things Tailwind can't express (the `Thumb` gradient/ring). Component-specific color math lives as `--btn-*`-style tokens in `style.css`, not inline `color-mix(...)` walls.
+- **`StatusMessage` is the one icon-as-child component** — pass an unsized icon as the first child and it clamps to 16px. Everything else takes explicit props.
+- One Storybook story per component showing its states/variants.
+
 ## Every screen PR owes ALL its states (24 total)
 
 Build a Storybook story per state, verified against its branch + screenshot.

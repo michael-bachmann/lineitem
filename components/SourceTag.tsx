@@ -15,11 +15,11 @@ const LABEL = { ok: "From history", embed: "Suggested", needs: "Needs a category
  * Classification-source tag on an item card: ✓ From history (neutral) /
  * ✦ Suggested (link-blue) / ⚠ Needs a category (attention). Icon + label.
  */
-export function SourceTag({ source }: { source: SourceKind }) {
+export function SourceTag({ source, className = "" }: { source: SourceKind; className?: string }) {
   const Glyph = GLYPH[source];
   return (
     <span
-      className={`inline-flex items-center gap-[5px] whitespace-nowrap text-[11.5px] font-medium ${STYLE[source]}`}
+      className={`inline-flex items-center gap-[5px] whitespace-nowrap text-[11.5px] font-medium ${STYLE[source]} ${className}`}
     >
       <Glyph width={13} height={13} className="flex-none" /> {LABEL[source]}
     </span>

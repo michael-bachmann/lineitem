@@ -2,11 +2,11 @@ import type { ButtonHTMLAttributes } from "react";
 
 /**
  * Compact icon-only button (the top-bar gear, and reused in Settings).
- * 38px tall, surface fill, pill radius in light mode. Distinct from `Button` —
- * it's a quiet affordance, not a primary/secondary action. Always pass an
- * `aria-label`.
+ * 38px tall (a deliberately smaller, quieter affordance than `Button`'s 44px
+ * touch target — not a primary/secondary action), surface fill, pill radius.
+ * Always pass an `aria-label`.
  */
-export default function IconButton({
+export function IconButton({
   className = "",
   ...rest
 }: ButtonHTMLAttributes<HTMLButtonElement>) {

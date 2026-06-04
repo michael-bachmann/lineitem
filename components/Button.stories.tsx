@@ -1,7 +1,8 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import type { ReactNode } from "react";
-import Button from "./Button";
+import { Button } from "./Button";
 import { Icon } from "./icons";
+import { SectionLabel } from "./SectionLabel";
 
 const meta = {
   title: "Primitives/Button",
@@ -50,7 +51,7 @@ export const AllVariants: StoryObj = {
     <div className="flex flex-col gap-4">
       {ROWS.map((r) => (
         <div key={r.label} className="flex flex-col gap-1">
-          <span className="text-[11px] font-bold uppercase tracking-[0.055em] text-faint">{r.label}</span>
+          <SectionLabel>{r.label}</SectionLabel>
           {r.node}
         </div>
       ))}

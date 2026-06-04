@@ -1,5 +1,5 @@
 interface SpinnerProps {
-  /** Diameter in px (15 default; 16 in tiles, 11 in chips). */
+  /** Diameter in px (15 default; 16 in status tiles, 11 inline in messages). */
   size?: number;
   /** White spinner for use on a colored/primary surface. */
   onAccent?: boolean;

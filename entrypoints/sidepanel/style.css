@@ -49,6 +49,13 @@
   --attention-line: color-mix(in oklab, var(--attention) 42%, transparent);
   --danger-weak: color-mix(in oklab, var(--danger) 16%, transparent);
   --danger-line: color-mix(in oklab, var(--danger) 45%, transparent);
+
+  /* Danger button — mixed over the opaque surface (distinct from the
+     -weak/-line tints above, which mix over transparent). */
+  --btn-danger-bg: color-mix(in oklab, var(--danger) 14%, var(--surface));
+  --btn-danger-bg-hover: color-mix(in oklab, var(--danger) 22%, var(--surface));
+  --btn-danger-line: color-mix(in oklab, var(--danger) 34%, transparent);
+  --btn-danger-text: color-mix(in oklab, var(--danger) 90%, #000);
 }
 
 /* ---- 3. Register tokens with Tailwind (utilities) ----------------- */

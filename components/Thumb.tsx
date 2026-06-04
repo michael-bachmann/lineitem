@@ -9,12 +9,20 @@ const FRAME =
   "relative h-[50px] w-[50px] flex-none overflow-hidden rounded-control border shadow-[inset_0_1px_0_rgba(255,255,255,.5),inset_0_0_0_1px_rgba(0,0,0,.03)]";
 const SWATCH = { background: "var(--swatch-bg)", borderColor: "var(--swatch-ring)" } as const;
 
-export function Thumb({ src, alt = "" }: { src?: string | null; alt?: string }) {
+export function Thumb({
+  src,
+  alt = "",
+  className = "",
+}: {
+  src?: string | null;
+  alt?: string;
+  className?: string;
+}) {
   const [failed, setFailed] = useState(false);
 
   if (src && !failed) {
     return (
-      <div className={FRAME} style={SWATCH}>
+      <div className={`${FRAME} ${className}`} style={SWATCH}>
         <img
           src={src}
           alt={alt}
@@ -28,7 +36,7 @@ export function Thumb({ src, alt = "" }: { src?: string | null; alt?: string }) 
 
   return (
     <div
-      className={`${FRAME} flex items-center justify-center text-faint`}
+      className={`${FRAME} flex items-center justify-center text-faint ${className}`}
       style={SWATCH}
       title="No product image"
     >

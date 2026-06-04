@@ -33,12 +33,14 @@ const VARIANT: Record<ButtonVariant, string> = {
     "bg-ink text-ink-fg border-transparent enabled:hover:[filter:brightness(1.4)] disabled:opacity-100 disabled:bg-surface-2 disabled:text-faint disabled:border-line",
   ghost:
     "bg-transparent text-muted border-line enabled:hover:bg-surface enabled:hover:text-text disabled:opacity-55",
+  // Danger tints are their own tokens (not --danger-weak/-line, which are
+  // mixed over transparent — the button mixes over surface). See style.css.
   danger:
-    "bg-[color-mix(in_oklab,var(--danger)_14%,var(--surface))] border-[color-mix(in_oklab,var(--danger)_34%,transparent)] text-[color-mix(in_oklab,var(--danger)_90%,#000)] enabled:hover:bg-[color-mix(in_oklab,var(--danger)_22%,var(--surface))] disabled:opacity-55",
+    "bg-[var(--btn-danger-bg)] border-[var(--btn-danger-line)] text-[var(--btn-danger-text)] enabled:hover:bg-[var(--btn-danger-bg-hover)] disabled:opacity-55",
 };
 
 /** Primary action / form button. See variants in the design's primitive kit. */
-export default function Button({
+export function Button({
   variant = "secondary",
   sm = false,
   busy = false,

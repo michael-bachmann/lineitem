@@ -18,13 +18,15 @@ const KIND: Record<StatusMessageKind, string> = {
 export function StatusMessage({
   kind = "muted",
   children,
+  className = "",
 }: {
   kind?: StatusMessageKind;
   children: ReactNode;
+  className?: string;
 }) {
   return (
     <span
-      className={`inline-flex items-center gap-2 text-[13.5px] [&_svg]:h-4 [&_svg]:w-4 [&_svg]:flex-none ${KIND[kind]}`}
+      className={`inline-flex items-center gap-2 text-[13.5px] [&_svg]:h-4 [&_svg]:w-4 [&_svg]:flex-none ${KIND[kind]} ${className}`}
     >
       {children}
     </span>

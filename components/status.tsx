@@ -10,7 +10,10 @@ export interface StatusAction {
 }
 
 export interface StatusInfo {
+  /** Drives the transaction-row dot + status-text color (TransactionCard). */
   kind: StatusKind;
+  /** Drives the StatusTile background. A separate axis from `kind` — it carries
+   *  an extra `ok` variant — though `statusInfo` currently sets them in step. */
   tile: TileKind;
   text: string;
   glyph?: IconComponent;
@@ -88,12 +91,20 @@ const TILE: Record<TileKind, string> = {
 };
 
 /** Square status/merchant tile anchoring a row (40px). */
-export function StatusTile({ status, size = 40 }: { status: string; size?: number }) {
+export function StatusTile({
+  status,
+  size = 40,
+  className = "",
+}: {
+  status: string;
+  size?: number;
+  className?: string;
+}) {
   const info = statusInfo({ status });
   const Glyph = info.glyph;
   return (
     <div
-      className={`flex flex-none items-center justify-center rounded-control ${TILE[info.tile]}`}
+      className={`flex flex-none items-center justify-center rounded-control ${TILE[info.tile]} ${className}`}
       style={{ width: size, height: size }}
     >
       {info.spin ? <Spinner size={16} /> : Glyph ? <Glyph width={19} height={19} /> : null}
