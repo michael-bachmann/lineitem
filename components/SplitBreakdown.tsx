@@ -31,6 +31,9 @@ export default function SplitBreakdown({ items, totalAmountCents, categories }: 
     uncategorized: key === "__uncat",
   }));
 
+  // Defensive backstop: AllocatedTransaction guarantees allocations sum to the
+  // charge, so this should always match in practice — but surface drift (e.g. a
+  // stale re-sync) rather than silently showing a wrong total.
   const matchesTotal = sum(items.map((i) => i.allocatedCents)) === totalAmountCents;
 
   return (

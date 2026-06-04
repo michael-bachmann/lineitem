@@ -3,13 +3,13 @@ import type { ApprovalItem, Category, QueueEntry } from "@/lib/types";
 import { formatCents, millunitsToCents } from "@/lib/money";
 import ItemCard from "@/components/ItemCard";
 import SplitBreakdown from "@/components/SplitBreakdown";
+import { BulkApply } from "@/components/BulkApply";
 import { BackLink } from "@/components/BackLink";
 import { Button } from "@/components/Button";
 import { SectionLabel } from "@/components/SectionLabel";
 import { StatusMessage } from "@/components/StatusMessage";
 import { StatusTile, statusInfo } from "@/components/status";
 import { Spinner } from "@/components/Spinner";
-import { CategorySelect } from "@/components/CategorySelect";
 import { Icon } from "@/components/icons";
 
 interface DetailViewProps {
@@ -57,12 +57,17 @@ export default function DetailView({ entry, categories, onBack, onApprove }: Det
     return (
       <div className="flex min-h-screen flex-col gap-3 bg-bg p-4 text-text">
         <BackLink onClick={onBack} />
-        <div className="flex flex-col gap-[11px] px-[2px] pt-[14px]">
+        <div
+          role={matchStatus.status === "error" ? "alert" : undefined}
+          className="flex flex-col gap-[11px] px-[2px] pt-[14px]"
+        >
           <div className="flex items-center gap-[11px]">
-            <StatusTile status={STATUS_OF[matchStatus.status]} size={38} />
-            <span className="text-[15.5px] font-semibold tracking-[-0.01em] text-text">
-              {info.text}
+            <span aria-hidden className="contents">
+              <StatusTile status={STATUS_OF[matchStatus.status]} size={38} />
             </span>
+            <h2 className="m-0 text-[15.5px] font-semibold tracking-[-0.01em] text-text">
+              {info.text}
+            </h2>
           </div>
           {info.reason && (
             <p className="m-0 text-[13.5px] leading-[1.55] text-muted">{info.reason}</p>
@@ -132,7 +137,9 @@ export default function DetailView({ entry, categories, onBack, onApprove }: Det
       <BackLink onClick={onBack} />
 
       <div className="flex items-start gap-3 rounded-card border border-line bg-surface px-[14px] py-[13px] shadow-card">
-        <StatusTile status="matched" size={44} />
+        <span aria-hidden className="contents">
+          <StatusTile status="matched" size={44} />
+        </span>
         <div className="flex min-w-0 flex-1 flex-col gap-1 pt-[2px]">
           <div className="flex items-baseline gap-[10px]">
             <span className="min-w-0 flex-1 truncate text-[15px] font-semibold tracking-[-0.008em] text-text">
@@ -154,26 +161,7 @@ export default function DetailView({ entry, categories, onBack, onApprove }: Det
       <SectionLabel>Items</SectionLabel>
 
       {uncats > 0 && (
-        <div className="flex flex-col gap-[9px] rounded-card border border-[var(--bulk-line)] bg-[var(--bulk-bg)] px-3 py-[11px]">
-          <div className="flex items-center gap-[9px]">
-            <span className="flex h-[25px] w-[25px] flex-none items-center justify-center rounded-[calc(var(--radius-sm)*0.8)] bg-attention text-white">
-              <Icon.wand aria-hidden width={14} height={14} />
-            </span>
-            <span className="min-w-0 flex-1 truncate text-[12.5px] font-semibold tracking-[-0.003em] text-text">
-              Apply to all remaining
-            </span>
-            <span className="tabular min-w-5 flex-none rounded-full border border-attention-line bg-attention-weak px-[6px] py-px text-center text-[11px] font-semibold text-attention">
-              {uncats}
-            </span>
-          </div>
-          <CategorySelect
-            categories={categories}
-            value={null}
-            placeholder="Choose a category…"
-            label="Bulk category"
-            onChange={handleBulkApply}
-          />
-        </div>
+        <BulkApply count={uncats} categories={categories} onApply={handleBulkApply} />
       )}
 
       <div className="flex flex-col gap-3">

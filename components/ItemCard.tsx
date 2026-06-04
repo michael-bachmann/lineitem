@@ -1,4 +1,5 @@
 import type { Category, ClassifiedItem } from "@/lib/types";
+import { formatCents } from "@/lib/money";
 import { Thumb } from "./Thumb";
 import { SourceTag, type SourceKind } from "./SourceTag";
 import { CategorySelect } from "./CategorySelect";
@@ -37,8 +38,6 @@ export default function ItemCard({
   hint,
 }: ItemCardProps) {
   const needs = selectedCategoryId === null;
-  const unit = unitPriceCents / 100;
-  const total = (unitPriceCents * quantity) / 100;
 
   return (
     <div
@@ -54,12 +53,12 @@ export default function ItemCard({
           </div>
           <div className="flex flex-wrap items-center justify-between gap-[10px]">
             <span className="tabular text-[13px] text-muted">
-              ${unit.toFixed(2)}
+              {formatCents(unitPriceCents)}
               {quantity > 1 && (
                 <>
                   {" "}
                   <span className="text-faint">× {quantity}</span>{" "}
-                  <span className="text-faint">= ${total.toFixed(2)}</span>
+                  <span className="text-faint">= {formatCents(unitPriceCents * quantity)}</span>
                 </>
               )}
             </span>
