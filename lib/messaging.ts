@@ -43,6 +43,14 @@ export async function cancelBackfill(): Promise<void> {
   await send({ type: "CANCEL_BACKFILL" });
 }
 
+export async function refreshCategories(): Promise<{ error?: string }> {
+  return (await send({ type: "REFRESH_CATEGORIES" })) as { error?: string };
+}
+
+export async function clearSettings(): Promise<void> {
+  await send({ type: "CLEAR_SETTINGS" });
+}
+
 /** Subscribe to backfill progress broadcasts. Returns an unsubscribe fn. */
 export function onBackfillProgress(callback: (event: BackfillProgress) => void): () => void {
   const listener = (msg: unknown) => {
