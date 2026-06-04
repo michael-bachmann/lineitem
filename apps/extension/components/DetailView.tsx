@@ -4,13 +4,8 @@ import { formatCents, millunitsToCents } from "@/lib/money";
 import ItemCard from "@/components/ItemCard";
 import SplitBreakdown from "@/components/SplitBreakdown";
 import { BulkApply } from "@/components/BulkApply";
-import { BackLink } from "@/components/BackLink";
-import { Button } from "@/components/Button";
-import { SectionLabel } from "@/components/SectionLabel";
-import { StatusMessage } from "@/components/StatusMessage";
+import { BackLink, Button, SectionLabel, StatusMessage, Spinner, Icon } from "@lineitem/ui";
 import { StatusTile, statusInfo } from "@/components/status";
-import { Spinner } from "@/components/Spinner";
-import { Icon } from "@/components/icons";
 
 interface DetailViewProps {
   entry: QueueEntry;

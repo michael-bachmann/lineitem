@@ -1,10 +1,6 @@
 import { useId, useState } from "react";
 import { FAQ, LINKS } from "@/lib/help-content";
-import { BackLink } from "./BackLink";
-import { Button } from "./Button";
-import { Row } from "./Row";
-import { SectionLabel } from "./SectionLabel";
-import { Icon } from "./icons";
+import { BackLink, Button, Row, SectionLabel, Icon } from "@lineitem/ui";
 
 interface HelpProps {
   onBack: () => void;

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Icon } from "./icons";
+import { Icon } from "@lineitem/ui";
 
 // Consistent "product swatch": a fixed rounded frame so Amazon photos (with
 // white baked into the pixels) blend into the chip via mix-blend instead of

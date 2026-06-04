@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import type { QueueDisplayStatus } from "@/lib/queue";
-import { Money } from "./Money";
+import { Money } from "@lineitem/ui";
 import { statusInfo, type StatusKind } from "./status";
 
 export interface TransactionVM {

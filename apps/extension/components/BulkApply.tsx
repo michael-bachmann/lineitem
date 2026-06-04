@@ -1,6 +1,6 @@
 import type { Category } from "@/lib/types";
 import { CategorySelect } from "./CategorySelect";
-import { Icon } from "./icons";
+import { Icon } from "@lineitem/ui";
 
 /** Attention-tinted helper that sets a category for all still-uncategorized
  *  items in one pick. Shown on the detail screen when ≥1 item needs a category. */

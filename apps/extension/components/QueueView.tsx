@@ -2,11 +2,7 @@ import type { QueueEntry } from "@/lib/types";
 import { entryStatus, isFullyClassified, type QueueDisplayStatus } from "@/lib/queue";
 import { millunitsToCents } from "@/lib/money";
 import TransactionCard, { type TransactionVM } from "@/components/TransactionCard";
-import { BrandRow } from "@/components/Mark";
-import { IconButton } from "@/components/IconButton";
-import { Button } from "@/components/Button";
-import { SectionLabel } from "@/components/SectionLabel";
-import { Icon } from "@/components/icons";
+import { BrandRow, IconButton, Button, SectionLabel, Icon } from "@lineitem/ui";
 
 interface QueueViewProps {
   queue: QueueEntry[];

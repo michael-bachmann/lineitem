@@ -1,6 +1,6 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import type { Category } from "@/lib/types";
-import { Icon } from "./icons";
+import { Icon } from "@lineitem/ui";
 
 export interface CategoryGroup {
   group: string;

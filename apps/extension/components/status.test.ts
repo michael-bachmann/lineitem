@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { statusInfo } from "./status";
-import { Icon } from "./icons";
+import { Icon } from "@lineitem/ui";
 
 describe("statusInfo", () => {
   it("maps classified → ready", () => {

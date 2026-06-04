@@ -1,4 +1,4 @@
-import { Icon } from "./icons";
+import { Icon } from "@lineitem/ui";
 
 export type SourceKind = "ok" | "embed" | "needs";
 

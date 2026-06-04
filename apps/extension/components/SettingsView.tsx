@@ -1,9 +1,5 @@
 import type { ReactNode } from "react";
-import { BackLink } from "./BackLink";
-import { Button } from "./Button";
-import { Row } from "./Row";
-import { StatusMessage } from "./StatusMessage";
-import { Icon } from "./icons";
+import { BackLink, Button, Row, StatusMessage, Icon } from "@lineitem/ui";
 
 export type SettingsState = "idle" | "refreshing" | "disconnecting" | "success" | "error";
 

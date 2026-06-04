@@ -8,16 +8,24 @@ Tracked in Linear: [bachmann / lineitem](https://linear.app/bachmann/project/lin
 
 ## What's in the repo
 
+pnpm workspace (`apps/*`, `packages/*`):
+
 ```
 .
-├── entrypoints/       # WXT entrypoints: side panel UI, background service worker, content scripts
-├── components/        # React UI (onboarding, queue, detail view, settings, backfill card, …)
-├── lib/               # Domain code: oauth, ynab API, settings, types, distribution, classifier, db, money
-├── background/        # Service-worker handlers: sync, backfill, approval, embedder, embedding eviction
-├── retailers/         # Per-retailer adapters (Amazon today; Target in BAC-115)
-├── worker/            # Cloudflare Worker — holds the YNAB OAuth client_secret
-└── wxt.config.ts      # Extension manifest config (permissions, host permissions, pinned key)
+├── apps/
+│   ├── extension/         # WXT MV3 extension
+│   │   ├── entrypoints/   # side panel UI, background service worker, content scripts
+│   │   ├── components/    # extension-specific React UI (queue, detail view, settings, backfill, …)
+│   │   ├── lib/           # domain code: oauth, ynab API, settings, types, distribution, classifier, db, money
+│   │   ├── background/    # service-worker handlers: sync, backfill, approval, embedder, embedding eviction
+│   │   ├── retailers/     # per-retailer adapters (Amazon today; Target in BAC-115)
+│   │   └── wxt.config.ts  # manifest config (permissions, host permissions, pinned key)
+│   └── worker/            # Cloudflare Worker — holds the YNAB OAuth client_secret
+└── packages/
+    └── ui/                # @lineitem/ui — shared design tokens + presentational React primitives
 ```
+
+Commands run per-package via `pnpm --filter <extension|worker> <script>`.
 
 ## Tech stack
 
@@ -41,25 +49,25 @@ pnpm install
 Dev build with live reload:
 
 ```bash
-pnpm dev          # Chrome (writes .output/chrome-mv3/)
-pnpm dev:firefox  # Firefox (writes .output/firefox-mv2/)
+pnpm --filter extension dev          # Chrome (writes apps/extension/.output/chrome-mv3/)
+pnpm --filter extension dev:firefox  # Firefox (writes apps/extension/.output/firefox-mv2/)
 ```
 
-Then in `chrome://extensions`: enable Developer mode → **Load unpacked** → pick `.output/chrome-mv3/`. The pinned manifest key gives a stable extension ID (`eahcpeohilmkjagfpdfocfjgaoeghghb`) across machines.
+Then in `chrome://extensions`: enable Developer mode → **Load unpacked** → pick `apps/extension/.output/chrome-mv3/`. The pinned manifest key gives a stable extension ID (`eahcpeohilmkjagfpdfocfjgaoeghghb`) across machines.
 
-Production build (used for store packaging or tighter CSP than `pnpm dev`):
+Production build (used for store packaging or tighter CSP than dev):
 
 ```bash
-pnpm build
-pnpm zip          # produces a store-ready zip
+pnpm --filter extension build
+pnpm --filter extension zip   # produces a store-ready zip
 ```
 
 ## Tests
 
 ```bash
-pnpm test:run     # vitest, extension tests (lib/, background/, retailers/, components/)
-pnpm worker:test  # vitest, worker tests (worker/src/)
-pnpm compile      # tsc --noEmit (full repo)
+pnpm --filter extension test:run   # vitest, extension tests (lib/, background/, retailers/, components/)
+pnpm --filter worker test          # vitest, worker tests (src/)
+pnpm --filter extension compile    # tsc --noEmit
 ```
 
 ## OAuth proxy worker
@@ -75,10 +83,10 @@ Both inject `YNAB_CLIENT_ID` + `YNAB_CLIENT_SECRET` from Cloudflare's encrypted 
 Deploy:
 
 ```bash
-pnpm wrangler login
-pnpm wrangler secret put YNAB_CLIENT_ID --config worker/wrangler.toml
-pnpm wrangler secret put YNAB_CLIENT_SECRET --config worker/wrangler.toml
-pnpm worker:deploy
+pnpm --filter worker exec wrangler login
+pnpm --filter worker exec wrangler secret put YNAB_CLIENT_ID
+pnpm --filter worker exec wrangler secret put YNAB_CLIENT_SECRET
+pnpm --filter worker deploy
 ```
 
 Then attach the custom domain in the Cloudflare dashboard: **Workers & Pages → `lineitem-oauth` → Settings → Domains & Routes → Add → Custom domain → `auth.lineitem.dev`**. DNS and TLS provisioning are automatic; ~2 minutes to "Active".

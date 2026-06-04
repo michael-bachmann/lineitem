@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { StatusTile, statusInfo } from "./status";
-import { SectionLabel } from "./SectionLabel";
+import { SectionLabel } from "@lineitem/ui";
 
 const STATUSES = ["classified", "partial", "loading", "nomatch", "auth", "error", "matched"];
 

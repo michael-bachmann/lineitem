@@ -1,5 +1,4 @@
-import { Icon, type IconComponent, type IconName } from "./icons";
-import { Spinner } from "./Spinner";
+import { Icon, type IconComponent, type IconName, Spinner } from "@lineitem/ui";
 
 export type StatusKind = "ready" | "warn" | "neutral" | "err";
 export type TileKind = "ready" | "ok" | "warn" | "neutral" | "err";

@@ -1,8 +1,4 @@
-import { BrandRow } from "./Mark";
-import { Button } from "./Button";
-import { StatusMessage } from "./StatusMessage";
-import { Spinner } from "./Spinner";
-import { Icon } from "./icons";
+import { BrandRow, Button, StatusMessage, Spinner, Icon } from "@lineitem/ui";
 
 export type OnboardingPhase = "connect" | "connecting" | "saving" | "error";
 

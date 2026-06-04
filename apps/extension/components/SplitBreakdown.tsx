@@ -1,8 +1,7 @@
 import type { Category } from "@/lib/types";
 import { formatCents } from "@/lib/money";
 import { sum } from "remeda";
-import { SectionLabel } from "./SectionLabel";
-import { Icon } from "./icons";
+import { SectionLabel, Icon } from "@lineitem/ui";
 
 interface SplitItem {
   allocatedCents: number;

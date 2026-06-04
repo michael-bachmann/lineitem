@@ -1,6 +1,6 @@
 import { useCallback, useState } from "react";
 import BackfillCard from "./BackfillCard";
-import { Button } from "./Button";
+import { Button } from "@lineitem/ui";
 import type { BackfillUiState } from "./BackfillCardView";
 
 interface BackfillPromptProps {

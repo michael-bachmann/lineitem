@@ -1,0 +1,18 @@
+{
+  "name": "worker",
+  "description": "Cloudflare worker that brokers the YNAB OAuth token exchange for the extension",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20240601.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.7",
+    "wrangler": "^4.0.0"
+  }
+}

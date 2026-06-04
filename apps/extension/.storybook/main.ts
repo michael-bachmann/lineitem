@@ -3,7 +3,10 @@ import { fileURLToPath } from "node:url";
 import tailwindcss from "@tailwindcss/vite";
 
 const config: StorybookConfig = {
-  stories: ["../components/**/*.stories.@(tsx|ts)"],
+  stories: [
+    "../components/**/*.stories.@(tsx|ts)",
+    "../../../packages/ui/src/**/*.stories.@(tsx|ts)",
+  ],
   addons: ["@storybook/addon-a11y"],
   framework: { name: "@storybook/react-vite", options: {} },
   async viteFinal(cfg) {
