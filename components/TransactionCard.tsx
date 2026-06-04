@@ -15,7 +15,7 @@ export interface TransactionVM {
   status: QueueDisplayStatus;
   /** Uncategorized item count, for the `partial` status text. */
   needs?: number;
-  /** YNAB inflow (refund) — shows a + amount and a "Refund ·" status prefix. */
+  /** YNAB inflow (refund) — shows a "+" on the amount. */
   refund?: boolean;
 }
 
@@ -62,7 +62,7 @@ export default function TransactionCard({
       </div>
       <div className="flex items-baseline gap-2 pl-[17px]">
         <span className={`min-w-0 flex-1 truncate text-[13px] font-medium ${STATUS_TEXT[info.kind]}`}>
-          {txn.refund ? `Refund · ${info.text}` : info.text}
+          {info.text}
         </span>
         <span className="flex-none text-[12.5px] text-faint">{txn.dateShort}</span>
       </div>

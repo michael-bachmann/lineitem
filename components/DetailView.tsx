@@ -153,7 +153,7 @@ export default function DetailView({ entry, categories, onBack, onApprove }: Det
           </div>
           <div className="flex items-baseline gap-[10px]">
             <span className="tabular min-w-0 flex-1 truncate text-[12px] text-faint">
-              {isRefund ? "Refund · " : ""}Order {orderId}
+              Order {orderId}
             </span>
             <span className="tabular flex-none text-[12px] text-faint">{ynabTransaction.date}</span>
           </div>
