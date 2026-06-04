@@ -38,8 +38,8 @@ export function OnboardingView({ phase, error, onConnect }: OnboardingViewProps)
         </StatusMessage>
       )}
       {phase === "error" && error && (
-        <StatusMessage kind="err">
-          <Icon.alertCircle /> {error}
+        <StatusMessage kind="err" role="alert">
+          <Icon.alertCircle aria-hidden /> {error}
         </StatusMessage>
       )}
     </div>

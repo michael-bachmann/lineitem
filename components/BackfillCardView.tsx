@@ -57,7 +57,14 @@ export function BackfillCardView({ state, onStart, onCancel }: BackfillCardViewP
           <div className="flex items-center gap-[9px] text-[13px] text-muted">
             <Spinner size={15} /> {progressLabel(state.progress)}
           </div>
-          <div className="h-[6px] overflow-hidden rounded-full bg-surface-3">
+          <div
+            role="progressbar"
+            aria-valuenow={progressPct(state.progress)}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuetext={progressLabel(state.progress)}
+            className="h-[6px] overflow-hidden rounded-full bg-surface-3"
+          >
             <div
               className="h-full rounded-full bg-ink transition-[width] duration-[400ms]"
               style={{ width: `${progressPct(state.progress)}%` }}
@@ -107,8 +114,8 @@ export function BackfillCardView({ state, onStart, onCancel }: BackfillCardViewP
 
       {state.kind === "error" && (
         <>
-          <StatusMessage kind="err">
-            <Icon.alertCircle /> Backfill failed: {state.message}
+          <StatusMessage kind="err" role="alert">
+            <Icon.alertCircle aria-hidden /> Backfill failed: {state.message}
           </StatusMessage>
           <Button variant="secondary" onClick={onStart}>
             Try again

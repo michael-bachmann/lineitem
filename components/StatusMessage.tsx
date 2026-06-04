@@ -19,13 +19,18 @@ export function StatusMessage({
   kind = "muted",
   children,
   className = "",
+  role,
 }: {
   kind?: StatusMessageKind;
   children: ReactNode;
   className?: string;
+  /** Set "alert" for error messages that appear on a state transition so AT
+   *  announces them; "status" for live-updating progress text. */
+  role?: "alert" | "status";
 }) {
   return (
     <span
+      role={role}
       className={`inline-flex items-center gap-2 text-[13.5px] [&_svg]:h-4 [&_svg]:w-4 [&_svg]:flex-none ${KIND[kind]} ${className}`}
     >
       {children}
