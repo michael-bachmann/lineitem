@@ -1,39 +1,35 @@
 import { useCallback, useState } from "react";
 import BackfillCard from "./BackfillCard";
+import { Button } from "./Button";
+import type { BackfillUiState } from "./BackfillCardView";
 
 interface BackfillPromptProps {
   onContinue: () => void;
 }
 
 export default function BackfillPrompt({ onContinue }: BackfillPromptProps) {
-  const [backfillRunning, setBackfillRunning] = useState(false);
+  const [running, setRunning] = useState(false);
 
-  // Disable Continue while a backfill is in flight so the user can't
-  // accidentally navigate away from the only surface that shows progress.
+  // Disable Continue while a backfill is in flight so the user can't navigate
+  // away from the only surface that shows progress.
   const handleStateChange = useCallback(
-    (state: { kind: string }) => setBackfillRunning(state.kind === "running"),
+    (state: BackfillUiState) => setRunning(state.kind === "running"),
     [],
   );
 
   return (
-    <div className="min-h-screen bg-gray-950 text-gray-100 p-4">
-      <h1 className="text-lg font-semibold">You're connected!</h1>
-      <p className="text-sm text-gray-400 mt-2">
-        Learn from your past orders so category suggestions are smarter from day one — or skip
-        and run this later from Settings.
+    <div className="flex min-h-screen flex-col gap-3 bg-bg p-4 pt-5 text-text">
+      <h1 className="m-0 text-[22px] font-bold tracking-[-0.018em] text-text">You’re connected!</h1>
+      <p className="m-0 text-[14px] leading-[1.55] text-muted">
+        Learn from your past orders so category suggestions are smarter from day one — or skip and
+        run this later from Settings.
       </p>
 
-      <div className="mt-6">
-        <BackfillCard onStateChange={handleStateChange} />
-      </div>
+      <BackfillCard onStateChange={handleStateChange} />
 
-      <button
-        onClick={onContinue}
-        disabled={backfillRunning}
-        className="w-full mt-4 rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
-      >
-        Continue
-      </button>
+      <Button variant="primary" disabled={running} onClick={onContinue}>
+        {running ? "Backfill running…" : "Continue"}
+      </Button>
     </div>
   );
 }

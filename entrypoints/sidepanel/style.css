@@ -87,6 +87,7 @@
   --color-faint: var(--faint);
 
   --color-brand: var(--brand);
+  --color-brand-weak: var(--brand-weak);
   --color-link: var(--link);
   --color-ok: var(--ok);
   --color-ok-text: var(--ok-text);
