@@ -1,97 +1,58 @@
 import { useState } from "react";
-import { browser } from "wxt/browser";
+import { clearSettings, refreshCategories } from "@/lib/messaging";
 import BackfillCard from "./BackfillCard";
-import SecondaryButton from "./SecondaryButton";
+import { SettingsView, type SettingsState } from "./SettingsView";
 
 interface SettingsProps {
   planName: string;
   onDisconnect: () => void;
   onBack: () => void;
+  onOpenHelp: () => void;
 }
 
-export default function Settings({ planName, onDisconnect, onBack }: SettingsProps) {
-  const [refreshing, setRefreshing] = useState(false);
-  const [disconnecting, setDisconnecting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
+/** Container: owns the refresh/disconnect IO + state; renders SettingsView with
+ *  the BackfillCard container injected. */
+export default function Settings({ planName, onDisconnect, onBack, onOpenHelp }: SettingsProps) {
+  const [state, setState] = useState<SettingsState>("idle");
+  const [errorMsg, setErrorMsg] = useState("");
 
-  async function handleRefreshCategories() {
-    setRefreshing(true);
-    setError(null);
-    setSuccess(null);
-
+  async function handleRefresh() {
+    setState("refreshing");
     try {
-      const response = await browser.runtime.sendMessage({
-        type: "REFRESH_CATEGORIES",
-      });
-      if (response.error) {
-        setError(response.error);
+      const res = await refreshCategories();
+      if (res?.error) {
+        setErrorMsg(res.error);
+        setState("error");
       } else {
-        setSuccess("Categories refreshed.");
+        setState("success");
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to refresh categories");
-    } finally {
-      setRefreshing(false);
+      setErrorMsg(e instanceof Error ? e.message : "Failed to refresh categories");
+      setState("error");
     }
   }
 
   async function handleDisconnect() {
-    setDisconnecting(true);
-    setError(null);
-    setSuccess(null);
-
+    setState("disconnecting");
     try {
-      await browser.runtime.sendMessage({ type: "CLEAR_SETTINGS" });
+      await clearSettings();
       onDisconnect();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to disconnect");
-      setDisconnecting(false);
+      setErrorMsg(e instanceof Error ? e.message : "Failed to disconnect");
+      setState("error");
     }
   }
 
   return (
-    <div className="min-h-screen bg-gray-950 text-gray-100 p-4">
-      <div className="flex items-center gap-2 mb-6">
-        <button
-          onClick={onBack}
-          className="text-sm text-gray-400 hover:text-gray-200"
-        >
-          &larr; Back
-        </button>
-        <h1 className="text-lg font-semibold">Settings</h1>
-      </div>
-
-      <div className="space-y-6">
-        <div>
-          <p className="text-sm text-gray-400">Connected plan</p>
-          <p className="text-sm font-medium text-gray-100 mt-1">{planName}</p>
-        </div>
-
-        <SecondaryButton
-          onClick={handleRefreshCategories}
-          disabled={refreshing || disconnecting}
-        >
-          {refreshing ? "Refreshing..." : "Refresh Categories from YNAB"}
-        </SecondaryButton>
-
-        <BackfillCard />
-
-        <button
-          onClick={handleDisconnect}
-          disabled={refreshing || disconnecting}
-          className="w-full rounded-md bg-red-900 border border-red-800 px-3 py-2 text-sm font-medium text-red-100 hover:bg-red-800 disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          {disconnecting ? "Disconnecting..." : "Disconnect YNAB"}
-        </button>
-
-        {error && (
-          <p className="text-sm text-red-400">{error}</p>
-        )}
-        {success && (
-          <p className="text-sm text-green-400">{success}</p>
-        )}
-      </div>
-    </div>
+    <SettingsView
+      state={state}
+      errorMsg={errorMsg}
+      planName={planName}
+      backfill={<BackfillCard />}
+      onRefresh={handleRefresh}
+      onDisconnect={handleDisconnect}
+      onOpenHelp={onOpenHelp}
+      onBack={onBack}
+    />
   );
 }

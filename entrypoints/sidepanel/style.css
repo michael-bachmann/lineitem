@@ -119,3 +119,15 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 .tabular { font-variant-numeric: tabular-nums; }
+
+/* Respect reduced-motion across the whole kit (transitions, the FAQ accordion,
+   spinner, progress bar). */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}

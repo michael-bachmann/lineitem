@@ -3,12 +3,13 @@ import { browser } from "wxt/browser";
 import Onboarding from "@/components/Onboarding";
 import BackfillPrompt from "@/components/BackfillPrompt";
 import Settings from "@/components/Settings";
+import Help from "@/components/Help";
 import QueueView from "@/components/QueueView";
 import DetailView from "@/components/DetailView";
 import { isFullyClassified } from "@/lib/queue";
 import type { QueueEntry, Category, ApprovalItem } from "@/lib/types";
 
-type View = "loading" | "onboarding" | "backfill_prompt" | "queue" | "settings" | "detail";
+type View = "loading" | "onboarding" | "backfill_prompt" | "queue" | "settings" | "detail" | "help";
 
 export default function App() {
   const [view, setView] = useState<View>("loading");
@@ -63,7 +64,14 @@ export default function App() {
         planName={planName}
         onDisconnect={() => setView("onboarding")}
         onBack={() => setView("queue")}
+        onOpenHelp={() => setView("help")}
       />
+    );
+  }
+
+  if (view === "help") {
+    return (
+      <Help onBack={() => setView("settings")} version={browser.runtime.getManifest().version} />
     );
   }
 
