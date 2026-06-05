@@ -39,6 +39,108 @@ export function parseInvoicesListFromDocument(doc: Document): RawTargetInvoice[]
   return out;
 }
 
+export interface RawTargetPaymentLine {
+  cardLabel: string;
+  isGiftCard: boolean;
+  /** Absolute cents charged to / refunded onto this payment method. */
+  amountCents: number;
+}
+
+export interface RawTargetItem {
+  productId: string;
+  title: string;
+  /** Absolute per-unit price in cents. */
+  unitPriceCents: number;
+  quantity: number;
+  /** Absolute line amount (unit*qty) in cents. */
+  amountCents: number;
+}
+
+export interface RawTargetInvoiceDetail {
+  isRefund: boolean;
+  items: RawTargetItem[];
+  /** Sum of absolute item line amounts (gross, pre-promo). */
+  itemSubtotalCents: number;
+  /** "Invoice total" (purchase) or "Total refund" (refund), absolute cents. */
+  invoiceTotalCents: number;
+  paymentLines: RawTargetPaymentLine[];
+}
+
+const ITEM_LABEL_RE = /^\s*(\d+)\s*-\s*(.+?)\s*$/s;
+
+function fieldAfter(container: Element, label: string): string {
+  // Find the deepest (last in traversal) child whose text starts with `label`
+  // and return the remaining text. Using the last match avoids picking up an
+  // ancestor whose textContent includes both the label and sibling content.
+  let result = "";
+  for (const el of container.querySelectorAll("*")) {
+    const t = (el.textContent ?? "").trim();
+    if (t.startsWith(label) && t.length > label.length) {
+      result = t.slice(label.length).trim();
+    }
+  }
+  return result;
+}
+
+export function parseInvoiceDetailFromDocument(doc: Document): RawTargetInvoiceDetail {
+  const headingText = doc.querySelector("h2")?.textContent ?? "";
+  const isRefund = /\brefund\b/i.test(headingText);
+
+  const items: RawTargetItem[] = [];
+  for (const row of doc.querySelectorAll<HTMLElement>(SELECTORS.invoiceItemRow)) {
+    const labelEl = row.querySelector("b p") ?? row.querySelector("p");
+    const labelMatch = (labelEl?.textContent ?? "").replace(/\s+/g, " ").trim().match(ITEM_LABEL_RE);
+    if (!labelMatch) continue;
+    const qtyText = fieldAfter(row, "Qty.") || "1";
+    const quantity = parseInt(qtyText.replace(/[^0-9]/g, ""), 10) || 1;
+    const unitPriceCents = parseCents(fieldAfter(row, "Unit price"));
+    const amountCents = parseCents(fieldAfter(row, "Amount"));
+    items.push({
+      productId: labelMatch[1],
+      title: labelMatch[2],
+      unitPriceCents,
+      quantity,
+      amountCents: amountCents || unitPriceCents * quantity,
+    });
+  }
+
+  const itemSubtotalCents = items.reduce((s, it) => s + it.amountCents, 0);
+
+  // Invoice/refund total: the detail row labeled "Invoice total" or "Total refund".
+  let invoiceTotalCents = 0;
+  for (const row of doc.querySelectorAll<HTMLElement>(SELECTORS.invoiceDetailRow)) {
+    const t = (row.textContent ?? "").replace(/\s+/g, " ");
+    if (/invoice total|total refund/i.test(t)) {
+      const m = t.match(MONEY_RE);
+      if (m) invoiceTotalCents = parseCents(m[0]);
+    }
+  }
+
+  // Payment lines: each row carrying a payment icon + card label. The amount is
+  // in the same row when split; when there is a single line and no amount, it
+  // bills the full invoice total.
+  const paymentLines: RawTargetPaymentLine[] = [];
+  for (const label of doc.querySelectorAll<HTMLElement>(SELECTORS.invoiceCardLabel)) {
+    const cardLabel = (label.textContent ?? "").trim();
+    if (!cardLabel) continue;
+    const row = label.closest(SELECTORS.invoiceDetailRow) ?? label.parentElement!;
+    const rowText = (row.textContent ?? "").replace(cardLabel, "");
+    const m = rowText.match(MONEY_RE);
+    const isGiftCard = /gift\s*card/i.test(cardLabel);
+    paymentLines.push({
+      cardLabel,
+      isGiftCard,
+      amountCents: m ? parseCents(m[0]) : 0,
+    });
+  }
+  // Single payment line with no explicit amount bills the whole invoice total.
+  if (paymentLines.length === 1 && paymentLines[0].amountCents === 0) {
+    paymentLines[0].amountCents = invoiceTotalCents;
+  }
+
+  return { isRefund, items, itemSubtotalCents, invoiceTotalCents, paymentLines };
+}
+
 /** Parse the /orders list into one entry per order (deduped by orderId). */
 export function parseOrdersFromDocument(doc: Document): RawTargetOrder[] {
   const out: RawTargetOrder[] = [];
