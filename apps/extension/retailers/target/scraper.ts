@@ -66,7 +66,7 @@ export interface RawTargetInvoiceDetail {
   paymentLines: RawTargetPaymentLine[];
 }
 
-const ITEM_LABEL_RE = /^\s*(\d+)\s*-\s*(.+?)\s*$/s;
+const ITEM_LABEL_RE = /^\s*(\d+)\s*-\s*(.+?)\s*$/;
 
 function fieldAfter(container: Element, label: string): string {
   // Find the deepest (last in traversal) child whose text starts with `label`
@@ -88,6 +88,7 @@ export function parseInvoiceDetailFromDocument(doc: Document): RawTargetInvoiceD
 
   const items: RawTargetItem[] = [];
   for (const row of doc.querySelectorAll<HTMLElement>(SELECTORS.invoiceItemRow)) {
+    // Target wraps the "{id} - {title}" label in <b><p>; fall back to a bare <p> if <b> is absent.
     const labelEl = row.querySelector("b p") ?? row.querySelector("p");
     const labelMatch = (labelEl?.textContent ?? "").replace(/\s+/g, " ").trim().match(ITEM_LABEL_RE);
     if (!labelMatch) continue;
@@ -152,8 +153,8 @@ export function parseOrdersFromDocument(doc: Document): RawTargetOrder[] {
     const orderId = idMatch[1];
     if (seen.has(orderId)) continue;
 
-    // The order card holds a visible date; find the nearest ancestor that also
-    // contains a date-shaped string.
+    // The link's ancestor <div> is the order card in Target's largely-flat
+    // markup; parseTargetDate returns '' if no date-shaped substring is found there.
     const card = link.closest("div");
     const dateText = card?.textContent ?? "";
     const date = parseTargetDate(dateText);

@@ -13,7 +13,7 @@ export const SELECTORS = {
   // Invoice detail (/orders/{id}/invoices/{invoiceId})
   invoiceItemRow: ".styles_infoRow__k6eLr",
   invoiceDetailRow: ".styles_detailsRowWrapper__QJjoS",
-  invoicePaymentIcon: ".styles_paymentIconWrapper__vGppy",
+  invoicePaymentIcon: ".styles_paymentIconWrapper__vGppy", // reserved for payment-row detection (see content script)
   invoiceCardLabel: ".styles_cardNumberWrapper__vHhvb",
 
   // Order detail (/orders/{id}) — image map only
@@ -55,7 +55,10 @@ const MONTHS: Record<string, string> = {
  * Parse Target date strings to ISO "YYYY-MM-DD". Handles an optional weekday
  * prefix and an optional "Invoice date:" label, and both full and abbreviated
  * month names. Examples: "Jun 4, 2026", "June 4, 2026", "Thu, Jun 4, 2026",
- * "Invoice date: August 23, 2025". Returns "" when unparseable.
+ * "Invoice date: August 23, 2025".
+ *
+ * Returns "" (empty string) when unparseable — NOT null. (Amazon's equivalent
+ * returns null; the difference is intentional.)
  */
 export function parseTargetDate(input: string): string {
   const cleaned = input.replace(/invoice date\s*:?/i, "").trim();
