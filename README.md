@@ -67,7 +67,8 @@ pnpm --filter extension zip   # produces a store-ready zip
 ```bash
 pnpm --filter extension test:run   # vitest, extension tests (lib/, background/, retailers/, components/)
 pnpm --filter worker test          # vitest, worker tests (src/)
-pnpm --filter extension compile    # tsc --noEmit
+pnpm --filter extension compile    # tsc --noEmit (extension)
+pnpm --filter worker compile       # tsc --noEmit (worker)
 ```
 
 ## OAuth proxy worker

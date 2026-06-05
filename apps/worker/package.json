@@ -7,6 +7,7 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
+    "compile": "tsc --noEmit",
     "test": "vitest run"
   },
   "devDependencies": {

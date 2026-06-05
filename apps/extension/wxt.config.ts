@@ -2,8 +2,9 @@ import { defineConfig } from "wxt";
 import tailwindcss from "@tailwindcss/vite";
 import { fileURLToPath } from "node:url";
 
-// Absolute path to the installed transformers dist dir (direct dependency, so
-// it's hoisted to the project-root node_modules).
+// Absolute path to the installed transformers dist dir. Resolved relative to
+// this config (apps/extension/) — pnpm symlinks the direct dependency into the
+// app's own node_modules, so this URL points at apps/extension/node_modules/...
 const ORT_DIST = fileURLToPath(
   new URL("node_modules/@huggingface/transformers/dist/", import.meta.url),
 );
