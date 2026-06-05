@@ -139,6 +139,11 @@ export const Icon = {
       <path d="M6 2c0 1-1 1.5-1 2.5M10 2c0 1-1 1.5-1 2.5M14 2c0 1-1 1.5-1 2.5" />
     </svg>
   ),
+  x: (p: IconProps) => (
+    <svg viewBox="0 0 24 24" strokeWidth={2} {...s} {...p}>
+      <path d="M18 6 6 18M6 6l12 12" />
+    </svg>
+  ),
   inbox: (p: IconProps) => (
     <svg viewBox="0 0 24 24" strokeWidth={1.7} {...s} {...p}>
       <path d="M22 12h-6l-2 3h-4l-2-3H2" />
