@@ -2,7 +2,7 @@
 // TODO: these URLs are design-handoff placeholders — swap in the real ones
 // before shipping the Help screen.
 export const LINKS = {
-  coffee: "https://buymeacoffee.com/lineitem",
+  coffee: "https://ko-fi.com/mbachmann",
   retailer: "https://lineitem.app/request-retailer",
   suggest: "https://lineitem.app/suggest",
   issue: "https://github.com/bachmann/lineitem/issues/new",
