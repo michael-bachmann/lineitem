@@ -60,5 +60,5 @@ export const SyncError: Story = {
 };
 export const Approving: Story = { args: { approving: true } };
 export const WithCoffee: Story = {
-  args: { showCoffee: true, coffeeItemized: 324, onDismissCoffee: noop, onCoffeeClick: noop },
+  args: { showCoffee: true, coffeeClassified: 324, onDismissCoffee: noop, onCoffeeClick: noop },
 };

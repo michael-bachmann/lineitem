@@ -7,7 +7,7 @@ import Help from "@/components/Help";
 import QueueView from "@/components/QueueView";
 import DetailView from "@/components/DetailView";
 import { isFullyClassified } from "@/lib/queue";
-import { recordItemized, retireCoffee } from "@/lib/coffee";
+import { recordClassified, retireCoffee } from "@/lib/coffee";
 import {
   approveBatch,
   approveTransaction,
@@ -29,7 +29,7 @@ export default function App() {
   const [approving, setApproving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showCoffee, setShowCoffee] = useState(false);
-  const [coffeeItemized, setCoffeeItemized] = useState(0);
+  const [coffeeClassified, setCoffeeClassified] = useState(0);
 
   useEffect(() => {
     getSettings()
@@ -128,8 +128,8 @@ export default function App() {
           n + (entry.matchStatus.status === "matched" ? entry.matchStatus.classifiedItems.length : 0),
         0,
       );
-      const { showCoffee: show, cumulativeItemized } = await recordItemized(itemCount);
-      setCoffeeItemized(cumulativeItemized);
+      const { showCoffee: show, cumulativeClassified } = await recordClassified(itemCount);
+      setCoffeeClassified(cumulativeClassified);
       setShowCoffee(show);
       const approvedSet = new Set(idsToApprove);
       setQueue((prev) => prev.filter((entry) => !approvedSet.has(entry.ynabTransaction.id)));
@@ -145,8 +145,8 @@ export default function App() {
     const handleApprove = async (ynabTransactionId: string, items: ApprovalItem[]) => {
       const result = await approveTransaction(ynabTransactionId, items);
       if (result?.error) throw new Error(result.error);
-      const { showCoffee: show, cumulativeItemized } = await recordItemized(items.length);
-      setCoffeeItemized(cumulativeItemized);
+      const { showCoffee: show, cumulativeClassified } = await recordClassified(items.length);
+      setCoffeeClassified(cumulativeClassified);
       setShowCoffee(show);
       setQueue((prev) => prev.filter((e) => e.ynabTransaction.id !== ynabTransactionId));
     };
@@ -179,7 +179,7 @@ export default function App() {
       }}
       onSettings={() => setView("settings")}
       showCoffee={showCoffee}
-      coffeeItemized={coffeeItemized}
+      coffeeClassified={coffeeClassified}
       onDismissCoffee={() => setShowCoffee(false)}
       onCoffeeClick={() => {
         void retireCoffee();

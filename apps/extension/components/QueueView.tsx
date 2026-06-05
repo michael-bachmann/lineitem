@@ -16,8 +16,8 @@ interface QueueViewProps {
   onSettings: () => void;
   /** Show the post-approval donation ask above the queue. */
   showCoffee?: boolean;
-  /** Lifetime itemized count, for the ask copy. */
-  coffeeItemized?: number;
+  /** Lifetime classified-item count, for the ask copy. */
+  coffeeClassified?: number;
   /** Dismiss the ask for this session. */
   onDismissCoffee?: () => void;
   /** Ko-fi button clicked (soft-retires the ask). */
@@ -47,7 +47,7 @@ export default function QueueView({
   onSelectEntry,
   onSettings,
   showCoffee,
-  coffeeItemized,
+  coffeeClassified,
   onDismissCoffee,
   onCoffeeClick,
 }: QueueViewProps) {
@@ -103,7 +103,7 @@ export default function QueueView({
           sub={
             <>
               LineItem has categorized{" "}
-              <b className="font-semibold text-text">{(coffeeItemized ?? 0).toLocaleString()}</b>{" "}
+              <b className="font-semibold text-text">{(coffeeClassified ?? 0).toLocaleString()}</b>{" "}
               line items for you so far — all free and ad-free.
             </>
           }

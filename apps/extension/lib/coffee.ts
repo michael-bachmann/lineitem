@@ -2,8 +2,8 @@ import { browser } from "wxt/browser";
 
 /** Persisted cadence state for the donation ask. */
 export interface CoffeeState {
-  /** Lifetime line items committed to YNAB at approval (backfill excluded). */
-  cumulativeItemized: number;
+  /** Lifetime classified line items committed to YNAB at approval (backfill excluded). */
+  cumulativeClassified: number;
   /** The cumulative count at which the next ask fires; doubles after each show. */
   nextThreshold: number;
   /** Set once the user clicks the Ko-fi button — silences the post-approval ask. */
@@ -14,7 +14,7 @@ const COFFEE_KEY = "coffeeState";
 const FIRST_THRESHOLD = 250;
 
 const DEFAULT_STATE: CoffeeState = {
-  cumulativeItemized: 0,
+  cumulativeClassified: 0,
   nextThreshold: FIRST_THRESHOLD,
   retired: false,
 };
@@ -33,18 +33,18 @@ async function write(state: CoffeeState): Promise<void> {
  * the ask. Increment + threshold check happen atomically so the count in the
  * card copy is always fresh. Crossing the threshold doubles it (self-quieting).
  */
-export async function recordItemized(
+export async function recordClassified(
   count: number,
-): Promise<{ showCoffee: boolean; cumulativeItemized: number }> {
+): Promise<{ showCoffee: boolean; cumulativeClassified: number }> {
   const state = await read();
-  const cumulativeItemized = state.cumulativeItemized + count;
-  const showCoffee = !state.retired && cumulativeItemized >= state.nextThreshold;
+  const cumulativeClassified = state.cumulativeClassified + count;
+  const showCoffee = !state.retired && cumulativeClassified >= state.nextThreshold;
   await write({
     ...state,
-    cumulativeItemized,
+    cumulativeClassified,
     nextThreshold: showCoffee ? state.nextThreshold * 2 : state.nextThreshold,
   });
-  return { showCoffee, cumulativeItemized };
+  return { showCoffee, cumulativeClassified };
 }
 
 /** Soft-retire the post-approval ask (on Ko-fi click). Help hero is unaffected. */
