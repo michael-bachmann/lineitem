@@ -7,6 +7,7 @@ import Help from "@/components/Help";
 import QueueView from "@/components/QueueView";
 import DetailView from "@/components/DetailView";
 import { isFullyClassified } from "@/lib/queue";
+import { recordItemized, retireCoffee } from "@/lib/coffee";
 import {
   approveBatch,
   approveTransaction,
@@ -27,6 +28,8 @@ export default function App() {
   const [syncing, setSyncing] = useState(false);
   const [approving, setApproving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showCoffee, setShowCoffee] = useState(false);
+  const [coffeeItemized, setCoffeeItemized] = useState(0);
 
   useEffect(() => {
     getSettings()
@@ -99,6 +102,7 @@ export default function App() {
         return;
       }
       setQueue(result?.queue ?? []);
+      setShowCoffee(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Sync failed");
     } finally {
@@ -107,9 +111,8 @@ export default function App() {
   };
 
   const handleApproveAll = async () => {
-    const idsToApprove = queue
-      .filter(isFullyClassified)
-      .map((entry) => entry.ynabTransaction.id);
+    const approvedEntries = queue.filter(isFullyClassified);
+    const idsToApprove = approvedEntries.map((entry) => entry.ynabTransaction.id);
     if (idsToApprove.length === 0) return;
 
     setApproving(true);
@@ -120,6 +123,14 @@ export default function App() {
         setError(result.error);
         return;
       }
+      const itemCount = approvedEntries.reduce(
+        (n, entry) =>
+          n + (entry.matchStatus.status === "matched" ? entry.matchStatus.classifiedItems.length : 0),
+        0,
+      );
+      const { showCoffee: show, cumulativeItemized } = await recordItemized(itemCount);
+      setCoffeeItemized(cumulativeItemized);
+      setShowCoffee(show);
       const approvedSet = new Set(idsToApprove);
       setQueue((prev) => prev.filter((entry) => !approvedSet.has(entry.ynabTransaction.id)));
     } catch (e) {
@@ -134,6 +145,9 @@ export default function App() {
     const handleApprove = async (ynabTransactionId: string, items: ApprovalItem[]) => {
       const result = await approveTransaction(ynabTransactionId, items);
       if (result?.error) throw new Error(result.error);
+      const { showCoffee: show, cumulativeItemized } = await recordItemized(items.length);
+      setCoffeeItemized(cumulativeItemized);
+      setShowCoffee(show);
       setQueue((prev) => prev.filter((e) => e.ynabTransaction.id !== ynabTransactionId));
     };
 
@@ -164,6 +178,13 @@ export default function App() {
         setView("detail");
       }}
       onSettings={() => setView("settings")}
+      showCoffee={showCoffee}
+      coffeeItemized={coffeeItemized}
+      onDismissCoffee={() => setShowCoffee(false)}
+      onCoffeeClick={() => {
+        void retireCoffee();
+        setShowCoffee(false);
+      }}
     />
   );
 }
