@@ -15,6 +15,17 @@ const ORT_FILES = [
 
 export default defineConfig({
   modules: ["@wxt-dev/module-react"],
+  // Don't auto-import from Storybook stories / tests. WXT scans components/ for
+  // auto-imports; CSF story files re-export the same case names (Empty, Idle,
+  // ErrorState, …) across files, which floods the build log with "Duplicated
+  // imports" warnings. We import everything explicitly anyway — this only trims
+  // the scan sources, WXT's built-in auto-imports (defineContentScript, browser)
+  // are unaffected.
+  imports: {
+    dirsScanOptions: {
+      fileFilter: (file) => !/\.(stories|test)\.[jt]sx?$/.test(file),
+    },
+  },
   manifest: ({ browser }) => ({
     name: "lineitem",
     description: "Match YNAB transactions to Amazon orders and categorize line items",
