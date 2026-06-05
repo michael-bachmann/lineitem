@@ -162,3 +162,21 @@ export function parseOrdersFromDocument(doc: Document): RawTargetOrder[] {
   }
   return out;
 }
+
+const ITEM_ID_RE = /^item-(\d+)$/;
+
+/** Map productId -> image URL from the order detail page. */
+export function parseOrderImageMap(doc: Document): Record<string, string> {
+  const map: Record<string, string> = {};
+  for (const title of doc.querySelectorAll<HTMLElement>(SELECTORS.orderItemTitle)) {
+    const idMatch = title.id.match(ITEM_ID_RE);
+    if (!idMatch) continue;
+    const productId = idMatch[1];
+    // The image lives in the same item-row container as the title.
+    const row = title.closest("[data-test='package-card-item-row']") ?? title.parentElement;
+    const img = row?.querySelector<HTMLImageElement>("img");
+    const src = img?.getAttribute("src") ?? "";
+    if (src) map[productId] = src;
+  }
+  return map;
+}

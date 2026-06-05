@@ -42,7 +42,7 @@ describe("isLoginUrl", () => {
   });
 });
 
-import { parseOrdersFromDocument, parseInvoicesListFromDocument, parseInvoiceDetailFromDocument } from "./scraper";
+import { parseOrdersFromDocument, parseInvoicesListFromDocument, parseInvoiceDetailFromDocument, parseOrderImageMap } from "./scraper";
 
 describe("parseOrdersFromDocument", () => {
   it("extracts orderId and date for each order card", () => {
@@ -203,5 +203,24 @@ describe("parseInvoiceDetailFromDocument", () => {
     expect(result.paymentLines).toEqual([
       { cardLabel: "Visa*7582", isGiftCard: false, amountCents: 1000 },
     ]);
+  });
+});
+
+describe("parseOrderImageMap", () => {
+  it("maps productId to image src from each item title's row", () => {
+    document.body.innerHTML = `
+      <div data-test="package-card-item-row">
+        <img src="https://target.scene7.com/is/image/Target/GUEST_2042?wid=160" alt="x" />
+        <h3 id="item-90571485">Esembly Cloth Diaper</h3>
+      </div>
+      <div data-test="package-card-item-row">
+        <img src="https://target.scene7.com/is/image/Target/GUEST_4f3a?wid=160" alt="y" />
+        <h3 id="item-93891638">Crinkle Maternity Swimsuit</h3>
+      </div>
+    `;
+    expect(parseOrderImageMap(document)).toEqual({
+      "90571485": "https://target.scene7.com/is/image/Target/GUEST_2042?wid=160",
+      "93891638": "https://target.scene7.com/is/image/Target/GUEST_4f3a?wid=160",
+    });
   });
 });
