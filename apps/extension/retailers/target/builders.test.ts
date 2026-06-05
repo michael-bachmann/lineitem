@@ -35,6 +35,45 @@ describe("buildPurchaseOrder", () => {
     expect(result.failures).toEqual([]);
     expect(result.allocated[0].items[0].allocatedCents).toBe(1859);
   });
+
+  it("falls back to empty imageUrl when productId is absent from imageMap", () => {
+    const detail: RawTargetInvoiceDetail = {
+      isRefund: false,
+      items: [
+        { productId: "90571485", title: "Diaper", unitPriceCents: 1859, quantity: 1, amountCents: 1859 },
+      ],
+      itemSubtotalCents: 1859,
+      invoiceTotalCents: 1859,
+      paymentLines: [{ cardLabel: "American Express*1014", isGiftCard: false, amountCents: 1859 }],
+    };
+    const order = buildPurchaseOrder("912003510147483", detail, {});
+    expect(order.items[0].imageUrl).toBe("");
+  });
+
+  it("maps two items and distributes a single charge across both", () => {
+    const detail: RawTargetInvoiceDetail = {
+      isRefund: false,
+      items: [
+        { productId: "aaa", title: "Item A", unitPriceCents: 1000, quantity: 2, amountCents: 2000 },
+        { productId: "bbb", title: "Item B", unitPriceCents: 500, quantity: 1, amountCents: 500 },
+      ],
+      itemSubtotalCents: 2500,
+      invoiceTotalCents: 2500,
+      paymentLines: [{ cardLabel: "Visa*1234", isGiftCard: false, amountCents: 2500 }],
+    };
+    const order = buildPurchaseOrder("ord-multi", detail, { aaa: "img-a.jpg", bbb: "img-b.jpg" });
+
+    expect(order.items).toHaveLength(2);
+    expect(order.items[0]).toMatchObject({ productId: "aaa", imageUrl: "img-a.jpg" });
+    expect(order.items[1]).toMatchObject({ productId: "bbb", imageUrl: "img-b.jpg" });
+    expect(order.displayedItemsSubtotalCents).toBe(detail.itemSubtotalCents);
+
+    const result = distributeOrder(order, [charge({ amountCents: 2500, isRefund: false })]);
+    expect(result.failures).toEqual([]);
+    const allocatedItems = result.allocated[0].items;
+    const totalAllocated = allocatedItems.reduce((s, it) => s + it.allocatedCents, 0);
+    expect(totalAllocated).toBe(2500);
+  });
 });
 
 describe("buildRefundOrder", () => {
@@ -68,7 +107,7 @@ describe("buildRefundOrder", () => {
 describe("cardPaymentCandidates", () => {
   it("excludes gift-card lines and tags refund/date/order/invoice", () => {
     const detail: RawTargetInvoiceDetail = {
-      isRefund: true, items: [], itemSubtotalCents: 0, invoiceTotalCents: 4390,
+      isRefund: true, items: [], /* items are irrelevant to payment-line candidate filtering */ itemSubtotalCents: 0, invoiceTotalCents: 4390,
       paymentLines: [
         { cardLabel: "Visa*6523", isGiftCard: false, amountCents: 2890 },
         { cardLabel: "Target GiftCard", isGiftCard: true, amountCents: 1500 },

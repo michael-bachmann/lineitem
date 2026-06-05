@@ -39,11 +39,6 @@ function toScrapedItems(
   }));
 }
 
-/** Gross item sum = sum(unitPrice*qty). Used for verifyScrape reconciliation. */
-function grossItemSum(items: ScrapedItem[]): number {
-  return items.reduce((s, it) => s + it.unitPriceCents * it.quantity, 0);
-}
-
 export function buildPurchaseOrder(
   orderId: string,
   detail: RawTargetInvoiceDetail,
@@ -54,7 +49,14 @@ export function buildPurchaseOrder(
     retailer: RETAILER,
     orderId,
     items,
-    displayedItemsSubtotalCents: grossItemSum(items),
+    // detail.itemSubtotalCents is the sum of per-item line amounts the scraper
+    // parsed. The pipeline's verifyScrape compares Σ(unitPrice*qty) against this,
+    // which catches a per-line unit×qty ≠ Amount discrepancy. NOTE: it does NOT
+    // catch a fully-missed item the way Amazon's guard does — Target's invoice
+    // detail only shows a post-promo "Item subtotal", so there is no promo-free
+    // independent total to reconcile gross items against. This is an accepted v1
+    // limitation (see the design doc's "Known limitations").
+    displayedItemsSubtotalCents: detail.itemSubtotalCents,
     refund: null,
   };
 }
@@ -74,7 +76,8 @@ export function buildRefundOrder(
     retailer: RETAILER,
     orderId,
     items,
-    displayedItemsSubtotalCents: grossItemSum(items),
+    // see note above
+    displayedItemsSubtotalCents: detail.itemSubtotalCents,
     refund: {
       itemCents,
       taxCents,
