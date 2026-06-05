@@ -2,7 +2,7 @@
 import type {
   RetailerAdapter, PayeeMapping, ScrapedOrder, YnabCharge,
 } from "@/lib/types";
-import { matchByAmountAndDate, cutoffDateFor, NO_MATCH_REASON } from "@/lib/matcher";
+import { matchByAmountAndDate, cutoffDateFor, NO_MATCH_REASON, THREE_DAYS_MS } from "@/lib/matcher";
 import { openRetailerTab, navigateTab } from "@/background/tabs";
 import {
   ordersUrl, orderInvoicesUrl, invoiceDetailUrl, orderDetailUrl,
@@ -19,7 +19,6 @@ const PAYEES: PayeeMapping[] = [
 ];
 
 const DEFAULT_MAX_PAGES = 10;
-const THREE_DAYS_MS = 3 * 24 * 60 * 60 * 1000;
 
 function send<T>(tabId: number, type: string): Promise<T> {
   return browser.tabs.sendMessage(tabId, { type }) as Promise<T>;
@@ -65,8 +64,11 @@ export const targetAdapter: RetailerAdapter = {
 
       // Phase 2: for orders near an unmatched charge, read their invoices list
       // and match charges to invoice TOTALS (handles single-card invoices).
+      // Build an invoice-list cache so Phase 3 can reuse it without re-fetching.
       let remaining = [...charges];
       const matchedInvoices: MatchedInvoice[] = [];
+      const consumedInvoices = new Set<string>(); // `${orderId}/${invoiceId}`
+      const invoiceListCache = new Map<string, RawTargetInvoice[]>(); // orderId → invoices
 
       for (const order of orders) {
         if (remaining.length === 0) break;
@@ -75,41 +77,51 @@ export const targetAdapter: RetailerAdapter = {
 
         await navigateTab(tabId, orderInvoicesUrl(order.orderId));
         const { invoices } = await send<{ invoices: RawTargetInvoice[] }>(tabId, "SCRAPE_INVOICES_LIST");
+        invoiceListCache.set(order.orderId, invoices);
 
         const stillRemaining: YnabCharge[] = [];
         for (const charge of remaining) {
-          const cand = invoices.filter((inv) => inv.isRefund === charge.isRefund);
+          const cand = invoices.filter(
+            (inv) => inv.isRefund === charge.isRefund
+              && !consumedInvoices.has(`${order.orderId}/${inv.invoiceId}`),
+          );
           const hit = matchByAmountAndDate(charge.amountCents, charge.date, cand);
-          if (hit) matchedInvoices.push({ orderId: order.orderId, invoiceId: hit.invoiceId, charge });
-          else stillRemaining.push(charge);
+          if (hit) {
+            consumedInvoices.add(`${order.orderId}/${hit.invoiceId}`);
+            matchedInvoices.push({ orderId: order.orderId, invoiceId: hit.invoiceId, charge });
+          } else {
+            stillRemaining.push(charge);
+          }
         }
         remaining = stillRemaining;
       }
 
       // Phase 3: for charges still unmatched, the invoice may be a payment
-      // split (total != card amount). Re-read nearby invoices' DETAILS and
-      // match on card payment-line amounts.
+      // split (total != card amount). Use the cached invoice lists (only orders
+      // Phase 2 already visited) and match on card payment-line amounts.
+      // Shares the consumedInvoices set so no invoice is bound twice.
       if (remaining.length > 0) {
-        for (const order of orders) {
+        for (const [orderId, invoices] of invoiceListCache) {
           if (remaining.length === 0) break;
           signal?.throwIfAborted();
-          if (!nearAnyCharge(order.date, remaining)) continue;
-
-          await navigateTab(tabId, orderInvoicesUrl(order.orderId));
-          const { invoices } = await send<{ invoices: RawTargetInvoice[] }>(tabId, "SCRAPE_INVOICES_LIST");
 
           for (const inv of invoices) {
             if (remaining.length === 0) break;
-            await navigateTab(tabId, invoiceDetailUrl(order.orderId, inv.invoiceId));
+            if (consumedInvoices.has(`${orderId}/${inv.invoiceId}`)) continue;
+            await navigateTab(tabId, invoiceDetailUrl(orderId, inv.invoiceId));
             const { detail } = await send<{ detail: RawTargetInvoiceDetail }>(tabId, "SCRAPE_INVOICE_DETAIL");
-            const candidates: TargetCandidate[] = cardPaymentCandidates(order.orderId, inv.invoiceId, inv.date, detail);
+            const candidates: TargetCandidate[] = cardPaymentCandidates(orderId, inv.invoiceId, inv.date, detail);
 
             const stillRemaining: YnabCharge[] = [];
             for (const charge of remaining) {
               const cand = candidates.filter((c) => c.isRefund === charge.isRefund);
               const hit = matchByAmountAndDate(charge.amountCents, charge.date, cand);
-              if (hit) matchedInvoices.push({ orderId: order.orderId, invoiceId: hit.invoiceId, charge, detail });
-              else stillRemaining.push(charge);
+              if (hit) {
+                consumedInvoices.add(`${orderId}/${hit.invoiceId}`);
+                matchedInvoices.push({ orderId, invoiceId: hit.invoiceId, charge, detail });
+              } else {
+                stillRemaining.push(charge);
+              }
             }
             remaining = stillRemaining;
           }

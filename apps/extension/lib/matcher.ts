@@ -1,4 +1,4 @@
-const THREE_DAYS_MS = 3 * 24 * 60 * 60 * 1000;
+export const THREE_DAYS_MS = 3 * 24 * 60 * 60 * 1000;
 
 /**
  * Match a YNAB transaction to a scraped retailer transaction by exact amount

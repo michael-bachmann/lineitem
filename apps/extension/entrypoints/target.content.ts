@@ -5,7 +5,7 @@ import {
   parseInvoiceDetailFromDocument,
   parseOrderImageMap,
 } from "@/retailers/target/scraper";
-import { isLoginUrl } from "@/retailers/target/selectors";
+import { isLoginUrl, SELECTORS } from "@/retailers/target/selectors";
 
 type ContentMessage =
   | { type: "CHECK_AUTH" }
@@ -49,31 +49,31 @@ async function handleMessage(message: ContentMessage): Promise<unknown> {
     case "CHECK_AUTH":
       return { authenticated: true };
     case "SCRAPE_ORDERS_LIST": {
-      await waitFor(() => document.querySelector("a[data-test='order-details-link']"));
+      await waitFor(() => document.querySelector(SELECTORS.orderLink));
       return { orders: parseOrdersFromDocument(document) };
     }
     case "LOAD_MORE": {
-      const btn = [...document.querySelectorAll("button")].find((b) =>
+      const btn = [...document.querySelectorAll(SELECTORS.loadMoreButton)].find((b) =>
         /load more/i.test(b.textContent ?? ""),
       );
       if (!btn) return { hasNext: false };
-      const before = document.querySelectorAll("a[data-test='order-details-link']").length;
+      const before = document.querySelectorAll(SELECTORS.orderLink).length;
       btn.click();
-      await waitFor(
-        () => document.querySelectorAll("a[data-test='order-details-link']").length > before,
+      const grew = await waitFor(
+        () => document.querySelectorAll(SELECTORS.orderLink).length > before,
       );
-      return { hasNext: true };
+      return { hasNext: grew !== null };
     }
     case "SCRAPE_INVOICES_LIST": {
-      await waitFor(() => document.querySelector(".styles_invoiceListGrid__B_fTC"));
+      await waitFor(() => document.querySelector(SELECTORS.invoiceRow));
       return { invoices: parseInvoicesListFromDocument(document) };
     }
     case "SCRAPE_INVOICE_DETAIL": {
-      await waitFor(() => document.querySelector(".styles_infoRow__k6eLr"));
+      await waitFor(() => document.querySelector(SELECTORS.invoiceItemRow));
       return { detail: parseInvoiceDetailFromDocument(document) };
     }
     case "SCRAPE_ORDER_IMAGES": {
-      await waitFor(() => document.querySelector("h3[id^='item-']"));
+      await waitFor(() => document.querySelector(SELECTORS.orderItemTitle));
       return { imageMap: parseOrderImageMap(document) };
     }
     default:
