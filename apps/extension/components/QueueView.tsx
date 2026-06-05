@@ -43,9 +43,10 @@ export default function QueueView({
     return {
       id: entry.ynabTransaction.id,
       payee: entry.ynabTransaction.payee_name ?? "Unknown payee",
-      // Magnitude only for now — refund/inflow sign display needs the design's
-      // negative-card treatment (ui-shots/txn-card-negative). TODO: handle sign.
+      // Magnitude; the sign is conveyed by `refund` (YNAB outflows are negative,
+      // a positive amount is an inflow/refund).
       amount: Math.abs(millunitsToCents(entry.ynabTransaction.amount)) / 100,
+      refund: entry.ynabTransaction.amount > 0,
       dateShort: formatDate(entry.ynabTransaction.date),
       status,
       needs,
