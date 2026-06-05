@@ -41,3 +41,39 @@ describe("isLoginUrl", () => {
     expect(isLoginUrl("https://www.target.com/orders")).toBe(false);
   });
 });
+
+import { parseOrdersFromDocument } from "./scraper";
+
+describe("parseOrdersFromDocument", () => {
+  it("extracts orderId and date for each order card", () => {
+    document.body.innerHTML = `
+      <div>
+        <div class="order-card">
+          <div>Jun 4, 2026</div>
+          <a data-test="order-details-link" href="/orders/912003510147483">View order</a>
+        </div>
+        <div class="order-card">
+          <div>May 25, 2026</div>
+          <a data-test="order-details-link" href="/orders/902003493044907">View order</a>
+        </div>
+      </div>
+    `;
+    expect(parseOrdersFromDocument(document)).toEqual([
+      { orderId: "912003510147483", date: "2026-06-04" },
+      { orderId: "902003493044907", date: "2026-05-25" },
+    ]);
+  });
+
+  it("ignores invoice links and dedupes repeated order links", () => {
+    document.body.innerHTML = `
+      <div class="order-card">
+        <div>Jun 4, 2026</div>
+        <a data-test="order-details-link" href="/orders/111">a</a>
+        <a data-test="order-details-link" href="/orders/111">b</a>
+      </div>
+    `;
+    expect(parseOrdersFromDocument(document)).toEqual([
+      { orderId: "111", date: "2026-06-04" },
+    ]);
+  });
+});
