@@ -42,7 +42,7 @@ describe("isLoginUrl", () => {
   });
 });
 
-import { parseOrdersFromDocument } from "./scraper";
+import { parseOrdersFromDocument, parseInvoicesListFromDocument } from "./scraper";
 
 describe("parseOrdersFromDocument", () => {
   it("extracts orderId and date for each order card", () => {
@@ -74,6 +74,31 @@ describe("parseOrdersFromDocument", () => {
     `;
     expect(parseOrdersFromDocument(document)).toEqual([
       { orderId: "111", date: "2026-06-04" },
+    ]);
+  });
+});
+
+describe("parseInvoicesListFromDocument", () => {
+  it("parses purchase and refund rows with id, date, amount, and isRefund", () => {
+    document.body.innerHTML = `
+      <div>
+        <div class="styles_invoiceListGrid__B_fTC">
+          <div class="h-text-bold">Invoice 1 of 2</div>
+          <div>Invoice date: July 28, 2025</div>
+          <span class="h-text-bold">$23.04</span>
+          <a href="/orders/902002727679794/invoices/111">View invoice</a>
+        </div>
+        <div class="styles_invoiceListGrid__B_fTC">
+          <div class="h-text-bold">Refund 1 of 1</div>
+          <div>Invoice date: August 23, 2025</div>
+          <span class="h-text-bold">$43.90</span>
+          <a href="/orders/902002727679794/invoices/5235329400738320">View invoice</a>
+        </div>
+      </div>
+    `;
+    expect(parseInvoicesListFromDocument(document)).toEqual([
+      { invoiceId: "111", date: "2025-07-28", amountCents: 2304, isRefund: false },
+      { invoiceId: "5235329400738320", date: "2025-08-23", amountCents: 4390, isRefund: true },
     ]);
   });
 });

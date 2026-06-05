@@ -9,6 +9,36 @@ export interface RawTargetOrder {
 
 const ORDER_ID_RE = /\/orders\/(\d+)(?:[/?#]|$)/;
 
+export interface RawTargetInvoice {
+  invoiceId: string;
+  /** ISO YYYY-MM-DD. */
+  date: string;
+  /** Displayed invoice/refund total in cents (absolute). */
+  amountCents: number;
+  isRefund: boolean;
+}
+
+const INVOICE_ID_RE = /\/invoices\/(\d+)(?:[/?#]|$)/;
+const MONEY_RE = /\$-?[\d,]+\.\d{2}/;
+
+export function parseInvoicesListFromDocument(doc: Document): RawTargetInvoice[] {
+  const out: RawTargetInvoice[] = [];
+  for (const row of doc.querySelectorAll<HTMLElement>(SELECTORS.invoiceRow)) {
+    const link = row.querySelector<HTMLAnchorElement>(SELECTORS.invoiceViewLink);
+    const idMatch = link?.getAttribute("href")?.match(INVOICE_ID_RE);
+    if (!idMatch) continue;
+
+    const text = row.textContent ?? "";
+    const isRefund = /\brefund\b/i.test(text);
+    const date = parseTargetDate(text);
+    const moneyMatch = text.match(MONEY_RE);
+    const amountCents = moneyMatch ? parseCents(moneyMatch[0]) : 0;
+
+    out.push({ invoiceId: idMatch[1], date, amountCents, isRefund });
+  }
+  return out;
+}
+
 /** Parse the /orders list into one entry per order (deduped by orderId). */
 export function parseOrdersFromDocument(doc: Document): RawTargetOrder[] {
   const out: RawTargetOrder[] = [];
