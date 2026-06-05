@@ -58,6 +58,7 @@ export default defineConfig({
     },
     host_permissions: [
       "https://*.amazon.com/*",
+      "https://*.target.com/*",
       "https://api.ynab.com/*",
       "https://app.ynab.com/oauth/*",
       "https://auth.lineitem.dev/*",

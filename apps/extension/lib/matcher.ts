@@ -33,3 +33,7 @@ export function cutoffDateFor(items: { date: string }[]): string {
   cutoff.setDate(cutoff.getDate() - 3);
   return cutoff.toISOString().slice(0, 10);
 }
+
+/** Reason string an adapter returns for a charge it found no order/invoice for.
+ *  sync.ts maps exactly this reason to the `no_match` status. */
+export const NO_MATCH_REASON = "No matching order found";
