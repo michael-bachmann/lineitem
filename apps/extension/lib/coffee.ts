@@ -37,19 +37,18 @@ export async function recordItemized(
   count: number,
 ): Promise<{ showCoffee: boolean; cumulativeItemized: number }> {
   const state = await read();
-  state.cumulativeItemized += count;
-  let showCoffee = false;
-  if (!state.retired && state.cumulativeItemized >= state.nextThreshold) {
-    state.nextThreshold *= 2;
-    showCoffee = true;
-  }
-  await write(state);
-  return { showCoffee, cumulativeItemized: state.cumulativeItemized };
+  const cumulativeItemized = state.cumulativeItemized + count;
+  const showCoffee = !state.retired && cumulativeItemized >= state.nextThreshold;
+  await write({
+    ...state,
+    cumulativeItemized,
+    nextThreshold: showCoffee ? state.nextThreshold * 2 : state.nextThreshold,
+  });
+  return { showCoffee, cumulativeItemized };
 }
 
 /** Soft-retire the post-approval ask (on Ko-fi click). Help hero is unaffected. */
 export async function retireCoffee(): Promise<void> {
   const state = await read();
-  state.retired = true;
-  await write(state);
+  await write({ ...state, retired: true });
 }
