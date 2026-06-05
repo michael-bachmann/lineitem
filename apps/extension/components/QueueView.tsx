@@ -3,6 +3,7 @@ import { entryStatus, isFullyClassified, type QueueDisplayStatus } from "@/lib/q
 import { millunitsToCents } from "@/lib/money";
 import TransactionCard, { type TransactionVM } from "@/components/TransactionCard";
 import { BrandRow, IconButton, Button, SectionLabel, Icon } from "@lineitem/ui";
+import CoffeeCard from "@/components/CoffeeCard";
 
 interface QueueViewProps {
   queue: QueueEntry[];
@@ -13,6 +14,14 @@ interface QueueViewProps {
   onApproveAll: () => void;
   onSelectEntry: (entry: QueueEntry) => void;
   onSettings: () => void;
+  /** Show the post-approval donation ask above the queue. */
+  showCoffee?: boolean;
+  /** Lifetime classified-item count, for the ask copy. */
+  coffeeClassified?: number;
+  /** Dismiss the ask for this session. */
+  onDismissCoffee?: () => void;
+  /** Ko-fi button clicked (soft-retires the ask). */
+  onCoffeeClick?: () => void;
 }
 
 const GROUPS: { key: string; label: string; has: (s: QueueDisplayStatus) => boolean }[] = [
@@ -37,6 +46,10 @@ export default function QueueView({
   onApproveAll,
   onSelectEntry,
   onSettings,
+  showCoffee,
+  coffeeClassified,
+  onDismissCoffee,
+  onCoffeeClick,
 }: QueueViewProps) {
   const vms = queue.map((entry): TransactionVM & { onOpen: () => void } => {
     const { status, needs } = entryStatus(entry);
@@ -83,6 +96,20 @@ export default function QueueView({
           <Icon.alertCircle aria-hidden />
           <span>Sync failed: {error}</span>
         </div>
+      )}
+
+      {showCoffee && (
+        <CoffeeCard
+          sub={
+            <>
+              LineItem has categorized{" "}
+              <b className="font-semibold text-text">{(coffeeClassified ?? 0).toLocaleString()}</b>{" "}
+              line items for you so far — all free and ad-free.
+            </>
+          }
+          onDismiss={onDismissCoffee}
+          onCoffeeClick={onCoffeeClick}
+        />
       )}
 
       {empty ? (

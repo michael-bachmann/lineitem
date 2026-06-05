@@ -1,6 +1,7 @@
 import { useId, useState } from "react";
 import { FAQ, LINKS } from "@/lib/help-content";
-import { BackLink, Button, Row, SectionLabel, Icon } from "@lineitem/ui";
+import { BackLink, Row, SectionLabel, Icon } from "@lineitem/ui";
+import CoffeeCard from "@/components/CoffeeCard";
 
 interface HelpProps {
   onBack: () => void;
@@ -22,26 +23,7 @@ export default function Help({ onBack, version = "0.0.0" }: HelpProps) {
       </div>
 
       {/* Buy me a coffee — hero */}
-      <div className="flex flex-col gap-3 rounded-card border border-line bg-surface p-[15px] shadow-card">
-        <div className="flex items-center gap-[11px]">
-          <span className="flex h-[38px] w-[38px] flex-none items-center justify-center rounded-control bg-brand-weak text-brand">
-            <Icon.coffee aria-hidden width={20} height={20} />
-          </span>
-          <div>
-            <div className="text-[15px] font-bold tracking-[-0.018em] text-text">
-              Enjoying LineItem?
-            </div>
-            <div className="text-[12.5px] leading-[1.45] text-muted">
-              It’s free and ad-free. A coffee keeps it maintained.
-            </div>
-          </div>
-        </div>
-        <a href={LINKS.coffee} target="_blank" rel="noopener noreferrer" className="no-underline">
-          <Button variant="primary">
-            <Icon.coffee aria-hidden width={16} height={16} /> Buy me a coffee
-          </Button>
-        </a>
-      </div>
+      <CoffeeCard sub="It’s free and ad-free. A coffee keeps it maintained." />
 
       {/* FAQ */}
       <SectionLabel>Frequently asked</SectionLabel>

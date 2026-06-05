@@ -59,3 +59,6 @@ export const SyncError: Story = {
   args: { error: "YNAB rate limit reached. Try again in a minute." },
 };
 export const Approving: Story = { args: { approving: true } };
+export const WithCoffee: Story = {
+  args: { showCoffee: true, coffeeClassified: 324, onDismissCoffee: noop, onCoffeeClick: noop },
+};
