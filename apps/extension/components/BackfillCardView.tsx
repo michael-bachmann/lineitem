@@ -92,7 +92,7 @@ export function BackfillCardView({ state, onStart, onCancel }: BackfillCardViewP
                 <Icon.refresh aria-hidden width={15} height={15} />
               </span>
               <p className="m-0 text-[12.5px] leading-[21px] text-faint">
-                {state.result.failed} couldn’t be read — they’ll retry on the next sync.
+                {state.result.failed} couldn’t be read — run again to retry them.
               </p>
             </div>
           )}
