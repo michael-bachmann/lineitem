@@ -1,4 +1,5 @@
 import { groupBy, sumBy } from "remeda";
+import { READ_FAILED_REASON } from "@/lib/matcher";
 import { getSettings } from "@/lib/settings";
 import { getTransactionsSince } from "@/lib/ynab";
 import { getAllocatedTransaction, putAllocatedTransactions } from "@/lib/db";
@@ -253,11 +254,17 @@ async function runForRetailer(
     }
     if (allocations.length > 0) await putAllocatedTransactions(allocations);
 
+    // A charge the adapter skipped because its page couldn't be read counts as
+    // a "failed" (couldn't-be-read) rather than a genuine no-match, so the UI's
+    // "run again to retry them" reflects it. Everything else stays unmatched.
+    const readFailed = unmatched.filter((u) => u.reason === READ_FAILED_REASON).length;
+
     return {
       matched: outcomes.filter((o) => o.kind === "ok").length,
       unmatched:
-        sumBy(outcomes, (o) => (o.kind === "ambiguous" ? o.chargeCount : 0)) + unmatched.length,
-      failed: 0,
+        sumBy(outcomes, (o) => (o.kind === "ambiguous" ? o.chargeCount : 0)) +
+        (unmatched.length - readFailed),
+      failed: readFailed,
       itemsWritten: entries.length,
     };
   } catch (err) {

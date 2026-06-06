@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { navigateTab } from "./tabs";
+import { navigateTab, sendToTab } from "./tabs";
 
 /** Minimal browser.tabs mock with a controllable onUpdated event. `get` returns
  *  a STALE "complete" status to mimic Firefox reporting the previous page as
@@ -72,5 +72,38 @@ describe("navigateTab", () => {
     tabs.fireUpdated(7, { status: "complete" });
     await p;
     expect(resolved).toBe(true);
+  });
+});
+
+describe("sendToTab", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("resolves with the content script's reply", async () => {
+    vi.stubGlobal("browser", {
+      tabs: { sendMessage: vi.fn(async () => ({ ok: true })) },
+    });
+    await expect(sendToTab(7, { type: "PING" })).resolves.toEqual({ ok: true });
+  });
+
+  it("rejects if no reply arrives within the timeout (a hung parser)", async () => {
+    vi.useFakeTimers();
+    // A content script that received the message but never replies.
+    vi.stubGlobal("browser", {
+      tabs: { sendMessage: vi.fn(() => new Promise(() => {})) },
+    });
+
+    const p = sendToTab(7, { type: "SCRAPE" }, 1000);
+    const assertion = expect(p).rejects.toThrow(/did not reply to SCRAPE within 1 seconds/);
+    await vi.advanceTimersByTimeAsync(1000);
+    await assertion;
+  });
+
+  it("propagates a sendMessage rejection without waiting for the timeout", async () => {
+    vi.stubGlobal("browser", {
+      tabs: { sendMessage: vi.fn(async () => { throw new Error("no receiver"); }) },
+    });
+    await expect(sendToTab(7, { type: "PING" })).rejects.toThrow("no receiver");
   });
 });

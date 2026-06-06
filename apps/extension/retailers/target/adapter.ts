@@ -2,8 +2,10 @@
 import type {
   RetailerAdapter, PayeeMapping, ScrapedOrder, YnabCharge,
 } from "@/lib/types";
-import { matchByAmountAndDate, cutoffDateFor, NO_MATCH_REASON, THREE_DAYS_MS } from "@/lib/matcher";
-import { openRetailerTab, navigateTab } from "@/background/tabs";
+import {
+  matchByAmountAndDate, cutoffDateFor, NO_MATCH_REASON, READ_FAILED_REASON, THREE_DAYS_MS,
+} from "@/lib/matcher";
+import { openRetailerTab, navigateTab, sendToTab } from "@/background/tabs";
 import {
   ordersUrl, orderInvoicesUrl, invoiceDetailUrl, orderDetailUrl,
 } from "@/retailers/target/selectors";
@@ -28,7 +30,22 @@ const PREFILTER_BEFORE_MS = 7 * DAY_MS;
 const PREFILTER_AFTER_MS = 45 * DAY_MS;
 
 function send<T>(tabId: number, type: string): Promise<T> {
-  return browser.tabs.sendMessage(tabId, { type }) as Promise<T>;
+  return sendToTab<T>(tabId, { type });
+}
+
+/**
+ * Run one page read, retrying it once on failure. A failed/hung load or a
+ * frozen parser usually recovers on a fresh navigation, so one cheap retry
+ * absorbs transient blips. (Cancellation is handled by the loop-level
+ * `signal.throwIfAborted()` calls, which sit outside every read.)
+ */
+export async function readWithRetry<T>(label: string, read: () => Promise<T>): Promise<T> {
+  try {
+    return await read();
+  } catch (err) {
+    console.warn(`[target] ${label} failed; retrying once`, err);
+    return await read();
+  }
 }
 
 /**
@@ -110,8 +127,18 @@ export const targetAdapter: RetailerAdapter = {
         signal?.throwIfAborted();
         if (!orderMightMatch(order, remaining)) continue;
 
-        await navigateTab(tabId, orderInvoicesUrl(order.orderId));
-        const { invoices } = await send<{ invoices: RawTargetInvoice[] }>(tabId, "SCRAPE_INVOICES_LIST");
+        let invoices: RawTargetInvoice[];
+        try {
+          invoices = await readWithRetry(`invoices ${order.orderId}`, async () => {
+            await navigateTab(tabId, orderInvoicesUrl(order.orderId));
+            return (await send<{ invoices: RawTargetInvoice[] }>(tabId, "SCRAPE_INVOICES_LIST")).invoices;
+          });
+        } catch (err) {
+          // Couldn't read this order's invoices — skip it; its charges stay
+          // unmatched and a re-run will reattempt.
+          console.warn(`[target] skipping order ${order.orderId}: invoices unreadable`, err);
+          continue;
+        }
         invoiceListCache.set(order.orderId, invoices);
 
         const stillRemaining: YnabCharge[] = [];
@@ -146,8 +173,18 @@ export const targetAdapter: RetailerAdapter = {
             if (consumedInvoices.has(`${orderId}/${inv.invoiceId}`)) continue;
             if (!invoiceMightSplitMatch(inv, remaining)) continue;
 
-            await navigateTab(tabId, invoiceDetailUrl(orderId, inv.invoiceId));
-            const { detail } = await send<{ detail: RawTargetInvoiceDetail }>(tabId, "SCRAPE_INVOICE_DETAIL");
+            let detail: RawTargetInvoiceDetail;
+            try {
+              detail = await readWithRetry(`invoice detail ${orderId}/${inv.invoiceId}`, async () => {
+                await navigateTab(tabId, invoiceDetailUrl(orderId, inv.invoiceId));
+                return (await send<{ detail: RawTargetInvoiceDetail }>(tabId, "SCRAPE_INVOICE_DETAIL")).detail;
+              });
+            } catch (err) {
+              // Couldn't read this invoice's detail — skip it; the charge stays
+              // unmatched and a re-run will reattempt.
+              console.warn(`[target] skipping invoice ${orderId}/${inv.invoiceId}: detail unreadable`, err);
+              continue;
+            }
             const candidates: TargetCandidate[] = cardPaymentCandidates(orderId, inv.invoiceId, inv.date, detail);
 
             const stillRemaining: YnabCharge[] = [];
@@ -176,7 +213,19 @@ export const targetAdapter: RetailerAdapter = {
         onScrapeProgress?.({ index: i + 1, total: matchedInvoices.length });
         const mi = matchedInvoices[i];
 
-        const detail = mi.detail ?? (await loadDetail(tabId, mi.orderId, mi.invoiceId));
+        let detail: RawTargetInvoiceDetail;
+        try {
+          detail = mi.detail
+            ?? (await readWithRetry(`detail ${mi.orderId}/${mi.invoiceId}`, () =>
+              loadDetail(tabId, mi.orderId, mi.invoiceId)));
+        } catch (err) {
+          // This charge matched an invoice but its detail page couldn't be read —
+          // surface it as a read failure (counts toward "couldn't be read") so a
+          // re-run reattempts it, rather than tanking the whole scrape.
+          console.warn(`[target] couldn't read detail for ${mi.orderId}/${mi.invoiceId}`, err);
+          detailFailures.push({ charge: mi.charge, reason: READ_FAILED_REASON });
+          continue;
+        }
         if (detail.items.length === 0) {
           detailFailures.push({ charge: mi.charge, reason: "Target invoice had no parseable items" });
           continue;
@@ -184,9 +233,16 @@ export const targetAdapter: RetailerAdapter = {
 
         let imageMap = imageCache.get(mi.orderId);
         if (!imageMap) {
-          await navigateTab(tabId, orderDetailUrl(mi.orderId));
-          const res = await send<{ imageMap: Record<string, string> }>(tabId, "SCRAPE_ORDER_IMAGES");
-          imageMap = res.imageMap;
+          try {
+            imageMap = await readWithRetry(`images ${mi.orderId}`, async () => {
+              await navigateTab(tabId, orderDetailUrl(mi.orderId));
+              return (await send<{ imageMap: Record<string, string> }>(tabId, "SCRAPE_ORDER_IMAGES")).imageMap;
+            });
+          } catch (err) {
+            console.warn(`[target] couldn't read order images for ${mi.orderId}`, err);
+            detailFailures.push({ charge: mi.charge, reason: READ_FAILED_REASON });
+            continue;
+          }
           imageCache.set(mi.orderId, imageMap);
         }
 

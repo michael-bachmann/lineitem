@@ -1,3 +1,38 @@
+/** Default ceiling for a content-script round-trip. A scrape on an already-
+ *  loaded page should take well under a second; this only guards against a
+ *  content script that received the message but never replies (e.g. a parser
+ *  that hung), which `browser.tabs.sendMessage` alone would wait on forever. */
+const MESSAGE_TIMEOUT_MS = 30_000;
+
+/**
+ * Send a message to a tab's content script, rejecting if no reply arrives
+ * within `timeoutMs`. `browser.tabs.sendMessage` never times out on its own, so
+ * a hung scraper would otherwise freeze the whole flow; this turns that hang
+ * into a catchable error the caller can retry or skip.
+ */
+export function sendToTab<T>(
+  tabId: number,
+  message: object,
+  timeoutMs = MESSAGE_TIMEOUT_MS,
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const type = (message as { type?: string }).type ?? "message";
+    const timer = setTimeout(() => {
+      reject(new Error(`Tab ${tabId} did not reply to ${type} within ${timeoutMs / 1000} seconds`));
+    }, timeoutMs);
+    browser.tabs.sendMessage(tabId, message).then(
+      (res) => {
+        clearTimeout(timer);
+        resolve(res as T);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      },
+    );
+  });
+}
+
 /** Find or create a tab for the given retailer URL. Reuses existing tabs on the same domain. */
 export async function openRetailerTab(
   startUrl: string,
