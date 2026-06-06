@@ -99,7 +99,7 @@ export function BackfillCardView({ state, onStart, onCancel }: BackfillCardViewP
           {state.result.hasUnbackfilled && (
             <>
               <p className="m-0 text-[13px] leading-[1.55] text-muted">
-                If you have other Amazon accounts, sign in and run again.
+                Some purchases may be on a different account — sign in to it and run again.
               </p>
               <Button variant="secondary" onClick={onStart}>
                 Run again

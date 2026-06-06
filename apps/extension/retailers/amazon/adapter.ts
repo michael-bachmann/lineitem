@@ -5,7 +5,7 @@ import type {
   YnabCharge,
   PayeeMapping,
 } from "@/lib/types";
-import { matchByAmountAndDate, cutoffDateFor } from "@/lib/matcher";
+import { matchByAmountAndDate, cutoffDateFor, NO_MATCH_REASON } from "@/lib/matcher";
 import { openRetailerTab, navigateTab } from "@/background/tabs";
 import { orderDetailUrl, itemmodUrl } from "@/retailers/amazon/selectors";
 import type { RawTransaction, RawItem } from "@/retailers/amazon/scraper";
@@ -100,7 +100,7 @@ export const amazonAdapter: RetailerAdapter = {
       const allUnmatched = [
         ...unmatchedCharges.map((c) => ({
           charge: c,
-          reason: error ?? "No matching Amazon order found",
+          reason: error ?? NO_MATCH_REASON,
         })),
         ...detailFailures,
       ];

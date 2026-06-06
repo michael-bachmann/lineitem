@@ -264,6 +264,7 @@ async function runForRetailer(
     // Re-throw abort so runBackfill stops the per-retailer loop instead of
     // recording the cancellation as a "scrape failure" for this batch.
     if (err instanceof DOMException && err.name === "AbortError") throw err;
+    console.error("[backfill] retailer", retailerId, "scrape threw:", err);
     return { matched: 0, unmatched: 0, failed: group.length, itemsWritten: 0 };
   }
 }

@@ -189,7 +189,7 @@ export default function DetailView({ entry, categories, onBack, onApprove }: Det
         refund={isRefund}
       />
 
-      <div className="sticky bottom-0 -mx-4 -mb-4 px-4 pt-3 [background:linear-gradient(180deg,transparent,var(--bg)_38%)]">
+      <div className="sticky bottom-0 -mx-4 -mb-4 px-4 pb-4 pt-3 [background:linear-gradient(180deg,transparent,var(--bg)_38%)]">
         <Button
           variant="primary"
           disabled={uncats > 0}

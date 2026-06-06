@@ -1,3 +1,4 @@
+import { NO_MATCH_REASON } from "@/lib/matcher";
 import { getSettings } from "@/lib/settings";
 import { getUnapprovedTransactions } from "@/lib/ynab";
 import { getAllocatedTransaction, putAllocatedTransactions } from "@/lib/db";
@@ -129,7 +130,7 @@ async function performSyncInner(): Promise<{ queue: QueueEntry[] } | { error: st
         errorEntries.push({
           ynabTransaction: tx,
           retailer: retailerId,
-          matchStatus: reason === "No matching Amazon order found"
+          matchStatus: reason === NO_MATCH_REASON
             ? { status: "no_match" }
             : { status: "error", message: reason },
         });
