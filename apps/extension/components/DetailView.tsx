@@ -157,7 +157,7 @@ export default function DetailView({ entry, categories, onBack, onApprove }: Det
 
       <SectionLabel>Items</SectionLabel>
 
-      {uncats > 0 && (
+      {uncats > 1 && (
         <BulkApply count={uncats} categories={categories} onApply={handleBulkApply} />
       )}
 
