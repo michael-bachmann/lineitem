@@ -45,35 +45,57 @@ describe("isLoginUrl", () => {
 import { parseOrdersFromDocument, parseInvoicesListFromDocument, parseInvoiceDetailFromDocument, parseOrderImageMap } from "./scraper";
 
 describe("parseOrdersFromDocument", () => {
+  // Mirrors the REAL Target /orders markup: `order-details-link` is a <div>
+  // card wrapper (not an <a>); the order anchor lives inside it, the date is a
+  // <p>, and the "#{orderId}" line also appears in the card text.
   it("extracts orderId and date for each order card", () => {
     document.body.innerHTML = `
-      <div>
-        <div class="order-card">
-          <div>Jun 4, 2026</div>
-          <a data-test="order-details-link" href="/orders/912003510147483">View order</a>
+      <div id="912003510147483">
+        <div class="styles_orderCard__AT6kC">
+          <div data-test="order-details-link">
+            <div class="h-display-flex">
+              <p class="h-text-bold h-text-lg">Jun 4, 2026</p>
+              <a aria-label="View purchase made on Jun 4, 2026 for $37.18"
+                 href="/orders/912003510147483">View purchase</a>
+            </div>
+            <p>$37.18 · 2 packages</p>
+            <p>#912003510147483</p>
+          </div>
         </div>
-        <div class="order-card">
-          <div>May 25, 2026</div>
-          <a data-test="order-details-link" href="/orders/902003493044907">View order</a>
+      </div>
+      <div id="902003493044907">
+        <div class="styles_orderCard__AT6kC">
+          <div data-test="order-details-link">
+            <div class="h-display-flex">
+              <p class="h-text-bold h-text-lg">May 25, 2026</p>
+              <a aria-label="View purchase made on May 25, 2026 for $12.00"
+                 href="/orders/902003493044907">View purchase</a>
+            </div>
+            <p>$12.00 · 1 package</p>
+            <p>#902003493044907</p>
+          </div>
         </div>
       </div>
     `;
     expect(parseOrdersFromDocument(document)).toEqual([
-      { orderId: "912003510147483", date: "2026-06-04" },
-      { orderId: "902003493044907", date: "2026-05-25" },
+      { orderId: "912003510147483", date: "2026-06-04", orderTotalCents: 3718 },
+      { orderId: "902003493044907", date: "2026-05-25", orderTotalCents: 1200 },
     ]);
   });
 
-  it("ignores invoice links and dedupes repeated order links", () => {
+  it("dedupes if the same order card appears twice; null total when none shown", () => {
     document.body.innerHTML = `
-      <div class="order-card">
-        <div>Jun 4, 2026</div>
-        <a data-test="order-details-link" href="/orders/111">a</a>
-        <a data-test="order-details-link" href="/orders/111">b</a>
+      <div data-test="order-details-link">
+        <p class="h-text-bold h-text-lg">Jun 4, 2026</p>
+        <a href="/orders/111">View purchase</a>
+      </div>
+      <div data-test="order-details-link">
+        <p class="h-text-bold h-text-lg">Jun 4, 2026</p>
+        <a href="/orders/111">View purchase</a>
       </div>
     `;
     expect(parseOrdersFromDocument(document)).toEqual([
-      { orderId: "111", date: "2026-06-04" },
+      { orderId: "111", date: "2026-06-04", orderTotalCents: null },
     ]);
   });
 });
@@ -207,20 +229,37 @@ describe("parseInvoiceDetailFromDocument", () => {
 });
 
 describe("parseOrderImageMap", () => {
-  it("maps productId to image src from each item title's row", () => {
+  // Real structure: a `package-card-item-row` is a PACKAGE that can hold many
+  // items, each in its own item card (one picture + one h3). The map must bind
+  // each item to ITS OWN image, not the first image in the package.
+  it("maps each item to its own image when several share one package row", () => {
     document.body.innerHTML = `
       <div data-test="package-card-item-row">
-        <img src="https://target.scene7.com/is/image/Target/GUEST_2042?wid=160" alt="x" />
-        <h3 id="item-90571485">Esembly Cloth Diaper</h3>
-      </div>
-      <div data-test="package-card-item-row">
-        <img src="https://target.scene7.com/is/image/Target/GUEST_4f3a?wid=160" alt="y" />
-        <h3 id="item-93891638">Crinkle Maternity Swimsuit</h3>
+        <div class="styles_packageCardItemWrapper__vGcBI">
+          <div class="styles_styledPackageItem__Uez2M">
+            <div class="styles_styledMinWidth__VT3Mr">
+              <div class="styles_pictureWrapper__nFVTN">
+                <picture><img src="https://target.scene7.com/is/image/Target/GUEST_AAA?wid=160" alt="a" /></picture>
+              </div>
+              <div class="styles_styledMinWidth__VT3Mr"><h3 id="item-90571485">Diaper</h3></div>
+            </div>
+          </div>
+        </div>
+        <div class="styles_packageCardItemWrapper__vGcBI">
+          <div class="styles_styledPackageItem__Uez2M">
+            <div class="styles_styledMinWidth__VT3Mr">
+              <div class="styles_pictureWrapper__nFVTN">
+                <picture><img src="https://target.scene7.com/is/image/Target/GUEST_BBB?wid=160" alt="b" /></picture>
+              </div>
+              <div class="styles_styledMinWidth__VT3Mr"><h3 id="item-83710567">Wipes</h3></div>
+            </div>
+          </div>
+        </div>
       </div>
     `;
     expect(parseOrderImageMap(document)).toEqual({
-      "90571485": "https://target.scene7.com/is/image/Target/GUEST_2042?wid=160",
-      "93891638": "https://target.scene7.com/is/image/Target/GUEST_4f3a?wid=160",
+      "90571485": "https://target.scene7.com/is/image/Target/GUEST_AAA?wid=160",
+      "83710567": "https://target.scene7.com/is/image/Target/GUEST_BBB?wid=160",
     });
   });
 });

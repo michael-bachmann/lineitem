@@ -49,7 +49,7 @@ async function handleMessage(message: ContentMessage): Promise<unknown> {
     case "CHECK_AUTH":
       return { authenticated: true };
     case "SCRAPE_ORDERS_LIST": {
-      await waitFor(() => document.querySelector(SELECTORS.orderLink));
+      await waitFor(() => document.querySelector(SELECTORS.orderCard));
       return { orders: parseOrdersFromDocument(document) };
     }
     case "LOAD_MORE": {
@@ -57,10 +57,10 @@ async function handleMessage(message: ContentMessage): Promise<unknown> {
         /load more/i.test(b.textContent ?? ""),
       );
       if (!btn) return { hasNext: false };
-      const before = document.querySelectorAll(SELECTORS.orderLink).length;
+      const before = document.querySelectorAll(SELECTORS.orderCard).length;
       btn.click();
       const grew = await waitFor(
-        () => document.querySelectorAll(SELECTORS.orderLink).length > before,
+        () => document.querySelectorAll(SELECTORS.orderCard).length > before,
       );
       return { hasNext: grew !== null };
     }

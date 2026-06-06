@@ -2,8 +2,10 @@
 
 /** Target order-history pages are scraped from the live (rendered) DOM. */
 export const SELECTORS = {
-  // Orders list (/orders)
-  orderLink: "a[data-test='order-details-link']",
+  // Orders list (/orders). `order-details-link` is a <div> card wrapper (NOT an
+  // <a>); the real order anchor (`<a href="/orders/{id}">`) lives inside it.
+  orderCard: "[data-test='order-details-link']",
+  orderCardLink: "a[href*='/orders/']",
   loadMoreButton: "button",            // matched by text "Load more" (see content script)
 
   // Invoices list (/orders/{id}/invoices)

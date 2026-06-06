@@ -5,6 +5,9 @@ export interface RawTargetOrder {
   orderId: string;
   /** ISO YYYY-MM-DD. */
   date: string;
+  /** Order total in cents from the list card, or null if not shown. A single
+   *  invoice/charge can never exceed this, so it bounds which orders to open. */
+  orderTotalCents: number | null;
 }
 
 const ORDER_ID_RE = /\/orders\/(\d+)(?:[/?#]|$)/;
@@ -142,40 +145,57 @@ export function parseInvoiceDetailFromDocument(doc: Document): RawTargetInvoiceD
   return { isRefund, items, itemSubtotalCents, invoiceTotalCents, paymentLines };
 }
 
-/** Parse the /orders list into one entry per order (deduped by orderId). */
+/** Parse the /orders list into one entry per order (deduped by orderId).
+ *
+ *  Each order is a `[data-test="order-details-link"]` card <div> containing an
+ *  `<a href="/orders/{id}">` (the orderId) and a date-shaped string (e.g.
+ *  "Jun 4, 2026"). */
 export function parseOrdersFromDocument(doc: Document): RawTargetOrder[] {
   const out: RawTargetOrder[] = [];
   const seen = new Set<string>();
-  for (const link of doc.querySelectorAll<HTMLAnchorElement>(SELECTORS.orderLink)) {
-    const href = link.getAttribute("href") ?? "";
-    const idMatch = href.match(ORDER_ID_RE);
+  for (const card of doc.querySelectorAll<HTMLElement>(SELECTORS.orderCard)) {
+    const link = card.querySelector<HTMLAnchorElement>(SELECTORS.orderCardLink);
+    const idMatch = link?.getAttribute("href")?.match(ORDER_ID_RE);
     if (!idMatch) continue;
     const orderId = idMatch[1];
     if (seen.has(orderId)) continue;
 
-    // The link's ancestor <div> is the order card in Target's largely-flat
-    // markup; parseTargetDate returns '' if no date-shaped substring is found there.
-    const card = link.closest("div");
-    const dateText = card?.textContent ?? "";
-    const date = parseTargetDate(dateText);
+    // parseTargetDate extracts the first date-shaped substring from the card
+    // text (other text like the "#{orderId}" line is ignored).
+    const text = card.textContent ?? "";
+    const date = parseTargetDate(text);
+    // First money on the card is the order total ("$37.18 · 2 packages").
+    const money = text.match(MONEY_RE);
+    const orderTotalCents = money ? parseCents(money[0]) : null;
     seen.add(orderId);
-    out.push({ orderId, date });
+    out.push({ orderId, date, orderTotalCents });
   }
   return out;
 }
 
 const ITEM_ID_RE = /^item-(\d+)$/;
 
-/** Map productId -> image URL from the order detail page. */
+/** Map productId -> image URL from the order detail page.
+ *
+ *  A `package-card-item-row` is a whole PACKAGE that can hold many items, so
+ *  `closest(package-card-item-row).querySelector("img")` would return the first
+ *  item's image for every item in the shipment. Instead, walk up from each
+ *  title to the nearest ancestor that contains an `<img>` — that ancestor is the
+ *  item's own card (each card has exactly one picture), so we get the right
+ *  image per item. */
 export function parseOrderImageMap(doc: Document): Record<string, string> {
   const map: Record<string, string> = {};
   for (const title of doc.querySelectorAll<HTMLElement>(SELECTORS.orderItemTitle)) {
     const idMatch = title.id.match(ITEM_ID_RE);
     if (!idMatch) continue;
     const productId = idMatch[1];
-    // The image lives in the same item-row container as the title.
-    const row = title.closest("[data-test='package-card-item-row']") ?? title.parentElement;
-    const img = row?.querySelector<HTMLImageElement>("img");
+
+    let el: HTMLElement | null = title.parentElement;
+    let img: HTMLImageElement | null = null;
+    while (el && !img) {
+      img = el.querySelector<HTMLImageElement>("img");
+      el = el.parentElement;
+    }
     const src = img?.getAttribute("src") ?? "";
     if (src) map[productId] = src;
   }
