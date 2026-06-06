@@ -20,15 +20,47 @@ const PAYEES: PayeeMapping[] = [
 
 const DEFAULT_MAX_PAGES = 10;
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+// An order's card charge posts on/after it was placed. Allow a charge from a
+// few days before (date-parse slop / auth-vs-placed timing) to well after
+// (backordered/late shipments are billed when they ship).
+const PREFILTER_BEFORE_MS = 7 * DAY_MS;
+const PREFILTER_AFTER_MS = 45 * DAY_MS;
+
 function send<T>(tabId: number, type: string): Promise<T> {
   return browser.tabs.sendMessage(tabId, { type }) as Promise<T>;
 }
 
-/** True when an order's date is within ±3 days of any charge still unmatched. */
-function nearAnyCharge(orderDate: string, charges: YnabCharge[]): boolean {
-  if (!orderDate) return true; // unparsed date → don't pre-filter it out
-  const od = new Date(orderDate).getTime();
-  return charges.some((c) => Math.abs(od - new Date(c.date).getTime()) <= THREE_DAYS_MS);
+/**
+ * Whether an order could plausibly contain one of the still-unmatched charges,
+ * used to decide if it's worth opening the order's invoices page. A single
+ * invoice/charge can't exceed the order total, and a charge posts within a
+ * generous window of the placed date. Conservative on both axes (unparsed
+ * date or total → don't filter it out) so we never skip a real match.
+ */
+function orderMightMatch(order: RawTargetOrder, charges: YnabCharge[]): boolean {
+  const orderTime = order.date ? new Date(order.date).getTime() : null;
+  return charges.some((c) => {
+    if (order.orderTotalCents !== null && c.amountCents > order.orderTotalCents) return false;
+    if (orderTime === null) return true;
+    const delta = new Date(c.date).getTime() - orderTime;
+    return delta >= -PREFILTER_BEFORE_MS && delta <= PREFILTER_AFTER_MS;
+  });
+}
+
+/**
+ * Whether an invoice is worth opening in Phase 3 to check its card payment
+ * lines. The card-billed portion can't exceed the invoice total, and the
+ * invoice date sits within the match window of the charge. Same isRefund sign.
+ */
+function invoiceMightSplitMatch(inv: RawTargetInvoice, charges: YnabCharge[]): boolean {
+  const invTime = new Date(inv.date).getTime();
+  return charges.some(
+    (c) =>
+      c.isRefund === inv.isRefund &&
+      c.amountCents <= inv.amountCents &&
+      Math.abs(new Date(c.date).getTime() - invTime) <= THREE_DAYS_MS,
+  );
 }
 
 export const targetAdapter: RetailerAdapter = {
@@ -62,9 +94,10 @@ export const targetAdapter: RetailerAdapter = {
       // Phase 1: walk the orders list (paginate Load more) until past cutoff.
       const orders = await collectOrders(tabId, charges, maxPages, signal);
 
-      // Phase 2: for orders near an unmatched charge, read their invoices list
-      // and match charges to invoice TOTALS (handles single-card invoices).
-      // Build an invoice-list cache so Phase 3 can reuse it without re-fetching.
+      // Phase 2: for orders that could contain a still-unmatched charge, read
+      // the invoices list and match charges to invoice TOTALS (single-card
+      // invoices). The invoice-list cache lets Phase 3 reuse it without
+      // re-fetching.
       let remaining = [...charges];
       const matchedInvoices: MatchedInvoice[] = [];
       const consumedInvoices = new Set<string>(); // `${orderId}/${invoiceId}`
@@ -73,7 +106,7 @@ export const targetAdapter: RetailerAdapter = {
       for (const order of orders) {
         if (remaining.length === 0) break;
         signal?.throwIfAborted();
-        if (!nearAnyCharge(order.date, remaining)) continue;
+        if (!orderMightMatch(order, remaining)) continue;
 
         await navigateTab(tabId, orderInvoicesUrl(order.orderId));
         const { invoices } = await send<{ invoices: RawTargetInvoice[] }>(tabId, "SCRAPE_INVOICES_LIST");
@@ -96,10 +129,11 @@ export const targetAdapter: RetailerAdapter = {
         remaining = stillRemaining;
       }
 
-      // Phase 3: for charges still unmatched, the invoice may be a payment
-      // split (total != card amount). Use the cached invoice lists (only orders
-      // Phase 2 already visited) and match on card payment-line amounts.
-      // Shares the consumedInvoices set so no invoice is bound twice.
+      // Phase 3: a still-unmatched charge may be a payment split (invoice total
+      // != card-billed amount). Re-check the cached invoices, but only open the
+      // detail page for invoices that could actually contain a remaining charge
+      // (total >= charge, date in window) — otherwise this fans out to every
+      // invoice of every order whenever an in-store charge stays unmatched.
       if (remaining.length > 0) {
         for (const [orderId, invoices] of invoiceListCache) {
           if (remaining.length === 0) break;
@@ -108,6 +142,8 @@ export const targetAdapter: RetailerAdapter = {
           for (const inv of invoices) {
             if (remaining.length === 0) break;
             if (consumedInvoices.has(`${orderId}/${inv.invoiceId}`)) continue;
+            if (!invoiceMightSplitMatch(inv, remaining)) continue;
+
             await navigateTab(tabId, invoiceDetailUrl(orderId, inv.invoiceId));
             const { detail } = await send<{ detail: RawTargetInvoiceDetail }>(tabId, "SCRAPE_INVOICE_DETAIL");
             const candidates: TargetCandidate[] = cardPaymentCandidates(orderId, inv.invoiceId, inv.date, detail);
