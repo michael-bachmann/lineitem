@@ -43,6 +43,7 @@ vi.mock("@/lib/verify-scrape", () => ({ verifyScrape: verifyScrapeMock }));
 vi.mock("@/lib/distribution", () => ({ distributeOrder: distributeOrderMock }));
 
 import { runBackfill } from "./backfill";
+import { READ_FAILED_REASON } from "@/lib/matcher";
 import type {
   ScrapedOrder,
   YnabCharge,
@@ -351,6 +352,20 @@ describe("runBackfill — failure handling", () => {
     expect(result.failed).toBe(2);
     expect(result.transactionsBackfilled).toBe(0);
     expect(result.itemsLearned).toBe(0);
+  });
+
+  it("counts a charge the adapter couldn't read as failed, not unmatched", async () => {
+    getTransactionsSinceMock.mockResolvedValue([tx({ id: "tx-1" }), tx({ id: "tx-2" })]);
+    scrapeMatchedOrdersMock.mockImplementation(async (charges: YnabCharge[]) => ({
+      matched: [{ order: order(), charges: [charges[0]] }],
+      unmatched: [{ charge: charges[1], reason: READ_FAILED_REASON }],
+    }));
+
+    const result = await runBackfill({ fromDate: "2025-01-01" });
+
+    expect(result.failed).toBe(1);
+    expect(result.transactionsBackfilled).toBe(1);
+    expect(result.hasUnbackfilled).toBe(true);
   });
 
   it("throws if YNAB credentials are missing", async () => {

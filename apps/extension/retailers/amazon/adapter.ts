@@ -5,8 +5,8 @@ import type {
   YnabCharge,
   PayeeMapping,
 } from "@/lib/types";
-import { matchByAmountAndDate, cutoffDateFor, NO_MATCH_REASON } from "@/lib/matcher";
-import { openRetailerTab, navigateTab } from "@/background/tabs";
+import { matchByAmountAndDate, cutoffDateFor, NO_MATCH_REASON, READ_FAILED_REASON } from "@/lib/matcher";
+import { openRetailerTab, navigateTab, sendToTab } from "@/background/tabs";
 import { orderDetailUrl, itemmodUrl } from "@/retailers/amazon/selectors";
 import type { RawTransaction, RawItem } from "@/retailers/amazon/scraper";
 import { groupBy } from "remeda";
@@ -38,7 +38,7 @@ export const amazonAdapter: RetailerAdapter = {
 
     try {
       // Auth check
-      const authResponse = (await browser.tabs.sendMessage(tabId, { type: "CHECK_AUTH" })) as
+      const authResponse = (await sendToTab(tabId, { type: "CHECK_AUTH" })) as
         | { authenticated: boolean }
         | { error: string };
 
@@ -76,7 +76,21 @@ export const amazonAdapter: RetailerAdapter = {
         // Emit progress BEFORE the scrape so the UI shows "Scraping order N
         // of T" while N is in flight, not after it lands.
         onScrapeProgress?.({ index: i + 1, total: totalOrders });
-        const result = await scrapeOrderItems(tabId, orderId);
+
+        // A hung/failed detail page (e.g. a sendToTab timeout) throws rather
+        // than returning {error}. Isolate it to this order so one bad page
+        // skips just its charges instead of tanking the whole batch; they're
+        // not persisted, so a re-run reattempts them.
+        let result: Awaited<ReturnType<typeof scrapeOrderItems>>;
+        try {
+          result = await scrapeOrderItems(tabId, orderId);
+        } catch (err) {
+          console.warn(`[amazon] couldn't read order ${orderId}`, err);
+          for (const [charge] of pairs) {
+            detailFailures.push({ charge, reason: READ_FAILED_REASON });
+          }
+          continue;
+        }
 
         if ("error" in result || result.items.length === 0) {
           const reason = "error" in result ? result.error : "Failed to scrape order items";
@@ -139,7 +153,7 @@ async function paginateAndMatch(
   let allMatched: [YnabCharge, RawTransaction][] = [];
 
   for (let page = 0; page < maxPages; page++) {
-    const txResponse = (await browser.tabs.sendMessage(tabId, {
+    const txResponse = (await sendToTab(tabId, {
       type: "SCRAPE_TRANSACTIONS",
     })) as { transactions: RawTransaction[] } | { error: string };
 
@@ -176,7 +190,7 @@ async function paginateAndMatch(
     );
     if (oldestOnPage < cutoffIso) break;
 
-    const pageResult = (await browser.tabs.sendMessage(tabId, {
+    const pageResult = (await sendToTab(tabId, {
       type: "NEXT_PAGE",
     })) as { hasNext: boolean };
     if (!pageResult.hasNext) break;
@@ -210,7 +224,7 @@ async function fetchItems(
   }
 
   await navigateTab(tabId, itemmodUrl(orderId));
-  const itemmodResp = (await browser.tabs.sendMessage(tabId, {
+  const itemmodResp = (await sendToTab(tabId, {
     type: "SCRAPE_ITEMS",
   })) as ItemmodResponse;
   if ("error" in itemmodResp) {
@@ -230,7 +244,7 @@ async function scrapeOrderItems(
 > {
   await navigateTab(tabId, orderDetailUrl(orderId));
 
-  const summaryResp = (await browser.tabs.sendMessage(tabId, {
+  const summaryResp = (await sendToTab(tabId, {
     type: "SCRAPE_ITEMS",
   })) as SummaryResponse;
 

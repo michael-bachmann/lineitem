@@ -37,3 +37,9 @@ export function cutoffDateFor(items: { date: string }[]): string {
 /** Reason string an adapter returns for a charge it found no order/invoice for.
  *  sync.ts maps exactly this reason to the `no_match` status. */
 export const NO_MATCH_REASON = "No matching order found";
+
+/** Reason string an adapter returns for a charge whose page couldn't be read
+ *  (failed/hung load or parse) even after a retry. Distinct from NO_MATCH_REASON
+ *  so backfill counts it as a "couldn't be read" failure rather than a genuine
+ *  no-match, and so re-running the scrape reattempts it. */
+export const READ_FAILED_REASON = "Couldn't read the page";

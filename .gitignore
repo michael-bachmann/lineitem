@@ -39,3 +39,6 @@ storybook-static/
 # not a project dependency — playwright-core is installed ad hoc, not committed)
 /cs-*.png
 /scripts/shot.mjs
+
+# Claude Code local working dir (worktrees, settings)
+.claude/

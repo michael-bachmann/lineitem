@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { orderMightMatch, invoiceMightSplitMatch } from "./adapter";
+import { describe, expect, it, vi } from "vitest";
+import { orderMightMatch, invoiceMightSplitMatch, readWithRetry } from "./adapter";
 import type { RawTargetOrder, RawTargetInvoice } from "./scraper";
 import type { YnabCharge } from "@/lib/types";
 
@@ -60,5 +60,27 @@ describe("invoiceMightSplitMatch", () => {
 
   it("skips on refund-sign mismatch", () => {
     expect(invoiceMightSplitMatch(inv, [charge({ date: "2025-07-27", amountCents: 2890, isRefund: true })])).toBe(false);
+  });
+});
+
+describe("readWithRetry", () => {
+  it("returns the result without retrying when the read succeeds", async () => {
+    const read = vi.fn(async () => "ok");
+    await expect(readWithRetry("x", read)).resolves.toBe("ok");
+    expect(read).toHaveBeenCalledTimes(1);
+  });
+
+  it("retries once and succeeds when the first read fails (a transient hang)", async () => {
+    const read = vi.fn()
+      .mockRejectedValueOnce(new Error("hung"))
+      .mockResolvedValueOnce("ok");
+    await expect(readWithRetry("x", read)).resolves.toBe("ok");
+    expect(read).toHaveBeenCalledTimes(2);
+  });
+
+  it("rethrows after the retry also fails (caller skips this page)", async () => {
+    const read = vi.fn(async () => { throw new Error("still hung"); });
+    await expect(readWithRetry("x", read)).rejects.toThrow("still hung");
+    expect(read).toHaveBeenCalledTimes(2);
   });
 });
