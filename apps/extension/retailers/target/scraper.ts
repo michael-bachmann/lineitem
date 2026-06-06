@@ -164,7 +164,9 @@ export function parseOrdersFromDocument(doc: Document): RawTargetOrder[] {
     // text (other text like the "#{orderId}" line is ignored).
     const text = card.textContent ?? "";
     const date = parseTargetDate(text);
-    // First money on the card is the order total ("$37.18 · 2 packages").
+    // First money in the card's TEXT is the order total ("$37.18 · 2 packages").
+    // The anchor's "...for $37.18" aria-label also has money but lives in an
+    // attribute, so textContent excludes it — keep that true if this changes.
     const money = text.match(MONEY_RE);
     const orderTotalCents = money ? parseCents(money[0]) : null;
     seen.add(orderId);
@@ -175,29 +177,38 @@ export function parseOrdersFromDocument(doc: Document): RawTargetOrder[] {
 
 const ITEM_ID_RE = /^item-(\d+)$/;
 
+/**
+ * The image belonging to `title`'s item: the one that most-recently precedes the
+ * title in document order. Each item card lays out its picture before the title,
+ * so the nearest preceding image is this item's — and unlike "first image in the
+ * nearest ancestor", this stays correct whether the picture is nested in a
+ * per-item wrapper or a flat sibling of the title. `imgs` must be in document
+ * order (i.e. `querySelectorAll` order).
+ */
+function precedingImg(title: HTMLElement, imgs: HTMLImageElement[]): HTMLImageElement | null {
+  let best: HTMLImageElement | null = null;
+  for (const img of imgs) {
+    // imgs are in document order, so once one is no longer before the title,
+    // none of the rest are either.
+    if (!(title.compareDocumentPosition(img) & Node.DOCUMENT_POSITION_PRECEDING)) break;
+    best = img;
+  }
+  return best;
+}
+
 /** Map productId -> image URL from the order detail page.
  *
- *  A `package-card-item-row` is a whole PACKAGE that can hold many items, so
- *  `closest(package-card-item-row).querySelector("img")` would return the first
- *  item's image for every item in the shipment. Instead, walk up from each
- *  title to the nearest ancestor that contains an `<img>` — that ancestor is the
- *  item's own card (each card has exactly one picture), so we get the right
- *  image per item. */
+ *  A `package-card-item-row` is a whole PACKAGE that can hold many items, so a
+ *  per-package image lookup would give every item the first picture. Pair each
+ *  item title with the image that precedes it instead (see `precedingImg`). */
 export function parseOrderImageMap(doc: Document): Record<string, string> {
   const map: Record<string, string> = {};
+  const imgs = [...doc.querySelectorAll<HTMLImageElement>("img")];
   for (const title of doc.querySelectorAll<HTMLElement>(SELECTORS.orderItemTitle)) {
     const idMatch = title.id.match(ITEM_ID_RE);
     if (!idMatch) continue;
-    const productId = idMatch[1];
-
-    let el: HTMLElement | null = title.parentElement;
-    let img: HTMLImageElement | null = null;
-    while (el && !img) {
-      img = el.querySelector<HTMLImageElement>("img");
-      el = el.parentElement;
-    }
-    const src = img?.getAttribute("src") ?? "";
-    if (src) map[productId] = src;
+    const src = precedingImg(title, imgs)?.getAttribute("src") ?? "";
+    if (src) map[idMatch[1]] = src;
   }
   return map;
 }

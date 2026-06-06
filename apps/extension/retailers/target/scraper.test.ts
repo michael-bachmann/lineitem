@@ -262,4 +262,21 @@ describe("parseOrderImageMap", () => {
       "83710567": "https://target.scene7.com/is/image/Target/GUEST_BBB?wid=160",
     });
   });
+
+  // Robustness: even if Target flattens the per-item wrapper to bare siblings
+  // (image then title, repeated), each title still pairs with its own image.
+  it("pairs each item with its preceding image even as flat siblings", () => {
+    document.body.innerHTML = `
+      <div data-test="package-card-item-row">
+        <img src="https://target.scene7.com/is/image/Target/GUEST_AAA?wid=160" alt="a" />
+        <h3 id="item-90571485">Diaper</h3>
+        <img src="https://target.scene7.com/is/image/Target/GUEST_BBB?wid=160" alt="b" />
+        <h3 id="item-83710567">Wipes</h3>
+      </div>
+    `;
+    expect(parseOrderImageMap(document)).toEqual({
+      "90571485": "https://target.scene7.com/is/image/Target/GUEST_AAA?wid=160",
+      "83710567": "https://target.scene7.com/is/image/Target/GUEST_BBB?wid=160",
+    });
+  });
 });

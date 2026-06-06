@@ -34,17 +34,19 @@ function send<T>(tabId: number, type: string): Promise<T> {
 /**
  * Whether an order could plausibly contain one of the still-unmatched charges,
  * used to decide if it's worth opening the order's invoices page. A single
- * invoice/charge can't exceed the order total, and a charge posts within a
- * generous window of the placed date. Conservative on both axes (unparsed
- * date or total → don't filter it out) so we never skip a real match.
+ * invoice/charge can't exceed the order total. A *purchase* posts within a
+ * generous window of the placed date; a *refund* posts whenever a return is
+ * processed — arbitrarily long after — so refunds are not upper-bounded on
+ * date. Conservative otherwise (unparsed date or total → don't filter out).
  */
-function orderMightMatch(order: RawTargetOrder, charges: YnabCharge[]): boolean {
+export function orderMightMatch(order: RawTargetOrder, charges: YnabCharge[]): boolean {
   const orderTime = order.date ? new Date(order.date).getTime() : null;
   return charges.some((c) => {
     if (order.orderTotalCents !== null && c.amountCents > order.orderTotalCents) return false;
     if (orderTime === null) return true;
     const delta = new Date(c.date).getTime() - orderTime;
-    return delta >= -PREFILTER_BEFORE_MS && delta <= PREFILTER_AFTER_MS;
+    if (delta < -PREFILTER_BEFORE_MS) return false;
+    return c.isRefund || delta <= PREFILTER_AFTER_MS;
   });
 }
 
@@ -53,7 +55,7 @@ function orderMightMatch(order: RawTargetOrder, charges: YnabCharge[]): boolean 
  * lines. The card-billed portion can't exceed the invoice total, and the
  * invoice date sits within the match window of the charge. Same isRefund sign.
  */
-function invoiceMightSplitMatch(inv: RawTargetInvoice, charges: YnabCharge[]): boolean {
+export function invoiceMightSplitMatch(inv: RawTargetInvoice, charges: YnabCharge[]): boolean {
   const invTime = new Date(inv.date).getTime();
   return charges.some(
     (c) =>
