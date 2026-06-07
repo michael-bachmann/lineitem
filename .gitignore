@@ -9,6 +9,7 @@ lerna-debug.log*
 
 node_modules
 .output
+dist
 .env
 .env.local
 stats.html

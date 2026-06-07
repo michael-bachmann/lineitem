@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Cancel superseded runs on the same ref (PR or branch) when new commits land.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  extension:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Typecheck
+        run: pnpm --filter extension compile
+      - name: Unit tests
+        run: pnpm --filter extension test:run
+      - name: Build + package zip
+        run: pnpm --filter extension zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: extension-zip
+          path: apps/extension/.output/*.zip
+          retention-days: 7
+
+  worker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Typecheck
+        run: pnpm --filter worker compile
+      - name: Unit tests
+        run: pnpm --filter worker test
+      - name: Validate wrangler config + bundle
+        run: pnpm --filter worker exec wrangler deploy --dry-run --outdir dist
