@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button, Icon } from "@lineitem/ui";
 import { FB_CONFIG, buildFeedbackForm, submitFeedback, type FeedbackKind } from "@/lib/feedback";
 
@@ -28,6 +28,13 @@ export default function FeedbackForm({
   const [email, setEmail] = useState("");
   const [status, setStatus] = useState<Status>("idle");
 
+  // Track the latest `active` so an in-flight submit that resolves after the row
+  // has collapsed doesn't write a stale success/error state onto a reset form.
+  const activeRef = useRef(active);
+  useEffect(() => {
+    activeRef.current = active;
+  }, [active]);
+
   // Reset to a clean form ~300ms after the row collapses (it stays mounted for
   // the max-height animation).
   useEffect(() => {
@@ -52,6 +59,8 @@ export default function FeedbackForm({
     setStatus("sending");
     const body = buildFeedbackForm({ kind, primary, email, context });
     const { ok } = await onSubmit(body);
+    // Bail if the row collapsed mid-flight — its state has already been reset.
+    if (!activeRef.current) return;
     setStatus(ok ? "done" : "error");
   };
 
@@ -70,7 +79,13 @@ export default function FeedbackForm({
   }
 
   return (
-    <form className="flex flex-col gap-[10px] px-[14px] pb-[14px] pt-[2px]" onSubmit={handleSubmit}>
+    <form
+      className="flex flex-col gap-[10px] px-[14px] pb-[14px] pt-[2px]"
+      onSubmit={handleSubmit}
+      // Validate in JS (primary required via the trim guard) so a malformed but
+      // optional email never hard-blocks submit per the spec.
+      noValidate
+    >
       {context && kind === "issue" && (
         <div className="rounded-control bg-surface-2 px-[10px] py-[7px] text-[11.5px] text-faint">
           Includes your browser &amp; version automatically.
@@ -135,7 +150,7 @@ export default function FeedbackForm({
       </Button>
 
       {status === "error" && (
-        <span className="text-[12px] text-[var(--danger)]">Couldn't send — try again.</span>
+        <span className="text-[12px] text-danger">Couldn't send — try again.</span>
       )}
     </form>
   );
