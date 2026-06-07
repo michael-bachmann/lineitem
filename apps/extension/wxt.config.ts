@@ -64,6 +64,7 @@ export default defineConfig({
       "https://auth.lineitem.dev/*",
       "https://huggingface.co/*",       // model metadata
       "https://*.huggingface.co/*",     // model file CDN (cdn-lfs.huggingface.co)
+      "https://api.web3forms.com/*",    // feedback form submissions
     ],
   }),
   // Copy the ONNX runtime files into the build at /ort/ for BOTH browsers.

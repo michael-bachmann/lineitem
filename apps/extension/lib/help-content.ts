@@ -1,13 +1,9 @@
 // Help & About copy + links.
-// TODO: these URLs are design-handoff placeholders — swap in the real ones
-// before shipping the Help screen.
 export const LINKS = {
   coffee: "https://ko-fi.com/mbachmann",
-  retailer: "https://lineitem.app/request-retailer",
-  suggest: "https://lineitem.app/suggest",
-  issue: "https://github.com/bachmann/lineitem/issues/new",
-  website: "https://lineitem.app",
-  readme: "https://github.com/bachmann/lineitem#readme",
+  issue: "https://github.com/michael-bachmann/lineitem/issues/new",
+  website: "https://lineitem.dev",
+  readme: "https://github.com/michael-bachmann/lineitem",
 };
 
 export interface FaqItem {

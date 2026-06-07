@@ -2,6 +2,8 @@ import { useId, useState } from "react";
 import { FAQ, LINKS } from "@/lib/help-content";
 import { BackLink, Row, SectionLabel, Icon } from "@lineitem/ui";
 import CoffeeCard from "@/components/CoffeeCard";
+import InvolveRow from "@/components/InvolveRow";
+import { getBrowserInfo, type FeedbackKind } from "@/lib/feedback";
 
 interface HelpProps {
   onBack: () => void;
@@ -13,6 +15,8 @@ interface HelpProps {
  *  No IO; the accordion is local UI state. */
 export default function Help({ onBack, version = "0.0.0" }: HelpProps) {
   const [open, setOpen] = useState(0);
+  const [involve, setInvolve] = useState<FeedbackKind | null>(null);
+  const toggleInvolve = (k: FeedbackKind) => setInvolve((cur) => (cur === k ? null : k));
   const faqId = useId();
 
   return (
@@ -62,37 +66,55 @@ export default function Help({ onBack, version = "0.0.0" }: HelpProps) {
         })}
       </div>
 
-      {/* Get involved */}
+      {/* Get involved — inline feedback forms */}
       <SectionLabel>Get involved</SectionLabel>
       <div className="flex flex-col gap-[7px]">
-        <Row
+        <InvolveRow
           icon={<Icon.store />}
           title="Request a retailer"
           sub="Tell us where to expand next"
-          href={LINKS.retailer}
+          kind="retailer"
+          expanded={involve === "retailer"}
+          onToggle={() => toggleInvolve("retailer")}
         />
-        <Row
+        <InvolveRow
           icon={<Icon.bulb />}
           title="Make a suggestion"
           sub="Ideas for the roadmap"
-          href={LINKS.suggest}
+          kind="suggestion"
+          expanded={involve === "suggestion"}
+          onToggle={() => toggleInvolve("suggestion")}
         />
-        <Row
+        <InvolveRow
           icon={<Icon.bug />}
           title="Report an issue"
           sub="Something broken? Let us know"
-          href={LINKS.issue}
+          kind="issue"
+          expanded={involve === "issue"}
+          onToggle={() => toggleInvolve("issue")}
+          context={{ browser: getBrowserInfo(), version }}
         />
       </div>
+      <p className="px-1 text-center text-[12px] leading-[1.5] text-faint">
+        Prefer GitHub?{" "}
+        <a
+          href={LINKS.issue}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-muted underline hover:text-link"
+        >
+          Open an issue
+        </a>
+      </p>
 
       {/* Links */}
       <SectionLabel>Links</SectionLabel>
       <div className="flex flex-col gap-[7px]">
-        <Row icon={<Icon.globe />} title="Website" sub="lineitem.app" href={LINKS.website} />
+        <Row icon={<Icon.globe />} title="Website" sub="lineitem.dev" href={LINKS.website} />
         <Row
           icon={<Icon.link />}
           title="README & docs"
-          sub="github.com/bachmann/lineitem"
+          sub="github.com/michael-bachmann/lineitem"
           href={LINKS.readme}
         />
       </div>
@@ -105,7 +127,7 @@ export default function Help({ onBack, version = "0.0.0" }: HelpProps) {
           rel="noopener noreferrer"
           className="text-muted no-underline hover:text-link"
         >
-          lineitem.app
+          lineitem.dev
         </a>
         <br />
         Made for YNAB + Amazon
