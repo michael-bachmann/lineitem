@@ -95,7 +95,7 @@ export default function Help({ onBack, version = "0.0.0" }: HelpProps) {
           context={{ browser: getBrowserInfo(), version }}
         />
       </div>
-      <p className="px-1 text-[12px] leading-[1.5] text-faint">
+      <p className="px-1 text-center text-[12px] leading-[1.5] text-faint">
         Prefer GitHub?{" "}
         <a
           href={LINKS.issue}
@@ -114,7 +114,7 @@ export default function Help({ onBack, version = "0.0.0" }: HelpProps) {
         <Row
           icon={<Icon.link />}
           title="README & docs"
-          sub="github.com/bachmann/lineitem"
+          sub="github.com/michael-bachmann/lineitem"
           href={LINKS.readme}
         />
       </div>
