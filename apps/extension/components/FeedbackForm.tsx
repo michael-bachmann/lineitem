@@ -68,7 +68,13 @@ export default function FeedbackForm({
     // submissions server-side (a bot fills the hidden field; humans never see it).
     const honeypot = (e.currentTarget.elements.namedItem("botcheck") as HTMLInputElement)?.value;
     setStatus("sending");
-    const body = buildFeedbackForm({ kind, primary, email, context, botcheck: honeypot });
+    const body = buildFeedbackForm({
+      kind,
+      primary: primary.trim(),
+      email: trimmedEmail,
+      context,
+      botcheck: honeypot,
+    });
     const { ok } = await onSubmit(body);
     // Bail if the row collapsed mid-flight — its state has already been reset.
     if (!activeRef.current) return;
