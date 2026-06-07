@@ -2,7 +2,7 @@
 export const LINKS = {
   coffee: "https://ko-fi.com/mbachmann",
   issue: "https://github.com/michael-bachmann/lineitem/issues/new",
-  website: "https://lineitem.app",
+  website: "https://lineitem.dev",
   readme: "https://github.com/michael-bachmann/lineitem",
 };
 

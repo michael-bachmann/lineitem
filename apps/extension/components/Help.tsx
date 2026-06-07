@@ -110,7 +110,7 @@ export default function Help({ onBack, version = "0.0.0" }: HelpProps) {
       {/* Links */}
       <SectionLabel>Links</SectionLabel>
       <div className="flex flex-col gap-[7px]">
-        <Row icon={<Icon.globe />} title="Website" sub="lineitem.app" href={LINKS.website} />
+        <Row icon={<Icon.globe />} title="Website" sub="lineitem.dev" href={LINKS.website} />
         <Row
           icon={<Icon.link />}
           title="README & docs"
@@ -127,7 +127,7 @@ export default function Help({ onBack, version = "0.0.0" }: HelpProps) {
           rel="noopener noreferrer"
           className="text-muted no-underline hover:text-link"
         >
-          lineitem.app
+          lineitem.dev
         </a>
         <br />
         Made for YNAB + Amazon
