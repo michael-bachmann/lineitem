@@ -3,8 +3,6 @@
 // before shipping the Help screen.
 export const LINKS = {
   coffee: "https://ko-fi.com/mbachmann",
-  retailer: "https://lineitem.app/request-retailer",
-  suggest: "https://lineitem.app/suggest",
   issue: "https://github.com/bachmann/lineitem/issues/new",
   website: "https://lineitem.app",
   readme: "https://github.com/bachmann/lineitem#readme",
