@@ -15,7 +15,8 @@ interface InvolveRowProps {
 }
 
 /** A Help "Get involved" row that expands inline into a FeedbackForm.
- *  Same max-height accordion mechanism as the FAQ above it. */
+ *  Uses a grid-rows 0fr→1fr transition (rather than the FAQ's fixed max-height)
+ *  because the form's height varies by kind/state and must never clip. */
 export default function InvolveRow({
   icon,
   title,
@@ -57,11 +58,13 @@ export default function InvolveRow({
       <div
         id={bodyId}
         aria-hidden={!expanded}
-        className={`overflow-hidden transition-[max-height] duration-[260ms] ${
-          expanded ? "max-h-[420px]" : "max-h-0"
+        className={`grid transition-[grid-template-rows] duration-[260ms] ${
+          expanded ? "grid-rows-[1fr]" : "grid-rows-[0fr]"
         }`}
       >
-        <FeedbackForm kind={kind} context={context} onDone={onToggle} active={expanded} />
+        <div className="overflow-hidden">
+          <FeedbackForm kind={kind} context={context} onDone={onToggle} active={expanded} />
+        </div>
       </div>
     </div>
   );

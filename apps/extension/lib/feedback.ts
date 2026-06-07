@@ -58,10 +58,19 @@ export interface BuildFeedbackArgs {
   primary: string;
   email: string;
   context?: Record<string, string>;
+  /** Honeypot value. Sent to Web3Forms so its server-side spam check engages —
+   *  a non-empty value (only a bot fills the hidden field) is dropped server-side. */
+  botcheck?: string;
 }
 
 /** Build the Web3Forms FormData payload. Pure — no IO. */
-export function buildFeedbackForm({ kind, primary, email, context }: BuildFeedbackArgs): FormData {
+export function buildFeedbackForm({
+  kind,
+  primary,
+  email,
+  context,
+  botcheck = "",
+}: BuildFeedbackArgs): FormData {
   const cfg = FB_CONFIG[kind];
   const body = new FormData();
   body.append("access_key", FB_ACCESS_KEY);
@@ -72,7 +81,15 @@ export function buildFeedbackForm({ kind, primary, email, context }: BuildFeedba
   if (context) {
     for (const [k, v] of Object.entries(context)) body.append(k, v);
   }
+  // Always present so Web3Forms' honeypot runs; empty for real submissions.
+  body.append("botcheck", botcheck);
   return body;
+}
+
+/** Basic email-shape check. Used to validate the optional email *only when
+ *  provided* — an empty string is not "valid" (callers gate on non-empty). */
+export function isValidEmail(email: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
 /** Parse a userAgent into a short "Browser NN" string for the issue report. */

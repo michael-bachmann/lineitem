@@ -1,6 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { Button, Icon } from "@lineitem/ui";
-import { FB_CONFIG, buildFeedbackForm, submitFeedback, type FeedbackKind } from "@/lib/feedback";
+import {
+  FB_CONFIG,
+  buildFeedbackForm,
+  isValidEmail,
+  submitFeedback,
+  type FeedbackKind,
+} from "@/lib/feedback";
 
 interface FeedbackFormProps {
   kind: FeedbackKind;
@@ -26,6 +32,7 @@ export default function FeedbackForm({
   const cfg = FB_CONFIG[kind];
   const [primary, setPrimary] = useState("");
   const [email, setEmail] = useState("");
+  const [emailError, setEmailError] = useState(false);
   const [status, setStatus] = useState<Status>("idle");
 
   // Track the latest `active` so an in-flight submit that resolves after the row
@@ -36,12 +43,13 @@ export default function FeedbackForm({
   }, [active]);
 
   // Reset to a clean form ~300ms after the row collapses (it stays mounted for
-  // the max-height animation).
+  // the collapse animation).
   useEffect(() => {
     if (active) return;
     const t = setTimeout(() => {
       setPrimary("");
       setEmail("");
+      setEmailError(false);
       setStatus("idle");
     }, 300);
     return () => clearTimeout(t);
@@ -50,14 +58,17 @@ export default function FeedbackForm({
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!primary.trim()) return;
-    // Honeypot: bots fill hidden fields. Pretend success without sending.
-    const honeypot = (e.currentTarget.elements.namedItem("botcheck") as HTMLInputElement)?.value;
-    if (honeypot) {
-      setStatus("done");
+    // Optional email: validate format only when provided; never hard-block on it.
+    const trimmedEmail = email.trim();
+    if (trimmedEmail && !isValidEmail(trimmedEmail)) {
+      setEmailError(true);
       return;
     }
+    // Honeypot value rides along in the payload so Web3Forms drops bot
+    // submissions server-side (a bot fills the hidden field; humans never see it).
+    const honeypot = (e.currentTarget.elements.namedItem("botcheck") as HTMLInputElement)?.value;
     setStatus("sending");
-    const body = buildFeedbackForm({ kind, primary, email, context });
+    const body = buildFeedbackForm({ kind, primary, email, context, botcheck: honeypot });
     const { ok } = await onSubmit(body);
     // Bail if the row collapsed mid-flight — its state has already been reset.
     if (!activeRef.current) return;
@@ -120,12 +131,21 @@ export default function FeedbackForm({
           Email <span className="font-normal text-faint">{cfg.emailHint}</span>
         </span>
         <input
-          className="rounded-control border border-line-strong bg-surface px-[11px] py-[9px] text-[13px] text-text outline-none focus:border-brand focus:ring-2 focus:ring-brand-weak"
+          className={`rounded-control border bg-surface px-[11px] py-[9px] text-[13px] text-text outline-none focus:ring-2 focus:ring-brand-weak ${
+            emailError ? "border-danger focus:border-danger" : "border-line-strong focus:border-brand"
+          }`}
           type="email"
           value={email}
           placeholder="you@example.com"
-          onChange={(e) => setEmail(e.target.value)}
+          aria-invalid={emailError || undefined}
+          onChange={(e) => {
+            setEmail(e.target.value);
+            if (emailError) setEmailError(false);
+          }}
         />
+        {emailError && (
+          <span className="text-[12px] text-danger">Enter a valid email, or leave it blank.</span>
+        )}
       </label>
 
       {/* Honeypot — visually hidden, never focusable, must stay empty. */}

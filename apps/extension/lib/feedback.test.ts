@@ -1,6 +1,12 @@
 // apps/extension/lib/feedback.test.ts
-import { describe, expect, it } from "vitest";
-import { buildFeedbackForm, getBrowserInfo, FB_CONFIG } from "./feedback";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  buildFeedbackForm,
+  getBrowserInfo,
+  isValidEmail,
+  submitFeedback,
+  FB_CONFIG,
+} from "./feedback";
 
 describe("buildFeedbackForm", () => {
   it("includes access_key, subject, request_type and the primary field per kind", () => {
@@ -32,6 +38,60 @@ describe("buildFeedbackForm", () => {
     });
     expect(fd.get("browser")).toBe("Chrome 124");
     expect(fd.get("version")).toBe("1.4.0");
+  });
+
+  it("always sends a botcheck honeypot field — empty by default, the value when set", () => {
+    expect(buildFeedbackForm({ kind: "retailer", primary: "x", email: "" }).get("botcheck")).toBe(
+      "",
+    );
+    expect(
+      buildFeedbackForm({ kind: "retailer", primary: "x", email: "", botcheck: "i-am-a-bot" }).get(
+        "botcheck",
+      ),
+    ).toBe("i-am-a-bot");
+  });
+});
+
+describe("isValidEmail", () => {
+  it("accepts a normal address", () => {
+    expect(isValidEmail("joe@example.com")).toBe(true);
+  });
+
+  it("rejects malformed addresses and empty input", () => {
+    expect(isValidEmail("joe@@example.com")).toBe(false);
+    expect(isValidEmail("joe@example")).toBe(false);
+    expect(isValidEmail("not an email")).toBe(false);
+    expect(isValidEmail("")).toBe(false);
+  });
+});
+
+describe("submitFeedback", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("returns ok:true when Web3Forms reports success", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ json: async () => ({ success: true }) })),
+    );
+    expect(await submitFeedback(new FormData())).toEqual({ ok: true });
+  });
+
+  it("returns ok:false when Web3Forms reports failure", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ json: async () => ({ success: false }) })),
+    );
+    expect(await submitFeedback(new FormData())).toEqual({ ok: false });
+  });
+
+  it("returns ok:false when the request throws", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new Error("network down");
+      }),
+    );
+    expect(await submitFeedback(new FormData())).toEqual({ ok: false });
   });
 });
 
