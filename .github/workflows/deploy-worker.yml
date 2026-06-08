@@ -1,0 +1,37 @@
+name: Deploy Worker
+
+# Cloudflare does not auto-deploy Workers from GitHub, so deploy on merge to
+# main whenever the worker (or the shared lockfile) changed.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/worker/**'
+      - 'pnpm-lock.yaml'
+      - '.github/workflows/deploy-worker.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-worker
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # Deploy with the workspace-pinned wrangler so it matches the version the
+      # CI dry-run validates against. wrangler reads these from env.
+      - name: Deploy worker
+        run: pnpm --filter worker exec wrangler deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

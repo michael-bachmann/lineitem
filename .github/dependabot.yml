@@ -1,0 +1,22 @@
+version: 2
+updates:
+  # pnpm workspace: one entry covers the root manifest plus every package
+  # under apps/* and packages/*.
+  - package-ecosystem: "npm"
+    directories:
+      - "/"
+      - "/apps/*"
+      - "/packages/*"
+    schedule:
+      interval: "weekly"
+    groups:
+      # Batch all minor + patch bumps into one PR; majors stay separate.
+      minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
