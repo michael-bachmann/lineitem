@@ -5,13 +5,41 @@ on:
   push:
     branches: [main]
 
+permissions:
+  contents: read
+
 # Cancel superseded runs on the same ref (PR or branch) when new commits land.
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  # Detect which parts of the monorepo changed so the heavy jobs only run when
+  # relevant. The extension depends on @lineitem/ui, so it watches packages/ui.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      extension: ${{ steps.filter.outputs.extension }}
+      worker: ${{ steps.filter.outputs.worker }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            extension:
+              - 'apps/extension/**'
+              - 'packages/ui/**'
+              - 'pnpm-lock.yaml'
+              - '.github/workflows/ci.yml'
+            worker:
+              - 'apps/worker/**'
+              - 'pnpm-lock.yaml'
+              - '.github/workflows/ci.yml'
+
   extension:
+    needs: changes
+    if: ${{ needs.changes.outputs.extension == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -34,6 +62,8 @@ jobs:
           retention-days: 7
 
   worker:
+    needs: changes
+    if: ${{ needs.changes.outputs.worker == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
