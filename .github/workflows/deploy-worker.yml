@@ -29,8 +29,9 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       # Deploy with the workspace-pinned wrangler so it matches the version the
-      # CI dry-run validates against. wrangler reads CLOUDFLARE_API_TOKEN from env.
+      # CI dry-run validates against. wrangler reads these from env.
       - name: Deploy worker
         run: pnpm --filter worker exec wrangler deploy
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
