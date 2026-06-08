@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: read
+  pull-requests: read # dorny/paths-filter reads changed files via the PR API
 
 # Cancel superseded runs on the same ref (PR or branch) when new commits land.
 concurrency:
