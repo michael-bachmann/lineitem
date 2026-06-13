@@ -20,7 +20,7 @@
   },
   "dependencies": {
     "@fontsource-variable/hanken-grotesk": "^5.2.8",
-    "@huggingface/transformers": "^3.8.1",
+    "@huggingface/transformers": "^4.2.0",
     "@lineitem/ui": "workspace:*",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
