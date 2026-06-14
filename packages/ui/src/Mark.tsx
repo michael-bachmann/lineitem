@@ -1,20 +1,16 @@
-/** Brand mark — rounded-square badge with three "line item" bars (doubles as
- *  the extension icon). Pure SVG; the fill uses the `--brand` token. */
+import MarkSvg from "./mark.svg?react";
+
+/** Brand mark — rounded-square badge with three "line item" bars. The artwork
+ *  lives in mark.svg (the single source of truth, also rasterized into the
+ *  extension icons by @wxt-dev/auto-icons); here it's rendered as a component. */
 export function Mark({ size = 24, className = "" }: { size?: number; className?: string }) {
   return (
-    <svg
+    <MarkSvg
       width={size}
       height={size}
-      viewBox="0 0 28 28"
-      fill="none"
       aria-hidden="true"
       className={`block flex-none ${className}`}
-    >
-      <rect width="28" height="28" rx="8.5" fill="var(--brand)" />
-      <rect x="7" y="8.2" width="11" height="2.7" rx="1.35" fill="#fff" />
-      <rect x="7" y="12.65" width="14" height="2.7" rx="1.35" fill="#fff" opacity="0.92" />
-      <rect x="7" y="17.1" width="8" height="2.7" rx="1.35" fill="#fff" opacity="0.66" />
-    </svg>
+    />
   );
 }
 

@@ -1,6 +1,7 @@
 import type { StorybookConfig } from "@storybook/react-vite";
 import { fileURLToPath } from "node:url";
 import tailwindcss from "@tailwindcss/vite";
+import svgr from "vite-plugin-svgr";
 
 const config: StorybookConfig = {
   stories: [
@@ -12,6 +13,7 @@ const config: StorybookConfig = {
   async viteFinal(cfg) {
     cfg.plugins = cfg.plugins ?? [];
     cfg.plugins.push(tailwindcss());
+    cfg.plugins.push(svgr()); // Mark imports mark.svg?react — see wxt.config.ts
     cfg.resolve = cfg.resolve ?? {};
     cfg.resolve.alias = {
       ...(cfg.resolve.alias ?? {}),
