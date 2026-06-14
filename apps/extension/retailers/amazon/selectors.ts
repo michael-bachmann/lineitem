@@ -48,7 +48,10 @@ export const SELECTORS = {
 } as const;
 
 export const ASIN_REGEX = /\/(?:dp|gp\/product)\/([A-Z0-9]{10})/;
-export const AUTH_PAGE_REGEX = /\/ap\/(signin|challenge|cvf)\//i;
+// Amazon's auth URLs appear as `/ap/signin?...` (query, no trailing slash) as
+// well as `/ap/signin/...`. Match the segment when followed by `/`, `?`, or
+// end-of-string so a logged-out redirect is detected rather than scraped.
+export const AUTH_PAGE_REGEX = /\/ap\/(signin|challenge|cvf)(?:[/?]|$)/i;
 
 export const TRANSACTIONS_URL =
   "https://www.amazon.com/cpe/yourpayments/transactions";
