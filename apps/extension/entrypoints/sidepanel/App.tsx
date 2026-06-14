@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { browser } from "wxt/browser";
 import Onboarding from "@/components/Onboarding";
 import BackfillPrompt from "@/components/BackfillPrompt";
@@ -31,18 +31,48 @@ export default function App() {
   const [showCoffee, setShowCoffee] = useState(false);
   const [coffeeClassified, setCoffeeClassified] = useState(0);
 
+  const handleSync = useCallback(async () => {
+    setSyncing(true);
+    setError(null);
+    try {
+      const catResponse = await getCategories();
+      if (catResponse?.error) {
+        setError(catResponse.error);
+        return;
+      }
+      setCategories(catResponse?.categories ?? []);
+
+      const result = await sync();
+      if (result?.error) {
+        setError(result.error);
+        return;
+      }
+      setQueue(result?.queue ?? []);
+      setShowCoffee(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Sync failed");
+    } finally {
+      setSyncing(false);
+    }
+  }, []);
+
   useEffect(() => {
     getSettings()
       .then((response) => {
         if (response.accessToken && response.planId) {
           setPlanName(response.planName ?? "");
           setView("queue");
+          // The queue lives only in React state, so it's lost when the panel
+          // closes. Restore it on open by syncing. Already-scraped transactions
+          // hit the IndexedDB cache, so this is fast and only scrapes genuinely
+          // new charges. App remounts per panel open, so this runs once a session.
+          void handleSync();
         } else {
           setView("onboarding");
         }
       })
       .catch(() => setView("onboarding"));
-  }, []);
+  }, [handleSync]);
 
   if (view === "loading") {
     return (
@@ -85,31 +115,6 @@ export default function App() {
   }
 
   // Handlers for the queue view
-  const handleSync = async () => {
-    setSyncing(true);
-    setError(null);
-    try {
-      const catResponse = await getCategories();
-      if (catResponse?.error) {
-        setError(catResponse.error);
-        return;
-      }
-      setCategories(catResponse?.categories ?? []);
-
-      const result = await sync();
-      if (result?.error) {
-        setError(result.error);
-        return;
-      }
-      setQueue(result?.queue ?? []);
-      setShowCoffee(false);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Sync failed");
-    } finally {
-      setSyncing(false);
-    }
-  };
-
   const handleApproveAll = async () => {
     const approvedEntries = queue.filter(isFullyClassified);
     const idsToApprove = approvedEntries.map((entry) => entry.ynabTransaction.id);
