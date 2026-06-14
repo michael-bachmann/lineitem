@@ -1,5 +1,6 @@
 import { defineConfig } from "wxt";
 import tailwindcss from "@tailwindcss/vite";
+import svgr from "vite-plugin-svgr";
 import { fileURLToPath } from "node:url";
 
 // Absolute path to the installed transformers dist dir. Resolved relative to
@@ -14,7 +15,14 @@ const ORT_FILES = [
 ];
 
 export default defineConfig({
-  modules: ["@wxt-dev/module-react"],
+  modules: ["@wxt-dev/module-react", "@wxt-dev/auto-icons"],
+  // Generate the manifest icons (Chrome + Firefox) from a single source — the
+  // brand Mark in assets/icon.svg (mirrors packages/ui/src/Mark.tsx). 96 is
+  // added to the module's defaults to match the sizes we shipped before.
+  autoIcons: {
+    baseIconPath: "../../packages/ui/src/mark.svg",
+    sizes: [128, 96, 48, 32, 16],
+  },
   // Don't auto-import from Storybook stories / tests. WXT scans components/ for
   // auto-imports; CSF story files re-export the same case names (Empty, Idle,
   // ErrorState, …) across files, which floods the build log with "Duplicated
@@ -82,6 +90,10 @@ export default defineConfig({
   vite: () => ({
     plugins: [
       tailwindcss(),
+      // Lets components import SVGs as React components via the `?react` query
+      // (e.g. @lineitem/ui's Mark). Default include is **/*.svg?react, so plain
+      // SVG URL imports (public/, assets/) are untouched.
+      svgr(),
       // De-inline the 21 MB ORT wasm. The glue locates its binary with
       // `new URL("...jsep.wasm", import.meta.url)`, which Vite resolves and
       // inlines as a ~28.8 MB data: URI. Neutralize the pattern (enforce:"pre",
