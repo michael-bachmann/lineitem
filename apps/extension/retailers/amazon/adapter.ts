@@ -5,7 +5,7 @@ import type {
   YnabCharge,
   PayeeMapping,
 } from "@/lib/types";
-import { matchByAmountAndDate, cutoffDateFor, NO_MATCH_REASON, READ_FAILED_REASON } from "@/lib/matcher";
+import { assignByAmountAndDate, cutoffDateFor, NO_MATCH_REASON, READ_FAILED_REASON } from "@/lib/matcher";
 import { openRetailerTab, navigateTab, sendToTab } from "@/background/tabs";
 import { orderDetailUrl, itemmodUrl } from "@/retailers/amazon/selectors";
 import type { RawTransaction, RawItem } from "@/retailers/amazon/scraper";
@@ -168,15 +168,21 @@ async function paginateAndMatch(
     const stillUnmatched: YnabCharge[] = [];
     const matchedRaws = new Set<RawTransaction>();
 
-    for (const charge of remaining) {
-      const match = matchByAmountAndDate(charge.amountCents, charge.date, allCandidates);
-      if (match?.orderId && !matchedRaws.has(match)) {
-        matchedThisPage.push([charge, match]);
-        matchedRaws.add(match);
+    // Only order-linked rows are matchable (we need the orderId to scrape the
+    // detail page). Assign charges to them 1:1, resolving balanced ambiguity.
+    const eligible = allCandidates.filter((c) => c.orderId);
+    const assignments = assignByAmountAndDate(remaining, eligible);
+
+    remaining.forEach((charge, i) => {
+      const j = assignments[i];
+      if (j !== null) {
+        const raw = eligible[j];
+        matchedThisPage.push([charge, raw]);
+        matchedRaws.add(raw);
       } else {
         stillUnmatched.push(charge);
       }
-    }
+    });
 
     allMatched = [...allMatched, ...matchedThisPage];
     remaining = stillUnmatched;
