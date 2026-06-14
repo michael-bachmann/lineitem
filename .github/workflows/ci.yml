@@ -23,7 +23,7 @@ jobs:
       extension: ${{ steps.filter.outputs.extension }}
       worker: ${{ steps.filter.outputs.worker }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: dorny/paths-filter@v4
         id: filter
         with:
@@ -43,7 +43,7 @@ jobs:
     if: ${{ needs.changes.outputs.extension == 'true' }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v4
         with:
@@ -67,7 +67,7 @@ jobs:
     if: ${{ needs.changes.outputs.worker == 'true' }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v4
         with:
