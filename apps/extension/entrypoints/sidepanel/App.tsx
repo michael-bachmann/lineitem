@@ -13,9 +13,10 @@ import {
   approveTransaction,
   getCategories,
   getSettings,
+  openRetailer,
   sync,
 } from "@/lib/messaging";
-import type { QueueEntry, Category, ApprovalItem } from "@/lib/types";
+import type { QueueEntry, Category, ApprovalItem, BlockedRetailer } from "@/lib/types";
 
 type View = "loading" | "onboarding" | "backfill_prompt" | "queue" | "settings" | "detail" | "help";
 
@@ -23,6 +24,7 @@ export default function App() {
   const [view, setView] = useState<View>("loading");
   const [planName, setPlanName] = useState("");
   const [queue, setQueue] = useState<QueueEntry[]>([]);
+  const [blocked, setBlocked] = useState<BlockedRetailer[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [selectedEntry, setSelectedEntry] = useState<QueueEntry | null>(null);
   const [syncing, setSyncing] = useState(false);
@@ -48,6 +50,7 @@ export default function App() {
         return;
       }
       setQueue(result?.queue ?? []);
+      setBlocked(result?.blocked ?? []);
       setShowCoffee(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Sync failed");
@@ -114,6 +117,11 @@ export default function App() {
     );
   }
 
+  // Open/focus a retailer tab so the user can sign in; they tap Sync to resume.
+  const handleOpenRetailer = (retailer: string) => {
+    void openRetailer(retailer);
+  };
+
   // Handlers for the queue view
   const handleApproveAll = async () => {
     const approvedEntries = queue.filter(isFullyClassified);
@@ -165,6 +173,7 @@ export default function App() {
           setView("queue");
         }}
         onApprove={handleApprove}
+        onOpenRetailer={handleOpenRetailer}
       />
     );
   }
@@ -183,6 +192,8 @@ export default function App() {
         setView("detail");
       }}
       onSettings={() => setView("settings")}
+      blocked={blocked}
+      onOpenRetailer={handleOpenRetailer}
       showCoffee={showCoffee}
       coffeeClassified={coffeeClassified}
       onDismissCoffee={() => setShowCoffee(false)}

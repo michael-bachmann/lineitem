@@ -22,6 +22,7 @@ const PAYEES: PayeeMapping[] = [
 export const amazonAdapter: RetailerAdapter = {
   id: "amazon",
   payees: PAYEES,
+  startUrl: START_URL,
 
   async scrapeMatchedOrders(charges, options) {
     const maxPages = options?.maxPages ?? DEFAULT_MAX_PAGES;
@@ -50,10 +51,13 @@ export const amazonAdapter: RetailerAdapter = {
       }
 
       if (!authResponse.authenticated) {
-        await browser.tabs.update(tabId, { active: true });
+        // Signed out — nothing is readable. Surface a sign-in wall; the side
+        // panel's resolution card foregrounds the tab on user action (we no
+        // longer pop it here, which was intrusive on a background sync).
         return {
           matched: [],
-          unmatched: charges.map((c) => ({ charge: c, reason: "Amazon auth required" })),
+          unmatched: [],
+          blocked: { reason: "signed_out", charges },
         };
       }
 

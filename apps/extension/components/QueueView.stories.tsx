@@ -33,6 +33,7 @@ const handlers = {
   onApproveAll: noop,
   onSelectEntry: noop,
   onSettings: noop,
+  onOpenRetailer: noop,
 };
 
 const meta = {
@@ -59,6 +60,14 @@ export const SyncError: Story = {
   args: { error: "YNAB rate limit reached. Try again in a minute." },
 };
 export const Approving: Story = { args: { approving: true } };
+export const Blocked: Story = {
+  args: {
+    blocked: [
+      { retailer: "amazon", reason: "signed_out", count: 3 },
+      { retailer: "target", reason: "step_up", count: 2 },
+    ],
+  },
+};
 export const WithCoffee: Story = {
   args: { showCoffee: true, coffeeClassified: 324, onDismissCoffee: noop, onCoffeeClick: noop },
 };

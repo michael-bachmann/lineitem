@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
-import { orderMightMatch, invoiceMightSplitMatch, readWithRetry } from "./adapter";
+import {
+  orderMightMatch, invoiceMightSplitMatch, readWithRetry, unwrap, StepUpRequired,
+} from "./adapter";
 import type { RawTargetOrder, RawTargetInvoice } from "./scraper";
 import type { YnabCharge } from "@/lib/types";
 
@@ -82,5 +84,26 @@ describe("readWithRetry", () => {
     const read = vi.fn(async () => { throw new Error("still hung"); });
     await expect(readWithRetry("x", read)).rejects.toThrow("still hung");
     expect(read).toHaveBeenCalledTimes(2);
+  });
+
+  it("does NOT retry a StepUpRequired (the whole session is gated)", async () => {
+    const read = vi.fn(async () => { throw new StepUpRequired(); });
+    await expect(readWithRetry("x", read)).rejects.toBeInstanceOf(StepUpRequired);
+    expect(read).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("unwrap", () => {
+  it("returns the payload for a normal response", () => {
+    expect(unwrap({ invoices: [1, 2] })).toEqual({ invoices: [1, 2] });
+  });
+
+  it("throws StepUpRequired when the page redirected to step-up sign-in", () => {
+    expect(() => unwrap({ error: "auth_required" })).toThrow(StepUpRequired);
+  });
+
+  it("throws a plain error (not StepUpRequired) on any other error shape — guards the old undefined.filter crash", () => {
+    expect(() => unwrap({ error: "boom" })).toThrow(/Target scrape error/);
+    expect(() => unwrap({ error: "boom" })).not.toThrow(StepUpRequired);
   });
 });

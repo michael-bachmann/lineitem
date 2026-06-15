@@ -1,4 +1,5 @@
 import type { BackfillProgress, BackfillResult } from "@/lib/types";
+import { retailerLabel } from "@/lib/registry";
 import { Button, Spinner, StatusMessage, Icon } from "@lineitem/ui";
 
 export type BackfillUiState =
@@ -18,6 +19,14 @@ function progressPct(p: BackfillProgress): number {
   if (p.status === "preparing") return 6;
   const frac = p.total > 0 ? p.index / p.total : 0;
   return p.status === "scraping" ? Math.round(6 + frac * 54) : Math.round(60 + frac * 40);
+}
+
+/** "Target 15 of 29 · Amazon 4 of 6" — per-retailer matched/eligible. */
+function retailerSummary(byRetailer: BackfillResult["byRetailer"]): string {
+  return byRetailer
+    .filter((r) => r.eligible > 0)
+    .map((r) => `${retailerLabel(r.retailer)} ${r.matched} of ${r.eligible}`)
+    .join(" · ");
 }
 
 interface BackfillCardViewProps {
@@ -86,6 +95,14 @@ export function BackfillCardView({ state, onStart, onCancel }: BackfillCardViewP
               <b className="font-bold">{state.result.transactionsBackfilled} transactions</b>.
             </p>
           </div>
+          {state.result.byRetailer.some((r) => r.eligible > 0) && (
+            <div className="flex items-start gap-[9px]">
+              <span className="h-[21px] w-[21px] flex-none" aria-hidden />
+              <p className="m-0 text-[12.5px] leading-[21px] text-muted">
+                {retailerSummary(state.result.byRetailer)}
+              </p>
+            </div>
+          )}
           {state.result.failed > 0 && (
             <div className="flex items-start gap-[9px]">
               <span className="flex h-[21px] w-[21px] flex-none items-center justify-center text-faint">
@@ -99,7 +116,8 @@ export function BackfillCardView({ state, onStart, onCancel }: BackfillCardViewP
           {state.result.hasUnbackfilled && (
             <>
               <p className="m-0 text-[13px] leading-[1.55] text-muted">
-                Some purchases may be on a different account — sign in to it and run again.
+                Some charges won’t match — in-store purchases, or orders paid on a card not in YNAB.
+                If you shop on another account, sign in to it and run again.
               </p>
               <Button variant="secondary" onClick={onStart}>
                 Run again

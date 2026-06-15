@@ -1,7 +1,16 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { BackfillCardView } from "./BackfillCardView";
 
-const result = { itemsLearned: 137, transactionsBackfilled: 42, hasUnbackfilled: false, failed: 0 };
+const result = {
+  itemsLearned: 137,
+  transactionsBackfilled: 42,
+  hasUnbackfilled: false,
+  failed: 0,
+  byRetailer: [
+    { retailer: "amazon", matched: 36, eligible: 38, failed: 0 },
+    { retailer: "target", matched: 6, eligible: 12, failed: 0 },
+  ],
+};
 
 const meta = {
   title: "Onboarding/BackfillCard",
