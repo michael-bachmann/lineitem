@@ -18,10 +18,13 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 // `enabled:` guards every hover/active effect so a disabled button is fully
 // inert — disabled <button>s still match :hover in CSS, so without the guard
 // they'd brighten/press (handoff UPDATE.md §2). Holds for all variants below.
-const BASE =
+// Exported so the anchor-based `LinkButton` shares the exact shape + sizing.
+// (It can't reuse the `VARIANT` strings below: their `enabled:`/`disabled:`
+// guards never match an <a>, which has no enabled/disabled state.)
+export const BASE =
   "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-pill border font-semibold tracking-[-0.005em] transition enabled:active:translate-y-px disabled:cursor-default";
 
-const SIZE = {
+export const SIZE = {
   default: "min-h-[44px] w-full px-4 py-[11px] text-[14.5px]",
   sm: "min-h-[36px] w-auto px-[13px] py-2 text-[13px]",
 };

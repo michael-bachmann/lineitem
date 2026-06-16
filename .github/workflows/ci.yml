@@ -22,6 +22,7 @@ jobs:
     outputs:
       extension: ${{ steps.filter.outputs.extension }}
       worker: ${{ steps.filter.outputs.worker }}
+      landing: ${{ steps.filter.outputs.landing }}
     steps:
       - uses: actions/checkout@v6
       - uses: dorny/paths-filter@v4
@@ -35,6 +36,11 @@ jobs:
               - '.github/workflows/ci.yml'
             worker:
               - 'apps/worker/**'
+              - 'pnpm-lock.yaml'
+              - '.github/workflows/ci.yml'
+            landing:
+              - 'apps/landing/**'
+              - 'packages/ui/**'
               - 'pnpm-lock.yaml'
               - '.github/workflows/ci.yml'
 
@@ -80,3 +86,20 @@ jobs:
         run: pnpm --filter worker test
       - name: Validate wrangler config + bundle
         run: pnpm --filter worker exec wrangler deploy --dry-run --outdir dist
+
+  landing:
+    needs: changes
+    if: ${{ needs.changes.outputs.landing == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Typecheck
+        run: pnpm --filter landing compile
+      - name: Build
+        run: pnpm --filter landing build

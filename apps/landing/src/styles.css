@@ -1,0 +1,10 @@
+@import "tailwindcss";
+
+/* Design tokens (CSS vars + @theme) live in the shared @lineitem/ui package so
+   the site and extension render from one source of truth. */
+@import "@lineitem/ui/styles/theme.css";
+
+/* @lineitem/ui lives outside this app's source tree (symlinked node_modules),
+   so Tailwind won't auto-scan it — point it at the package source explicitly so
+   the utility classes used in the shared components get generated. */
+@source "../../../packages/ui/src";
