@@ -28,6 +28,7 @@ export function LinkButton({
   return (
     <a
       {...rest}
+      // Re-add the active press: BASE's is `enabled:active:` which never matches an <a>.
       className={`${BASE} active:translate-y-px no-underline ${sm ? SIZE.sm : SIZE.default} ${VARIANT[variant]} ${className}`}
     >
       {children}
