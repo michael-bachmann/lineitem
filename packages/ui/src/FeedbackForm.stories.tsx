@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import FeedbackForm from "./FeedbackForm";
 
 const meta = {
-  title: "Settings/FeedbackForm",
+  title: "Components/FeedbackForm",
   component: FeedbackForm,
   decorators: [
     (Story) => (

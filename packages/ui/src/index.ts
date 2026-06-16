@@ -1,6 +1,8 @@
 export * from "./Button";
 export * from "./LinkButton";
 export * from "./IconButton";
+export * from "./feedback";
+export { default as FeedbackForm } from "./FeedbackForm";
 export * from "./Spinner";
 export * from "./icons";
 export * from "./Money";
