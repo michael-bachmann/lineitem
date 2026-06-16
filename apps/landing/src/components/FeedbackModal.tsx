@@ -46,17 +46,18 @@ export default function FeedbackModal({ kind, onClose, onSubmit }: FeedbackModal
 
   useEffect(() => {
     const dlg = ref.current;
-    if (!dlg) return;
-    if (open && !dlg.open) {
-      dlg.showModal();
-      // Land focus on the first field rather than the × (showModal's default).
-      dlg.querySelector<HTMLElement>("input, textarea")?.focus();
-    }
-    if (!open && dlg.open) dlg.close();
+    if (!dlg || !open) return;
+    // Remember the trigger so focus returns to it on close (WCAG 2.4.3).
+    const trigger = document.activeElement as HTMLElement | null;
+    if (!dlg.open) dlg.showModal();
+    // Land focus on the first real field, not the × or the hidden honeypot.
+    dlg.querySelector<HTMLElement>("input:not([tabindex='-1']), textarea")?.focus();
     // Native <dialog> doesn't lock the page behind it — do it ourselves.
-    document.body.style.overflow = open ? "hidden" : "";
+    document.body.style.overflow = "hidden";
     return () => {
+      if (dlg.open) dlg.close();
       document.body.style.overflow = "";
+      trigger?.focus?.();
     };
   }, [open]);
 
@@ -65,6 +66,7 @@ export default function FeedbackModal({ kind, onClose, onSubmit }: FeedbackModal
   return (
     <dialog
       ref={ref}
+      aria-modal="true"
       aria-labelledby={titleId}
       onClose={onClose}
       // Backdrop click: the dialog element is the only thing behind the card.
