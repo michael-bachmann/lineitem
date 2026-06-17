@@ -22,7 +22,9 @@ export function Chip({
     <span
       className={`inline-flex items-center gap-[6px] rounded-pill border px-[10px] py-1 text-[12.5px] font-semibold ${TONE[tone]}`}
     >
-      {dot && <span aria-hidden className="h-2 w-2 rounded-full bg-ok" />}
+      {dot && (
+        <span aria-hidden className="h-2 w-2 rounded-full bg-ok shadow-[0_0_0_3px_var(--ok-weak)]" />
+      )}
       {children}
     </span>
   );
