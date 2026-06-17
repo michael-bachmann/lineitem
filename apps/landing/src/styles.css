@@ -9,6 +9,12 @@
    the utility classes used in the shared components get generated. */
 @source "../../../packages/ui/src";
 
+/* Dramatic lift for the hero PanelMock (marketing-only, so it lives here rather
+   than in the shared token layer). Generates the `shadow-mock` utility. */
+@theme {
+  --shadow-mock: 0 32px 70px -28px rgba(47, 42, 51, 0.42), 0 10px 28px -16px rgba(47, 42, 51, 0.28);
+}
+
 /* FeedbackModal card entrance — opacity + transform only (the backdrop is a
    static dim layer). Applied via `motion-safe:animate-[fbPop_...]`. */
 @keyframes fbPop {

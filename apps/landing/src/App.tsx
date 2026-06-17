@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import SiteNav from "./components/SiteNav";
+import Hero from "./components/Hero";
 import SiteFooter from "./components/SiteFooter";
 
 /** True once the page is scrolled past the top — drives the nav's hairline. */
@@ -19,7 +20,9 @@ export default function App() {
   return (
     <>
       <SiteNav scrolled={scrolled} />
-      <main id="top">{/* Sections land here in subsequent PRs. */}</main>
+      <main id="top">
+        <Hero />
+      </main>
       <SiteFooter />
     </>
   );
