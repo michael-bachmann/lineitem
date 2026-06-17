@@ -4,7 +4,9 @@ type Props =
   | { variant: "live" | "planned"; name: string }
   | { variant: "request"; name: string; onClick: () => void };
 
-const ROW = "flex items-center gap-3 rounded-control px-[18px] py-4 text-[16px]";
+// w-full so the request <button> (which would otherwise shrink-wrap) matches the
+// width of the <div> rows even outside a stretching flex column.
+const ROW = "flex w-full items-center gap-3 rounded-control px-[18px] py-4 text-[16px]";
 
 /** A retailer status row, or the dashed "Request a retailer" CTA. */
 export default function RetailerRow(props: Props) {
