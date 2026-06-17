@@ -33,10 +33,12 @@ interface BackfillCardViewProps {
   state: BackfillUiState;
   onStart: () => void;
   onCancel: () => void;
+  /** Open/focus a retailer tab so the user can sign in, then run backfill again. */
+  onOpenRetailer?: (retailer: string) => void;
 }
 
 /** Presentational backfill card — all states, no IO. */
-export function BackfillCardView({ state, onStart, onCancel }: BackfillCardViewProps) {
+export function BackfillCardView({ state, onStart, onCancel, onOpenRetailer }: BackfillCardViewProps) {
   return (
     <div className="flex flex-col gap-[11px] rounded-card border border-line bg-surface p-4 shadow-card">
       <div className="flex items-center gap-[10px]">
@@ -103,6 +105,30 @@ export function BackfillCardView({ state, onStart, onCancel }: BackfillCardViewP
               </p>
             </div>
           )}
+          {/* A retailer that hit a sign-in wall read none of its orders — its low
+              count means "sign in", not "won't match". Prompt explicitly. */}
+          {state.result.byRetailer
+            .filter((r) => r.blocked)
+            .map((r) => (
+              <div key={r.retailer} className="flex items-start gap-[9px]">
+                <span className="flex h-[21px] w-[21px] flex-none items-center justify-center text-attention">
+                  <Icon.lock aria-hidden width={14} height={14} />
+                </span>
+                <div className="flex flex-col items-start gap-[6px]">
+                  <p className="m-0 text-[12.5px] leading-[21px] text-muted">
+                    {r.blocked === "step_up"
+                      ? `${retailerLabel(r.retailer)} needs you to finish signing in to read its orders.`
+                      : `You’re signed out of ${retailerLabel(r.retailer)}, so its orders couldn’t be read.`}{" "}
+                    Sign in, then run again.
+                  </p>
+                  {onOpenRetailer && (
+                    <Button variant="secondary" sm onClick={() => onOpenRetailer(r.retailer)}>
+                      <Icon.ext aria-hidden width={13} height={13} /> Open {retailerLabel(r.retailer)}
+                    </Button>
+                  )}
+                </div>
+              </div>
+            ))}
           {state.result.failed > 0 && (
             <div className="flex items-start gap-[9px]">
               <span className="flex h-[21px] w-[21px] flex-none items-center justify-center text-faint">

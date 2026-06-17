@@ -22,7 +22,7 @@ const meta = {
       </div>
     ),
   ],
-  args: { onStart: () => {}, onCancel: () => {} },
+  args: { onStart: () => {}, onCancel: () => {}, onOpenRetailer: () => {} },
 } satisfies Meta<typeof BackfillCardView>;
 
 export default meta;
@@ -38,6 +38,21 @@ export const DoneSomeFailed: Story = {
 };
 export const DoneRunAgain: Story = {
   args: { state: { kind: "done", result: { ...result, hasUnbackfilled: true } } },
+};
+export const DoneRetailerSignedOut: Story = {
+  args: {
+    state: {
+      kind: "done",
+      result: {
+        ...result,
+        hasUnbackfilled: true,
+        byRetailer: [
+          { retailer: "amazon", matched: 195, eligible: 245, failed: 0 },
+          { retailer: "target", matched: 0, eligible: 32, failed: 0, blocked: "signed_out" },
+        ],
+      },
+    },
+  },
 };
 export const LoginRequired: Story = {
   args: { state: { kind: "error", message: "Amazon login required." } },

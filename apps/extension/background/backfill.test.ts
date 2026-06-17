@@ -367,6 +367,26 @@ describe("runBackfill — per-retailer breakdown", () => {
     expect(byR.target).toMatchObject({ eligible: 1, matched: 1 });
   });
 
+  it("propagates a retailer sign-in wall to byRetailer (so the card prompts to sign in, not 'won't match')", async () => {
+    getTransactionsSinceMock.mockResolvedValue([
+      tx({ id: "tgt-1", payee_name: "TARGET" }),
+      tx({ id: "tgt-2", payee_name: "TARGET" }),
+    ]);
+    getRetailerForPayeeMock.mockImplementation((payee: string) =>
+      /target/i.test(payee) ? { retailer: "target", strategy: "scrape" } : null,
+    );
+    scrapeMatchedOrdersMock.mockResolvedValue({
+      matched: [],
+      unmatched: [],
+      blocked: { reason: "signed_out", charges: [] },
+    });
+
+    const result = await runBackfill({ fromDate: "2025-01-01" });
+
+    const target = result.byRetailer.find((r) => r.retailer === "target");
+    expect(target).toMatchObject({ eligible: 2, matched: 0, blocked: "signed_out" });
+  });
+
   it("folds pre-existing allocations into a retailer's cumulative matched", async () => {
     getTransactionsSinceMock.mockResolvedValue([
       tx({ id: "amz-1", payee_name: "AMAZON.COM" }),

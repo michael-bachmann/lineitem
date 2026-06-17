@@ -14,6 +14,7 @@ import type {
   BackfillProgress,
   BackfillResult,
   BackfillRetailerProgress,
+  RetailerBlockReason,
   ScrapedOrder,
   YnabCharge,
   YnabTransaction,
@@ -104,6 +105,7 @@ export async function runBackfill(options: BackfillOptions): Promise<BackfillRes
         eligible: counts.eligible,
         matched: counts.alreadyMatched + (run?.matched ?? 0),
         failed: run?.failed ?? 0,
+        ...(run?.blocked ? { blocked: run.blocked } : {}),
       };
     });
 
@@ -197,6 +199,8 @@ interface RetailerTotals {
   unmatched: number;
   failed: number;
   itemsWritten: number;
+  /** The retailer hit a sign-in wall this run (its orders were unreadable). */
+  blocked?: RetailerBlockReason;
 }
 
 /**
@@ -263,7 +267,7 @@ async function runForRetailer(
   const charges = group.map((g) => toYnabCharge(g.tx));
 
   try {
-    const { matched, unmatched } = await adapter.scrapeMatchedOrders(charges, {
+    const { matched, unmatched, blocked } = await adapter.scrapeMatchedOrders(charges, {
       maxPages: BACKFILL_MAX_PAGES,
       signal: ctx.signal,
       onScrapeProgress: ({ index, total }) =>
@@ -302,6 +306,7 @@ async function runForRetailer(
         (unmatched.length - readFailed),
       failed: readFailed,
       itemsWritten: entries.length,
+      blocked: blocked?.reason,
     };
   } catch (err) {
     // Re-throw abort so runBackfill stops the per-retailer loop instead of

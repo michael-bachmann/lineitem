@@ -173,6 +173,10 @@ export interface BackfillRetailerProgress {
   eligible: number;
   /** Transactions whose pages couldn't be read this run (retryable). */
   failed: number;
+  /** Set when this retailer's scrape hit a sign-in wall — its orders couldn't
+   *  be read at all, so its low match count means "sign in", not "won't match".
+   *  Drives a sign-in prompt on the done card instead of the generic copy. */
+  blocked?: RetailerBlockReason;
 }
 
 /**
