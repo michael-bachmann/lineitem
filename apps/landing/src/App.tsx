@@ -6,6 +6,9 @@ import HowItWorks from "./components/HowItWorks";
 import Features from "./components/Features";
 import Retailers from "./components/Retailers";
 import Faq from "./components/Faq";
+import GetInvolved from "./components/GetInvolved";
+import CoffeeBand from "./components/CoffeeBand";
+import FinalCta from "./components/FinalCta";
 import SiteFooter from "./components/SiteFooter";
 import FeedbackModal from "./components/FeedbackModal";
 
@@ -35,8 +38,11 @@ export default function App() {
         <Features />
         <Retailers onFeedback={setFeedback} />
         <Faq />
+        <GetInvolved onFeedback={setFeedback} />
+        <CoffeeBand />
+        <FinalCta />
       </main>
-      <SiteFooter />
+      <SiteFooter onFeedback={setFeedback} />
       <FeedbackModal kind={feedback} onClose={() => setFeedback(null)} />
     </>
   );
