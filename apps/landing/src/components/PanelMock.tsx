@@ -1,4 +1,4 @@
-import { Icon, Mark } from "@lineitem/ui";
+import { Button, Icon, Mark } from "@lineitem/ui";
 
 function PanelCard({
   dot,
@@ -31,7 +31,10 @@ function PanelCard({
 /** Static replica of the extension's queue side panel — purely decorative. */
 export default function PanelMock() {
   return (
+    // `inert` keeps the real <Button>s below out of the tab order — the whole
+    // panel is a decorative screenshot, not live UI.
     <div
+      inert
       aria-hidden
       className="w-full max-w-[340px] rotate-[0.6deg] overflow-hidden rounded-[22px] border border-line bg-surface shadow-mock"
     >
@@ -46,9 +49,9 @@ export default function PanelMock() {
         <div className="flex items-center gap-2">
           <Mark size={24} />
           <span className="text-[15px] font-bold tracking-[-0.02em] text-text">lineitem</span>
-          <span className="ml-auto inline-flex items-center gap-[5px] rounded-[8px] bg-ink px-[10px] py-[6px] text-[12px] font-semibold text-ink-fg">
-            <Icon.sync width={12} height={12} /> Sync
-          </span>
+          <Button variant="primary" sm className="ml-auto">
+            <Icon.sync width={14} height={14} /> Sync
+          </Button>
         </div>
 
         <span className="text-[10px] font-bold uppercase tracking-[0.08em] text-faint">Needs review</span>
@@ -64,9 +67,9 @@ export default function PanelMock() {
         <PanelCard dot="ok" payee="AMAZON.COM" amount="$42.98" status="Ready to approve" date="May 20" />
         <PanelCard dot="ok" payee="TARGET" amount="+$24.50" status="Refund · ready" date="May 19" />
 
-        <div className="mt-[2px] rounded-[10px] bg-ink py-[10px] text-center text-[13px] font-semibold text-ink-fg">
+        <Button variant="primary" className="mt-[2px]">
           Approve all ready (2)
-        </div>
+        </Button>
       </div>
     </div>
   );
