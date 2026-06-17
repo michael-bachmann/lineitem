@@ -169,8 +169,6 @@ export interface BackfillRetailerProgress {
   retailer: string;
   /** Cumulative matched (pre-existing + this run) for this retailer. */
   matched: number;
-  /** Eligible-by-shape transactions in the window for this retailer. */
-  eligible: number;
   /** Transactions whose pages couldn't be read this run (retryable). */
   failed: number;
   /** Set when this retailer's scrape hit a sign-in wall — its orders couldn't

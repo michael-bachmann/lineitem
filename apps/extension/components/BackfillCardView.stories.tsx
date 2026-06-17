@@ -7,8 +7,8 @@ const result = {
   hasUnbackfilled: false,
   failed: 0,
   byRetailer: [
-    { retailer: "amazon", matched: 36, eligible: 38, failed: 0 },
-    { retailer: "target", matched: 6, eligible: 12, failed: 0 },
+    { retailer: "amazon", matched: 36, failed: 0 },
+    { retailer: "target", matched: 6, failed: 0 },
   ],
 };
 
@@ -47,8 +47,8 @@ export const DoneRetailerSignedOut: Story = {
         ...result,
         hasUnbackfilled: true,
         byRetailer: [
-          { retailer: "amazon", matched: 195, eligible: 245, failed: 0 },
-          { retailer: "target", matched: 0, eligible: 32, failed: 0, blocked: "signed_out" },
+          { retailer: "amazon", matched: 195, failed: 0 },
+          { retailer: "target", matched: 0, failed: 0, blocked: "signed_out" },
         ],
       },
     },

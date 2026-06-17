@@ -354,6 +354,9 @@ async function collectOrders(
       orders[0]?.date ?? "9999-12-31",
     );
     if (oldest < cutoff) break;
+    // "Load more" is an in-page XHR that appends rows — it does NOT navigate the
+    // tab, so (unlike Amazon's pager) there's no content-script teardown to
+    // tolerate and no waitForTabLoad needed after it.
     const { hasNext } = unwrap(await send<{ hasNext: boolean } | { error: string }>(tabId, "LOAD_MORE"));
     if (!hasNext) break;
   }

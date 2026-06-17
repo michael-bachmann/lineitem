@@ -102,7 +102,6 @@ export async function runBackfill(options: BackfillOptions): Promise<BackfillRes
       const run = runByRetailer.get(retailer);
       return {
         retailer,
-        eligible: counts.eligible,
         matched: counts.alreadyMatched + (run?.matched ?? 0),
         failed: run?.failed ?? 0,
         ...(run?.blocked ? { blocked: run.blocked } : {}),
@@ -153,9 +152,9 @@ interface CandidateAssessment {
   /** Items in AllocatedTransactions for eligible tx that were already backfilled
    *  before this run. Added to this run's items for the cumulative total. */
   alreadyBackfilledItems: number;
-  /** Per-retailer eligible count + already-allocated tx count, for the done
-   *  card's "Target: X of Y · Amazon: A of B" breakdown. */
-  perRetailer: Map<string, { eligible: number; alreadyMatched: number }>;
+  /** Per-retailer already-allocated tx count (keyed by every retailer with any
+   *  eligible tx), for the done card's per-retailer "learned N orders" line. */
+  perRetailer: Map<string, { alreadyMatched: number }>;
 }
 
 /** Walk the YNAB tx set once: bucket each into eligible-pending,
@@ -182,11 +181,10 @@ async function assessCandidates(txs: YnabTransaction[]): Promise<CandidateAssess
   const pending = eligible.flatMap((o) => (o.kind === "pending" ? [o.tagged] : []));
   const alreadyBackfilledItems = sumBy(eligible, (o) => (o.kind === "already" ? o.items : 0));
 
-  const perRetailer = new Map<string, { eligible: number; alreadyMatched: number }>();
+  const perRetailer = new Map<string, { alreadyMatched: number }>();
   for (const o of eligible) {
     const retailer = o.kind === "pending" ? o.tagged.retailer : o.retailer;
-    const cur = perRetailer.get(retailer) ?? { eligible: 0, alreadyMatched: 0 };
-    cur.eligible += 1;
+    const cur = perRetailer.get(retailer) ?? { alreadyMatched: 0 };
     if (o.kind === "already") cur.alreadyMatched += 1;
     perRetailer.set(retailer, cur);
   }

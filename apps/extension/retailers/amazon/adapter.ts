@@ -144,7 +144,7 @@ const DEFAULT_MAX_PAGES = 10;
  *  Chrome rejects the send with one of these. Here that means the page-turn
  *  happened, not that the scrape failed. (A genuine hang trips sendToTab's
  *  timeout instead, which we let propagate.) */
-function isPageTurnNavigationError(err: unknown): boolean {
+export function isPageTurnNavigationError(err: unknown): boolean {
   const msg = err instanceof Error ? err.message : String(err);
   return /message channel closed|receiving end does not exist/i.test(msg);
 }
@@ -225,7 +225,14 @@ async function paginateAndMatch(
 
     // Sync with the new page before scraping it — otherwise SCRAPE_TRANSACTIONS
     // races the reload ("Receiving end does not exist" before the new content
-    // script injects).
+    // script injects). We deliberately use waitForTabLoad (which trusts a
+    // current "complete") rather than a navigateTab-style fresh-event wait: the
+    // content script's `click()` + randomDelay means navigation is already in
+    // flight by the time we get here, so a lingering old "complete" is unlikely
+    // — and if it does slip through, the worst case is re-scraping one page,
+    // which the matcher dedupes harmlessly. A fresh-event-only wait has the
+    // opposite, worse failure: miss a fast reload's event → 30s hang → the whole
+    // batch throws.
     await waitForTabLoad(tabId);
   }
 

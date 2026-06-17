@@ -343,7 +343,7 @@ describe("runBackfill — happy path", () => {
 });
 
 describe("runBackfill — per-retailer breakdown", () => {
-  it("reports matched and eligible per retailer", async () => {
+  it("reports matched per retailer", async () => {
     getTransactionsSinceMock.mockResolvedValue([
       tx({ id: "amz-1", payee_name: "AMAZON.COM" }),
       tx({ id: "amz-2", payee_name: "AMAZON.COM" }),
@@ -363,8 +363,8 @@ describe("runBackfill — per-retailer breakdown", () => {
     const result = await runBackfill({ fromDate: "2025-01-01" });
 
     const byR = Object.fromEntries(result.byRetailer.map((r) => [r.retailer, r]));
-    expect(byR.amazon).toMatchObject({ eligible: 2, matched: 1 });
-    expect(byR.target).toMatchObject({ eligible: 1, matched: 1 });
+    expect(byR.amazon).toMatchObject({ matched: 1 });
+    expect(byR.target).toMatchObject({ matched: 1 });
   });
 
   it("propagates a retailer sign-in wall to byRetailer (so the card prompts to sign in, not 'won't match')", async () => {
@@ -384,7 +384,7 @@ describe("runBackfill — per-retailer breakdown", () => {
     const result = await runBackfill({ fromDate: "2025-01-01" });
 
     const target = result.byRetailer.find((r) => r.retailer === "target");
-    expect(target).toMatchObject({ eligible: 2, matched: 0, blocked: "signed_out" });
+    expect(target).toMatchObject({ matched: 0, blocked: "signed_out" });
   });
 
   it("folds pre-existing allocations into a retailer's cumulative matched", async () => {
@@ -403,7 +403,7 @@ describe("runBackfill — per-retailer breakdown", () => {
     const result = await runBackfill({ fromDate: "2025-01-01" });
 
     const amazon = result.byRetailer.find((r) => r.retailer === "amazon");
-    expect(amazon).toMatchObject({ eligible: 2, matched: 2 }); // 1 pre-existing + 1 new
+    expect(amazon).toMatchObject({ matched: 2 }); // 1 pre-existing + 1 new
   });
 });
 
