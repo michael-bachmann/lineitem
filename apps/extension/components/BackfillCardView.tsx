@@ -21,12 +21,15 @@ function progressPct(p: BackfillProgress): number {
   return p.status === "scraping" ? Math.round(6 + frac * 54) : Math.round(60 + frac * 40);
 }
 
-/** "Target 15 of 29 · Amazon 4 of 6" — per-retailer matched/eligible. */
+/** "Amazon 195 · Target 18 orders" — per-retailer matched counts, no
+ *  denominator. Backfill misses aren't actionable, so a shortfall fraction just
+ *  reads as broken; show what it learned. Blocked retailers are prompted
+ *  separately, so a retailer that matched nothing simply doesn't appear here. */
 function retailerSummary(byRetailer: BackfillResult["byRetailer"]): string {
-  return byRetailer
-    .filter((r) => r.eligible > 0)
-    .map((r) => `${retailerLabel(r.retailer)} ${r.matched} of ${r.eligible}`)
-    .join(" · ");
+  const parts = byRetailer
+    .filter((r) => r.matched > 0)
+    .map((r) => `${retailerLabel(r.retailer)} ${r.matched}`);
+  return parts.length > 0 ? `${parts.join(" · ")} orders` : "";
 }
 
 interface BackfillCardViewProps {
@@ -97,7 +100,7 @@ export function BackfillCardView({ state, onStart, onCancel, onOpenRetailer }: B
               <b className="font-bold">{state.result.transactionsBackfilled} transactions</b>.
             </p>
           </div>
-          {state.result.byRetailer.some((r) => r.eligible > 0) && (
+          {state.result.byRetailer.some((r) => r.matched > 0) && (
             <div className="flex items-start gap-[9px]">
               <span className="h-[21px] w-[21px] flex-none" aria-hidden />
               <p className="m-0 text-[12.5px] leading-[21px] text-muted">
