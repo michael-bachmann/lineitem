@@ -7,9 +7,11 @@ const meta = {
   title: "Landing/InvolvedCard",
   component: InvolvedCard,
   args: { onClick: fn() },
+  // Inline width (not a Tailwind arbitrary class): story-only `w-[…]` values
+  // aren't reliably scanned into Storybook's CSS, so the frame must be inline.
   decorators: [
     (Story) => (
-      <div className="w-[620px] max-w-full">
+      <div style={{ width: 620, maxWidth: "100%" }}>
         <Story />
       </div>
     ),
