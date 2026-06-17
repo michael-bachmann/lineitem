@@ -6,7 +6,7 @@ import type {
   PayeeMapping,
 } from "@/lib/types";
 import { assignByAmountAndDate, cutoffDateFor, NO_MATCH_REASON, READ_FAILED_REASON } from "@/lib/matcher";
-import { openRetailerTab, navigateTab, sendToTab } from "@/background/tabs";
+import { openRetailerTab, navigateTab, sendToTab, waitForTabLoad } from "@/background/tabs";
 import { orderDetailUrl, itemmodUrl } from "@/retailers/amazon/selectors";
 import type { RawTransaction, RawItem } from "@/retailers/amazon/scraper";
 import { groupBy } from "remeda";
@@ -140,6 +140,15 @@ export const amazonAdapter: RetailerAdapter = {
  *  Sync's natural cutoff (`cutoffDateFor`) short-circuits well before this. */
 const DEFAULT_MAX_PAGES = 10;
 
+/** A NEXT_PAGE that navigated the tab tears down the content script mid-reply;
+ *  Chrome rejects the send with one of these. Here that means the page-turn
+ *  happened, not that the scrape failed. (A genuine hang trips sendToTab's
+ *  timeout instead, which we let propagate.) */
+function isPageTurnNavigationError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  return /message channel closed|receiving end does not exist/i.test(msg);
+}
+
 interface PaginateResult {
   matchedPairs: [YnabCharge, RawTransaction][];
   unmatchedCharges: YnabCharge[];
@@ -200,10 +209,24 @@ async function paginateAndMatch(
     );
     if (oldestOnPage < cutoffIso) break;
 
-    const pageResult = (await sendToTab(tabId, {
-      type: "NEXT_PAGE",
-    })) as { hasNext: boolean };
-    if (!pageResult.hasNext) break;
+    // NEXT_PAGE clicks Amazon's pager, which navigates the whole page. That
+    // teardown can close the message channel before the content script replies
+    // — Chrome surfaces it as a messaging error that here means "we turned the
+    // page", not a failure. Treat it as a successful page-turn; if a real next
+    // page didn't exist the content script replies cleanly with hasNext:false.
+    let hasNext = true;
+    try {
+      const pageResult = (await sendToTab(tabId, { type: "NEXT_PAGE" })) as { hasNext: boolean };
+      hasNext = pageResult.hasNext;
+    } catch (err) {
+      if (!isPageTurnNavigationError(err)) throw err;
+    }
+    if (!hasNext) break;
+
+    // Sync with the new page before scraping it — otherwise SCRAPE_TRANSACTIONS
+    // races the reload ("Receiving end does not exist" before the new content
+    // script injects).
+    await waitForTabLoad(tabId);
   }
 
   return { matchedPairs: allMatched, unmatchedCharges: remaining };
