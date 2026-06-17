@@ -8,3 +8,16 @@
    so Tailwind won't auto-scan it — point it at the package source explicitly so
    the utility classes used in the shared components get generated. */
 @source "../../../packages/ui/src";
+
+/* FeedbackModal card entrance — opacity + transform only (the backdrop is a
+   static dim layer). Applied via `motion-safe:animate-[fbPop_...]`. */
+@keyframes fbPop {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
