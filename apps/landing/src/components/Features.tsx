@@ -4,7 +4,8 @@ import { Wrap } from "./Wrap";
 import FeatureItem from "./FeatureItem";
 
 // The shared icon set has no crosshair, so the "in control" glyph is inlined.
-const Crosshair = () => (
+// Exported so the FeatureItem story can show the real strip.
+export const Crosshair = () => (
   <svg
     viewBox="0 0 24 24"
     width={19}

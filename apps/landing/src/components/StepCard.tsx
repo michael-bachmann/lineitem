@@ -15,7 +15,10 @@ export default function StepCard({
   return (
     <li className="relative flex flex-col gap-[10px] rounded-card border border-line bg-surface px-[22px] py-[26px] shadow-card">
       <span className="absolute right-5 top-[18px] text-[13px] font-bold text-faint tabular">{n}</span>
-      <span className="flex h-11 w-11 items-center justify-center rounded-[12px] bg-brand-weak text-brand">
+      <span
+        aria-hidden
+        className="mb-1 flex h-11 w-11 items-center justify-center rounded-[12px] bg-brand-weak text-brand"
+      >
         {icon}
       </span>
       <h3 className="text-[19px] font-bold tracking-[-0.02em] text-text">{title}</h3>
