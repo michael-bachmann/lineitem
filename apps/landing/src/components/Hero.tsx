@@ -23,7 +23,7 @@ export default function Hero() {
 
         <div
           id="install"
-          className="flex flex-wrap gap-3 max-[400px]:w-full max-[400px]:flex-col"
+          className="flex flex-wrap gap-3 max-[620px]:w-full max-[400px]:flex-col"
         >
           <StoreButton store="chrome" href={LINKS.chrome} />
           <StoreButton store="firefox" href={LINKS.firefox} />

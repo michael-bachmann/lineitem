@@ -22,13 +22,17 @@ export default function StoreButton({
     <LinkButton
       href={href}
       variant={s.variant}
-      // LinkButton is w-full by default; sit side-by-side above the 400px stack point.
-      className={`gap-3 py-[13px] min-[401px]:w-auto ${className}`}
+      // LinkButton is w-full by default. Reference responsive tiers: stacked
+      // full-width ≤400, stretched to share the row 401–620, natural width ≥621.
+      className={`min-w-0 gap-3 py-[13px] min-[401px]:max-[620px]:flex-1 min-[621px]:w-auto ${className}`}
     >
       <Icon.ext aria-hidden width={22} height={22} className="flex-none" />
-      <span className="flex flex-col items-start leading-[1.15]">
+      <span className="flex flex-col items-start leading-[1.2]">
         <span className="text-[15px] font-bold">{s.label}</span>
-        <span className="text-[11.5px] font-medium opacity-80">{s.sub}</span>
+        {/* Decorative reassurance — keep it out of the link's accessible name. */}
+        <span aria-hidden className="text-[11.5px] font-medium opacity-80">
+          {s.sub}
+        </span>
       </span>
     </LinkButton>
   );

@@ -33,7 +33,7 @@ export default function PanelMock() {
   return (
     <div
       aria-hidden
-      className="w-full max-w-[340px] rotate-[0.6deg] overflow-hidden rounded-[22px] border border-line bg-surface shadow-[0_32px_70px_-28px_rgba(47,42,51,0.42),0_10px_28px_-16px_rgba(47,42,51,0.28)]"
+      className="w-full max-w-[340px] rotate-[0.6deg] overflow-hidden rounded-[22px] border border-line bg-surface shadow-mock"
     >
       <div className="flex h-[30px] items-center gap-[6px] border-b border-line bg-surface-2 px-3">
         <span className="h-2 w-2 rounded-full bg-line-strong" />
