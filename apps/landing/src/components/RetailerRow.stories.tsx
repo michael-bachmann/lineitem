@@ -7,7 +7,7 @@ const meta = {
   component: RetailerRow,
   decorators: [
     (Story) => (
-      <div className="w-[480px] max-w-full">
+      <div style={{ width: 480, maxWidth: "100%" }}>
         <Story />
       </div>
     ),

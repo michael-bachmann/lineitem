@@ -7,7 +7,10 @@ const meta = {
   component: FaqItem,
   decorators: [
     (Story) => (
-      <div className="w-[680px] max-w-full overflow-hidden rounded-card border border-line bg-surface shadow-card">
+      <div
+        style={{ width: 680, maxWidth: "100%" }}
+        className="overflow-hidden rounded-card border border-line bg-surface shadow-card"
+      >
         <Story />
       </div>
     ),
@@ -22,6 +25,6 @@ export const Expanded: Story = { args: { ...FAQ[0], defaultOpen: true } };
 
 /** The full accordion (first item open). */
 export const FullAccordion: StoryObj = {
-  decorators: [(Story) => <div className="w-[680px] max-w-full"><Story /></div>],
+  decorators: [(Story) => <div style={{ width: 680, maxWidth: "100%" }}><Story /></div>],
   render: () => <FaqAccordion items={FAQ} />,
 };

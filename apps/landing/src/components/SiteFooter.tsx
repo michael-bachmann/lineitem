@@ -1,19 +1,21 @@
-import type { ReactNode } from "react";
-import { Mark } from "@lineitem/ui";
+import { Mark, type FeedbackKind } from "@lineitem/ui";
 import { Wrap } from "./Wrap";
 import { LINKS, VERSION } from "@/lib/links";
 
+type FooterItem = { label: string } & (
+  | { href: string; external?: boolean }
+  | { feedback: FeedbackKind }
+);
+
 interface Col {
   heading: string;
-  links: { label: string; href: string; external?: boolean }[];
+  items: FooterItem[];
 }
 
-// Project-column feedback items currently link to GitHub issues; PR6 wires them
-// to the FeedbackModal once the page owns its open-state.
 const COLS: Col[] = [
   {
     heading: "Product",
-    links: [
+    items: [
       { label: "Add to Chrome", href: "#install" },
       { label: "Add to Firefox", href: "#install" },
       { label: "How it works", href: "#how" },
@@ -22,35 +24,45 @@ const COLS: Col[] = [
   },
   {
     heading: "Project",
-    links: [
+    items: [
       { label: "README & docs", href: LINKS.readme, external: true },
-      { label: "Report an issue", href: LINKS.issues, external: true },
-      { label: "Request a retailer", href: LINKS.issues, external: true },
+      { label: "Report an issue", feedback: "issue" },
+      { label: "Make a suggestion", feedback: "suggestion" },
+      { label: "Request a retailer", feedback: "retailer" },
     ],
   },
   {
     heading: "Support",
-    links: [
+    items: [
       { label: "Buy me a coffee", href: LINKS.coffee, external: true },
       { label: "YNAB", href: LINKS.ynab, external: true },
     ],
   },
 ];
 
-function FooterLink({ label, href, external }: Col["links"][number]): ReactNode {
+const ITEM = "text-left text-[14.5px] text-muted transition-colors hover:text-text";
+
+function FooterItemLink({ item, onFeedback }: { item: FooterItem; onFeedback: (k: FeedbackKind) => void }) {
+  if ("feedback" in item) {
+    return (
+      <button type="button" onClick={() => onFeedback(item.feedback)} className={ITEM}>
+        {item.label}
+      </button>
+    );
+  }
   return (
     <a
-      href={href}
-      {...(external ? { target: "_blank", rel: "noreferrer" } : {})}
-      className="text-[14.5px] text-muted transition-colors hover:text-text"
+      href={item.href}
+      {...(item.external ? { target: "_blank", rel: "noreferrer" } : {})}
+      className={ITEM}
     >
-      {label}
+      {item.label}
     </a>
   );
 }
 
 /** Site footer: brand blurb + Product/Project/Support columns + legal row. */
-export default function SiteFooter() {
+export default function SiteFooter({ onFeedback }: { onFeedback: (kind: FeedbackKind) => void }) {
   return (
     <footer className="border-t border-line bg-surface pb-7 pt-12">
       <Wrap className="grid grid-cols-1 gap-10 min-[861px]:grid-cols-[1.2fr_2fr]">
@@ -67,12 +79,12 @@ export default function SiteFooter() {
         </div>
         <div className="grid grid-cols-3 gap-7 max-[620px]:grid-cols-2">
           {COLS.map((col) => (
-            <div key={col.heading} className="flex flex-col gap-[11px]">
+            <div key={col.heading} className="flex flex-col items-start gap-[11px]">
               <span className="mb-[3px] text-[12px] font-bold uppercase tracking-[0.1em] text-faint">
                 {col.heading}
               </span>
-              {col.links.map((l) => (
-                <FooterLink key={l.label} {...l} />
+              {col.items.map((item) => (
+                <FooterItemLink key={item.label} item={item} onFeedback={onFeedback} />
               ))}
             </div>
           ))}
