@@ -20,15 +20,18 @@ html {
   }
 }
 section[id],
-#install {
+#install,
+#top {
   scroll-margin-top: 84px;
 }
 
-/* Visible keyboard focus ring for interactive elements (mouse focus unaffected). */
+/* Visible keyboard focus ring for interactive elements (mouse focus unaffected).
+   --ink (not --brand) so the ring clears the 3:1 non-text-contrast minimum on
+   the cream page background. */
 a:focus-visible,
 button:focus-visible,
 summary:focus-visible {
-  outline: 2px solid var(--brand);
+  outline: 2px solid var(--ink);
   outline-offset: 2px;
 }
 
