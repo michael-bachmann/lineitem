@@ -52,11 +52,11 @@ export default function FeedbackModal({ kind, onClose, onSubmit }: FeedbackModal
     if (!dlg.open) dlg.showModal();
     // Land focus on the first real field, not the × or the hidden honeypot.
     dlg.querySelector<HTMLElement>("input:not([tabindex='-1']), textarea")?.focus();
-    // Native <dialog> doesn't lock the page behind it — do it ourselves.
-    document.body.style.overflow = "hidden";
+    // Deliberately NOT locking body scroll: showModal() already makes the page
+    // behind inert, and toggling `overflow: hidden` removes the scrollbar, which
+    // reflows the layout + re-centers the dialog on classic scrollbars (BAC-137).
     return () => {
       if (dlg.open) dlg.close();
-      document.body.style.overflow = "";
       trigger?.focus?.();
     };
   }, [open]);

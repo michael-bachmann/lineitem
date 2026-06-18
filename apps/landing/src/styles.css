@@ -13,10 +13,6 @@
    a scroll offset so the sticky 66px nav doesn't cover their heading. */
 html {
   scroll-behavior: smooth;
-  /* Reserve the scrollbar gutter so locking page scroll when the feedback modal
-     opens (body overflow:hidden) doesn't remove the scrollbar and shift/reflow
-     the layout — only visible with classic (non-overlay) scrollbars. */
-  scrollbar-gutter: stable;
 }
 @media (prefers-reduced-motion: reduce) {
   html {
