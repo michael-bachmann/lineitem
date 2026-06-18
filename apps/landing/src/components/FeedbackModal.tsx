@@ -74,38 +74,37 @@ export default function FeedbackModal({ kind, onClose, onSubmit }: FeedbackModal
         if (e.target === ref.current) onClose();
       }}
       // m-auto restores native dialog centering (Tailwind preflight resets the UA margin).
-      className="m-auto w-[min(440px,calc(100vw-32px))] bg-transparent p-0 backdrop:bg-[rgba(47,42,51,0.44)]"
+      // overflow-clip: the native <dialog> defaults to overflow:auto, so the 8px
+      // entrance translate briefly makes it scrollable and flashes its scrollbar
+      // (BAC-137). `clip` is never a scroll container; the clip-margin keeps the
+      // card's shadow-pop visible.
+      className="m-auto w-[min(440px,calc(100vw-32px))] overflow-clip [overflow-clip-margin:40px] bg-transparent p-0 backdrop:bg-[rgba(47,42,51,0.44)]"
     >
-      {/* The entrance transform lives on this wrapper, NOT the scrolling card —
-          animating `transform` on an `overflow:auto` box makes the browser flash
-          its scrollbar for the animation's duration (BAC-137). */}
-      <div className="motion-safe:animate-[fbPop_0.19s_cubic-bezier(0.4,0,0.2,1)]">
-        {/* px-[10px] + the form's own px-[14px] = 24px field inset; the header
-            carries a matching px-[14px] so it lines up. */}
-        <div className="relative flex max-h-[calc(100vh-32px)] flex-col gap-3 overflow-y-auto rounded-card border border-line bg-surface px-[10px] pb-[10px] pt-[18px] shadow-pop">
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close"
-            className="absolute right-[13px] top-[13px] flex h-[30px] w-[30px] items-center justify-center rounded-control text-faint transition-colors hover:bg-surface-3 hover:text-muted"
-          >
-            <Icon.x aria-hidden width={17} height={17} />
-          </button>
+      {/* px-[10px] + the form's own px-[14px] = 24px field inset; the header
+          carries a matching px-[14px] so it lines up. */}
+      <div className="relative flex max-h-[calc(100vh-32px)] flex-col gap-3 overflow-y-auto rounded-card border border-line bg-surface px-[10px] pb-[10px] pt-[18px] shadow-pop motion-safe:animate-[fbPop_0.19s_cubic-bezier(0.4,0,0.2,1)]">
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close"
+          className="absolute right-[13px] top-[13px] flex h-[30px] w-[30px] items-center justify-center rounded-control text-faint transition-colors hover:bg-surface-3 hover:text-muted"
+        >
+          <Icon.x aria-hidden width={17} height={17} />
+        </button>
 
-          <div className="flex items-start gap-[13px] px-[14px] pr-[34px]">
-            <span className="flex h-10 w-10 flex-none items-center justify-center rounded-[11px] bg-brand-weak text-brand">
-              <head.Glyph aria-hidden width={20} height={20} />
-            </span>
-            <div>
-              <h2 id={titleId} className="text-[18px] font-bold tracking-[-0.018em] text-text">
-                {head.title}
-              </h2>
-              <p className="mt-[3px] text-[14px] text-muted">{head.desc}</p>
-            </div>
+        <div className="flex items-start gap-[13px] px-[14px] pr-[34px]">
+          <span className="flex h-10 w-10 flex-none items-center justify-center rounded-[11px] bg-brand-weak text-brand">
+            <head.Glyph aria-hidden width={20} height={20} />
+          </span>
+          <div>
+            <h2 id={titleId} className="text-[18px] font-bold tracking-[-0.018em] text-text">
+              {head.title}
+            </h2>
+            <p className="mt-[3px] text-[14px] text-muted">{head.desc}</p>
           </div>
-
-          <FeedbackForm kind={shown} active={open} onDone={onClose} onSubmit={onSubmit} />
         </div>
+
+        <FeedbackForm kind={shown} active={open} onDone={onClose} onSubmit={onSubmit} />
       </div>
     </dialog>
   );
