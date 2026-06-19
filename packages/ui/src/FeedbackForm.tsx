@@ -23,6 +23,15 @@ interface FeedbackFormProps {
 
 type Status = "idle" | "sending" | "done" | "error";
 
+// These are feedback fields, not credentials — tell password managers
+// (LastPass / 1Password / Dashlane) to skip them. Their injected icons reflow
+// the input on a delay, which shows up as the field "growing" after open.
+const IGNORE_PW_MANAGERS = {
+  "data-lpignore": "true",
+  "data-1p-ignore": "true",
+  "data-form-type": "other",
+};
+
 export default function FeedbackForm({
   kind,
   context,
@@ -120,6 +129,7 @@ export default function FeedbackForm({
             placeholder={cfg.placeholder}
             onChange={(e) => setPrimary(e.target.value)}
             required
+            {...IGNORE_PW_MANAGERS}
           />
         ) : (
           <input
@@ -129,6 +139,7 @@ export default function FeedbackForm({
             placeholder={cfg.placeholder}
             onChange={(e) => setPrimary(e.target.value)}
             required
+            {...IGNORE_PW_MANAGERS}
           />
         )}
       </label>
@@ -149,6 +160,7 @@ export default function FeedbackForm({
             setEmail(e.target.value);
             if (emailError) setEmailError(false);
           }}
+          {...IGNORE_PW_MANAGERS}
         />
         {emailError && (
           <span className="text-[12px] text-danger">Enter a valid email, or leave it blank.</span>
