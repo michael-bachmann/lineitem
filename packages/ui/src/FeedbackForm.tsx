@@ -23,15 +23,6 @@ interface FeedbackFormProps {
 
 type Status = "idle" | "sending" | "done" | "error";
 
-// These are feedback fields, not credentials — tell password managers
-// (LastPass / 1Password / Dashlane) to skip them. Their injected icons reflow
-// the input on a delay, which shows up as the field "growing" after open.
-const IGNORE_PW_MANAGERS = {
-  "data-lpignore": "true",
-  "data-1p-ignore": "true",
-  "data-form-type": "other",
-};
-
 export default function FeedbackForm({
   kind,
   context,
@@ -129,7 +120,6 @@ export default function FeedbackForm({
             placeholder={cfg.placeholder}
             onChange={(e) => setPrimary(e.target.value)}
             required
-            {...IGNORE_PW_MANAGERS}
           />
         ) : (
           <input
@@ -139,7 +129,6 @@ export default function FeedbackForm({
             placeholder={cfg.placeholder}
             onChange={(e) => setPrimary(e.target.value)}
             required
-            {...IGNORE_PW_MANAGERS}
           />
         )}
       </label>
@@ -152,12 +141,7 @@ export default function FeedbackForm({
           className={`rounded-control border bg-surface px-[11px] py-[9px] text-[13px] text-text outline-none focus:ring-2 focus:ring-brand-weak ${
             emailError ? "border-danger focus:border-danger" : "border-line-strong focus:border-brand"
           }`}
-          // type="text" (not "email") + inputMode: LastPass treats type="email"
-          // as a credential field and decorates it (icon + reflow) even with
-          // data-lpignore. We already validate the address in JS, so the text
-          // type loses nothing and removes LastPass's trigger. (BAC-137)
-          type="text"
-          inputMode="email"
+          type="email"
           value={email}
           placeholder="you@example.com"
           aria-invalid={emailError || undefined}
@@ -165,7 +149,6 @@ export default function FeedbackForm({
             setEmail(e.target.value);
             if (emailError) setEmailError(false);
           }}
-          {...IGNORE_PW_MANAGERS}
         />
         {emailError && (
           <span className="text-[12px] text-danger">Enter a valid email, or leave it blank.</span>
