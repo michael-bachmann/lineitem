@@ -152,7 +152,12 @@ export default function FeedbackForm({
           className={`rounded-control border bg-surface px-[11px] py-[9px] text-[13px] text-text outline-none focus:ring-2 focus:ring-brand-weak ${
             emailError ? "border-danger focus:border-danger" : "border-line-strong focus:border-brand"
           }`}
-          type="email"
+          // type="text" (not "email") + inputMode: LastPass treats type="email"
+          // as a credential field and decorates it (icon + reflow) even with
+          // data-lpignore. We already validate the address in JS, so the text
+          // type loses nothing and removes LastPass's trigger. (BAC-137)
+          type="text"
+          inputMode="email"
           value={email}
           placeholder="you@example.com"
           aria-invalid={emailError || undefined}
