@@ -1,5 +1,6 @@
 import { groupBy, sumBy } from "remeda";
 import { READ_FAILED_REASON } from "@/lib/matcher";
+import { NOT_CONNECTED } from "@/lib/messages";
 import { getSettings } from "@/lib/settings";
 import { getTransactionsSince } from "@/lib/ynab";
 import { getAllocatedTransaction, putAllocatedTransactions } from "@/lib/db";
@@ -62,7 +63,7 @@ export async function runBackfill(options: BackfillOptions): Promise<BackfillRes
   const { fromDate, signal, onProgress } = options;
 
   const settings = await getSettings();
-  if (!settings.accessToken || !settings.planId) throw new Error("Not connected to YNAB");
+  if (!settings.accessToken || !settings.planId) throw new Error(NOT_CONNECTED);
 
   signal?.throwIfAborted();
   onProgress?.({ status: "preparing" });

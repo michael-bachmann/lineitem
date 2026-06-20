@@ -1,4 +1,5 @@
 import { Icon, type IconComponent } from "@lineitem/ui";
+import { plural } from "@/lib/intl";
 
 export type StatusKind = "ready" | "warn" | "neutral" | "err";
 export type TileKind = "ready" | "ok" | "warn" | "neutral" | "err";
@@ -35,7 +36,7 @@ export function statusInfo({ status, needs }: StatusInput): StatusInfo {
         kind: "warn",
         tile: "warn",
         glyph: Icon.warnTri,
-        text: `${n} item${n > 1 ? "s" : ""} ${n > 1 ? "need" : "needs"} a category`,
+        text: `${n} ${plural(n, { one: "item needs", other: "items need" })} a category`,
       };
     }
     case "nomatch":

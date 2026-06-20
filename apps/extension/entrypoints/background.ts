@@ -1,3 +1,4 @@
+import { NOT_CONNECTED } from "@/lib/messages";
 import { getSettings, saveSettings, clearSettings } from "@/lib/settings";
 import { runOAuthFlow } from "@/lib/oauth";
 import { getPlans, getCategories } from "@/lib/ynab";
@@ -85,7 +86,7 @@ async function handleMessage(message: MessageRequest): Promise<unknown> {
       try {
         const settings = await getSettings();
         if (!settings.accessToken || !settings.planId) {
-          return { error: "Not connected to YNAB" };
+          return { error: NOT_CONNECTED };
         }
         const categories = await getCategories(settings.planId);
         await putCategories(categories);

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { ApprovalItem, Category, QueueEntry } from "@/lib/types";
 import { formatCents, millunitsToCents } from "@/lib/money";
+import { plural } from "@/lib/intl";
 import ItemCard from "@/components/ItemCard";
 import SplitBreakdown from "@/components/SplitBreakdown";
 import { BulkApply } from "@/components/BulkApply";
@@ -155,7 +156,7 @@ export default function DetailView({ entry, categories, onBack, onApprove }: Det
           onClick={handleApprove}
         >
           {uncats > 0
-            ? `${uncats} item${uncats === 1 ? "" : "s"} still need${uncats === 1 ? "s" : ""} a category`
+            ? `${uncats} ${plural(uncats, { one: "item still needs", other: "items still need" })} a category`
             : "Approve & write split"}
         </Button>
       </div>

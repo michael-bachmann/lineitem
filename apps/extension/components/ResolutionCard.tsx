@@ -1,5 +1,6 @@
 import type { BlockedRetailer } from "@/lib/types";
 import { retailerLabel } from "@/lib/registry";
+import { plural } from "@/lib/intl";
 import { Button, Icon } from "@lineitem/ui";
 
 function title(b: BlockedRetailer): string {
@@ -8,7 +9,7 @@ function title(b: BlockedRetailer): string {
 }
 
 function subtitle(b: BlockedRetailer): string {
-  const charges = `${b.count} charge${b.count === 1 ? "" : "s"}`;
+  const charges = `${b.count} ${plural(b.count, { one: "charge", other: "charges" })}`;
   return b.reason === "step_up"
     ? `${retailerLabel(b.retailer)} needs a quick re-sign-in to read ${charges}. Sign in, then tap Sync.`
     : `You’re signed out, so ${charges} couldn’t be read. Sign in, then tap Sync.`;
