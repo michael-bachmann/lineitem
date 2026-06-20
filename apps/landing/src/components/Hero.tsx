@@ -16,7 +16,7 @@ export default function Hero() {
         </h1>
         <p className="max-w-[30em] text-[clamp(16px,1.6vw,19px)] leading-[1.55] text-muted">
           lineitem reads the actual items behind your Amazon and Target charges in YNAB,
-          then splits each one into the right categories — so a single{" "}
+          then splits each charge into the right categories — so a single{" "}
           <span className="font-semibold text-text tabular">$42.98</span> charge becomes groceries,
           household, and the rest. Nothing posts to YNAB until you approve.
         </p>
