@@ -15,7 +15,7 @@ export default function Retailers({ onFeedback }: { onFeedback: (kind: FeedbackK
         <div className="mx-auto flex max-w-[520px] flex-col gap-[10px]">
           <RetailerRow variant="live" name="Amazon" />
           <RetailerRow variant="live" name="Target" />
-          <RetailerRow variant="planned" name="Walmart" />
+          <RetailerRow variant="planned" name="Costco" />
           <RetailerRow
             variant="request"
             name="Request a retailer"

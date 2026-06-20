@@ -1,8 +1,8 @@
 {
   "name": "extension",
-  "description": "Match YNAB transactions to Amazon orders and categorize line items",
+  "description": "Match YNAB transactions to your Amazon and Target orders and split each charge into the right budget categories",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
     "dev": "wxt",

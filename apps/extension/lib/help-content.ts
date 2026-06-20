@@ -10,7 +10,7 @@ export interface FaqItem {
 export const FAQ: FaqItem[] = [
   {
     q: "How does lineitem match orders?",
-    a: "When you sync, lineitem looks at recent YNAB transactions from Amazon and finds the order with the closest amount and date. You confirm each match before anything is written back.",
+    a: "When you sync, lineitem looks at recent YNAB transactions from Amazon and Target and finds the order with the closest amount and date. You confirm each match before anything is written back.",
   },
   {
     q: "Will it change my budget without asking?",
@@ -22,7 +22,7 @@ export const FAQ: FaqItem[] = [
   },
   {
     q: "Why does an item say “Login required”?",
-    a: "lineitem reads order details from your logged-in Amazon session. If you’ve been signed out, open Amazon in a tab, sign in, and sync again.",
+    a: "lineitem reads order details from your logged-in Amazon or Target session. If you’ve been signed out, open that store in a tab, sign in, and sync again.",
   },
   {
     q: "Is my data sent anywhere?",

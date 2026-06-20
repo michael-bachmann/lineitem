@@ -12,13 +12,13 @@ export default function Hero() {
           For YNAB shoppers
         </span>
         <h1 className="text-[clamp(34px,5.2vw,56px)] font-extrabold leading-[1.05] tracking-[-0.03em] text-text">
-          Every online order, itemized in&nbsp;YNAB.
+          One order, split into the right budget categories.
         </h1>
         <p className="max-w-[30em] text-[clamp(16px,1.6vw,19px)] leading-[1.55] text-muted">
-          lineitem matches your YNAB transactions to the Amazon and Target orders behind them,
-          then splits each charge into the right budget categories — so a single{" "}
+          lineitem reads the actual items behind your Amazon and Target charges in YNAB,
+          then splits each charge into the right categories — so a single{" "}
           <span className="font-semibold text-text tabular">$42.98</span> charge becomes groceries,
-          household, and the rest, automatically.
+          household, and the rest. Nothing posts to YNAB until you approve.
         </p>
 
         <div
