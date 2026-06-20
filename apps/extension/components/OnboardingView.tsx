@@ -1,4 +1,5 @@
 import { BrandRow, Button, StatusMessage, Spinner, Icon } from "@lineitem/ui";
+import { LINKS } from "@lineitem/ui/links";
 
 export type OnboardingPhase = "connect" | "connecting" | "saving" | "error";
 
@@ -22,6 +23,19 @@ export function OnboardingView({ phase, error, onConnect }: OnboardingViewProps)
         <Button variant="primary" onClick={onConnect}>
           Connect YNAB
         </Button>
+      )}
+      {(phase === "connect" || phase === "error") && (
+        <p className="-mt-[6px] text-[12.5px] text-faint">
+          We respect your privacy.{" "}
+          <a
+            href={LINKS.privacy}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-muted underline hover:text-link"
+          >
+            Privacy Policy
+          </a>
+        </p>
       )}
       {phase === "connecting" && (
         <StatusMessage kind="muted">

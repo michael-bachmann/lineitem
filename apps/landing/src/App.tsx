@@ -1,5 +1,7 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import type { FeedbackKind } from "@lineitem/ui";
+import { useScrolled } from "./lib/useScrolled";
+import { useHashScrollOnLoad } from "./lib/useHashScroll";
 import SiteNav from "./components/SiteNav";
 import Hero from "./components/Hero";
 import HowItWorks from "./components/HowItWorks";
@@ -12,22 +14,13 @@ import FinalCta from "./components/FinalCta";
 import SiteFooter from "./components/SiteFooter";
 import FeedbackModal from "./components/FeedbackModal";
 
-/** True once the page is scrolled past the top — drives the nav's hairline. */
-function useScrolled() {
-  const [scrolled, setScrolled] = useState(false);
-  useEffect(() => {
-    const onScroll = () => setScrolled(window.scrollY > 4);
-    onScroll();
-    window.addEventListener("scroll", onScroll, { passive: true });
-    return () => window.removeEventListener("scroll", onScroll);
-  }, []);
-  return scrolled;
-}
-
 export default function App() {
   const scrolled = useScrolled();
   // The page owns the feedback modal; sections open it via `setFeedback(kind)`.
   const [feedback, setFeedback] = useState<FeedbackKind | null>(null);
+
+  // Land on the right section when arriving via /#how etc. from another page.
+  useHashScrollOnLoad();
 
   return (
     <>

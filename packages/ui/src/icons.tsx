@@ -163,6 +163,12 @@ export const Icon = {
       <path d="M8 10.5V7.5a4 4 0 0 1 8 0v3" />
     </svg>
   ),
+  shield: (p: IconProps) => (
+    <svg viewBox="0 0 24 24" strokeWidth={1.8} {...s} {...p}>
+      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+      <path d="m9 12 2 2 4-4" />
+    </svg>
+  ),
   search: (p: IconProps) => (
     <svg viewBox="0 0 24 24" strokeWidth={1.8} {...s} {...p}>
       <circle cx="11" cy="11" r="7" />

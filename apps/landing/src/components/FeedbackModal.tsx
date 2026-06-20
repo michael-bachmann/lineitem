@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { FeedbackForm, Icon, type FeedbackKind } from "@lineitem/ui";
+import { PRIVACY_PATH } from "@/lib/links";
 
 type Glyph = (typeof Icon)[keyof typeof Icon];
 
@@ -105,6 +106,13 @@ export default function FeedbackModal({ kind, onClose, onSubmit }: FeedbackModal
         </div>
 
         <FeedbackForm kind={shown} active={open} onDone={onClose} onSubmit={onSubmit} />
+
+        <p className="px-[14px] pb-[6px] text-center text-[11.5px] leading-[1.5] text-faint">
+          Only what you type is sent.{" "}
+          <a href={PRIVACY_PATH} className="text-muted underline hover:text-link">
+            Privacy
+          </a>
+        </p>
       </div>
     </dialog>
   );

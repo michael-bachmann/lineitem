@@ -45,7 +45,25 @@ export default defineConfig({
     //    commit), which derives a stable extension ID so the YNAB redirect-URI
     //    registration doesn't change across machines or fresh installs.
     ...(browser === "firefox"
-      ? { browser_specific_settings: { gecko: { id: "lineitem@lineitem.dev" } } }
+      ? {
+          browser_specific_settings: {
+            gecko: {
+              id: "lineitem@lineitem.dev",
+              // Firefox's built-in data-collection consent (mandatory for new AMO
+              // submissions since 2025-11-03; a missing key is rejected at signing).
+              // Only data that LEAVES the device counts — the Amazon/Target order
+              // reads are processed locally and never transmitted, so they're out
+              // of scope here. What we transmit:
+              //  - authenticationInfo: YNAB OAuth tokens, exchanged via auth.lineitem.dev
+              //  - financialAndPaymentInfo: YNAB budget/transaction data (read + write)
+              //  - personalCommunications: the feedback message + optional email (Web3Forms)
+              // No telemetry, so technicalAndInteraction is omitted (it can only be optional).
+              data_collection_permissions: {
+                required: ["authenticationInfo", "financialAndPaymentInfo", "personalCommunications"],
+              },
+            },
+          },
+        }
       : {
           key: "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAtkJGQ2J6/qiSlDdRHLrauLgKxTeGx2W68jpk+0TPcebtbtdS7OaHxaN+CKTY8a5EUfFdpv/8LDfQC+L7xAjwsKihbagaWiOpe/dKsdzUYi3dUllzIJlDLlEhz9jEqumG6JyQVP6fq1S22+5bXLNCXRNM0vNDDTiq/2m8sytxCN9D5ufv0556uklIBJ/wQvqcCnp107gdYGs3x0ooVwxXZu035YJBLDoIriB/zmwsDoim1koahf9TKV1VqgzdlIt7Jx+sHIUvNA9IA1KGyvwE6Zp2eE6voT3haO2iInwj8QuEvDYmovW7piun5kXPICGXWqNQcjv3HPKhZxXSt3G+8wIDAQAB",
         }),
