@@ -1,6 +1,6 @@
 import { Mark, type FeedbackKind } from "@lineitem/ui";
 import { Wrap } from "./Wrap";
-import { LINKS, VERSION } from "@/lib/links";
+import { LINKS, PRIVACY_PATH, VERSION } from "@/lib/links";
 
 type FooterItem = { label: string } & (
   | { href: string; external?: boolean }
@@ -16,10 +16,10 @@ const COLS: Col[] = [
   {
     heading: "Product",
     items: [
-      { label: "Add to Chrome", href: "#install" },
-      { label: "Add to Firefox", href: "#install" },
-      { label: "How it works", href: "#how" },
-      { label: "FAQ", href: "#faq" },
+      { label: "Add to Chrome", href: "/#install" },
+      { label: "Add to Firefox", href: "/#install" },
+      { label: "How it works", href: "/#how" },
+      { label: "FAQ", href: "/#faq" },
     ],
   },
   {
@@ -35,6 +35,7 @@ const COLS: Col[] = [
     heading: "Support",
     items: [
       { label: "Buy me a coffee", href: LINKS.coffee, external: true },
+      { label: "Privacy Policy", href: PRIVACY_PATH },
       { label: "YNAB", href: LINKS.ynab, external: true },
     ],
   },

@@ -8,6 +8,7 @@ export const LINKS = {
   readme: "https://github.com/michael-bachmann/lineitem#readme",
   issues: "https://github.com/michael-bachmann/lineitem/issues/new",
   website: "https://lineitem.dev",
+  privacy: "https://lineitem.dev/privacy",
   ynab: "https://www.ynab.com",
   coffee: "https://ko-fi.com/mbachmann",
   email: "support@lineitem.dev",

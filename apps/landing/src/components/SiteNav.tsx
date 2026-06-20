@@ -1,10 +1,12 @@
 import { LinkButton, Mark } from "@lineitem/ui";
 import { Wrap } from "./Wrap";
 
+// Root-absolute hashes so the nav also works from non-home pages (e.g. /privacy),
+// where a bare "#how" would resolve against the current path.
 const NAV_LINKS = [
-  { href: "#how", label: "How it works" },
-  { href: "#retailers", label: "Retailers" },
-  { href: "#faq", label: "FAQ" },
+  { href: "/#how", label: "How it works" },
+  { href: "/#retailers", label: "Retailers" },
+  { href: "/#faq", label: "FAQ" },
 ];
 
 /** Sticky top nav: brand + anchor links + install CTA. `scrolled` shows the
@@ -17,7 +19,7 @@ export default function SiteNav({ scrolled = false }: { scrolled?: boolean }) {
       }`}
     >
       <Wrap className="flex h-[66px] items-center gap-5">
-        <a href="#top" aria-label="lineitem home" className="inline-flex items-center gap-[9px]">
+        <a href="/#top" aria-label="lineitem home" className="inline-flex items-center gap-[9px]">
           <Mark size={28} className="rounded-[8px]" />
           <span className="text-[19px] font-bold lowercase tracking-[-0.02em] text-text">
             lineitem
@@ -36,7 +38,7 @@ export default function SiteNav({ scrolled = false }: { scrolled?: boolean }) {
           ))}
         </nav>
 
-        <LinkButton href="#install" variant="primary" sm className="ml-1 max-[620px]:ml-auto">
+        <LinkButton href="/#install" variant="primary" sm className="ml-1 max-[620px]:ml-auto">
           Add to browser
         </LinkButton>
       </Wrap>

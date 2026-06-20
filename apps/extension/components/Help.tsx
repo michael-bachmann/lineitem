@@ -117,6 +117,12 @@ export default function Help({ onBack, version = "0.0.0" }: HelpProps) {
           sub="github.com/michael-bachmann/lineitem"
           href={LINKS.readme}
         />
+        <Row
+          icon={<Icon.shield />}
+          title="Privacy Policy"
+          sub="lineitem.dev/privacy"
+          href={LINKS.privacy}
+        />
       </div>
 
       <div className="py-[6px] text-center text-[11.5px] leading-[1.7] text-faint">
