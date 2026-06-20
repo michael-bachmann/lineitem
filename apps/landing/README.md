@@ -23,8 +23,10 @@ Manual deploy from the repo:
 
 ```bash
 pnpm --filter landing build
-pnpm --filter landing deploy   # wrangler deploy → lineitem-landing
+pnpm --filter landing run deploy   # wrangler deploy → lineitem-landing
 ```
+
+(`run` is required — bare `pnpm deploy` invokes pnpm's own built-in deploy command.)
 
 Connected to Git via **Workers Builds** (Workers & Pages → `lineitem-landing` →
 Settings → Builds), which auto-deploys `main`:
