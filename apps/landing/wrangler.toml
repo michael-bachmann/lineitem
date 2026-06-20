@@ -1,6 +1,12 @@
 name = "lineitem-landing"
 compatibility_date = "2026-06-01"
 
+# Only serve on the custom domains (lineitem.dev / www.lineitem.dev). Without these,
+# deploy re-enables the workers.dev URL and per-deploy preview URLs by default,
+# which would expose the site at a second, non-canonical hostname.
+workers_dev = false
+preview_urls = false
+
 # Static marketing site: no Worker script, just the Vite build served as assets.
 # `directory` is resolved relative to this file, so it points at apps/landing/dist.
 [assets]
