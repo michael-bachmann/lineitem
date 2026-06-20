@@ -75,7 +75,7 @@ export default function SiteFooter({ onFeedback }: { onFeedback: (kind: Feedback
             </span>
           </a>
           <p className="mt-[10px] max-w-[22em] text-[14px] text-muted">
-            Itemize your online orders in YNAB.
+            One charge, every category — itemized in YNAB.
           </p>
         </div>
         <div className="grid grid-cols-3 gap-7 max-[620px]:grid-cols-2">

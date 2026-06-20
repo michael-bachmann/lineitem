@@ -134,7 +134,7 @@ export default function QueueView({
           </span>
           <p className="m-0 max-w-[230px] text-[13.5px] leading-[1.5]">
             No transactions to review. Tap <b className="font-semibold text-muted">Sync</b> to check
-            for new Amazon charges.
+            for new Amazon and Target charges.
           </p>
         </div>
       ) : (

@@ -36,7 +36,7 @@ export default defineConfig({
   },
   manifest: ({ browser }) => ({
     name: "lineitem",
-    description: "Match YNAB transactions to Amazon orders and categorize line items",
+    description: "Match YNAB transactions to your Amazon and Target orders and split each charge into the right budget categories",
     // Each browser has its own stable-extension-ID mechanism, and each warns on
     // the other's — so they're mutually exclusive here:
     //  - Firefox: browser_specific_settings.gecko.id, which also pins the OAuth

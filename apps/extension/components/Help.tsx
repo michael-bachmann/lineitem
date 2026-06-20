@@ -136,7 +136,7 @@ export default function Help({ onBack, version = "0.0.0" }: HelpProps) {
           lineitem.dev
         </a>
         <br />
-        Made for YNAB + Amazon
+        Made for YNAB + Amazon &amp; Target
       </div>
     </div>
   );
