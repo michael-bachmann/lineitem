@@ -25,12 +25,12 @@ const FEATURES: { icon: ReactNode; title: string; body: string }[] = [
   {
     icon: <Icon.wand width={19} height={19} />,
     title: "Learns your categories",
-    body: "Backfill the last 12 months and LineItem suggests categories the way you'd assign them.",
+    body: "Backfill the last 12 months and lineitem suggests categories the way you'd assign them.",
   },
   {
     icon: <Icon.lock width={19} height={19} />,
     title: "Private by design",
-    body: "Order details are matched locally in your browser. The only thing LineItem touches is YNAB.",
+    body: "Order details are matched locally in your browser. The only thing lineitem touches is YNAB.",
   },
   {
     icon: <Crosshair />,

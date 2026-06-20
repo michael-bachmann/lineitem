@@ -29,7 +29,7 @@ export const FB_CONFIG: Record<FeedbackKind, FeedbackConfig> = {
     primaryLabel: "Your idea",
     primaryName: "suggestion",
     multiline: true,
-    placeholder: "What would make LineItem more useful?",
+    placeholder: "What would make lineitem more useful?",
     emailHint: "optional — only if you'd like a reply",
     submit: "Send suggestion",
     success: "Thanks for the idea! Every suggestion gets read.",
@@ -74,7 +74,7 @@ export function buildFeedbackForm({
   const cfg = FB_CONFIG[kind];
   const body = new FormData();
   body.append("access_key", FB_ACCESS_KEY);
-  body.append("subject", `LineItem · ${kind}`);
+  body.append("subject", `lineitem · ${kind}`);
   body.append("request_type", kind);
   body.append(cfg.primaryName, primary);
   if (email) body.append("email", email);

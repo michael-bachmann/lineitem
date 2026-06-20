@@ -7,8 +7,8 @@ export interface FaqEntry {
 
 export const FAQ: FaqEntry[] = [
   {
-    q: "How does LineItem match orders?",
-    a: "When you sync, LineItem looks at recent transactions from supported retailers in YNAB and finds the order with the closest amount and date. You confirm each match before anything is written back.",
+    q: "How does lineitem match orders?",
+    a: "When you sync, lineitem looks at recent transactions from supported retailers in YNAB and finds the order with the closest amount and date. You confirm each match before anything is written back.",
   },
   {
     q: "Will it change my budget without asking?",
@@ -20,10 +20,10 @@ export const FAQ: FaqEntry[] = [
   },
   {
     q: "Is my data sent anywhere?",
-    a: "Order details are matched locally in your browser. LineItem only talks to YNAB to read your categories and write the splits you approve.",
+    a: "Order details are matched locally in your browser. lineitem only talks to YNAB to read your categories and write the splits you approve.",
   },
   {
     q: "How much does it cost?",
-    a: "LineItem is free and open source. If it saves you time, you can buy the maintainer a coffee — but every feature is free, always.",
+    a: "lineitem is free and open source. If it saves you time, you can buy the maintainer a coffee — but every feature is free, always.",
   },
 ];

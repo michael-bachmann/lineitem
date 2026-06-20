@@ -17,7 +17,7 @@ export default function SiteNav({ scrolled = false }: { scrolled?: boolean }) {
       }`}
     >
       <Wrap className="flex h-[66px] items-center gap-5">
-        <a href="#top" aria-label="LineItem home" className="inline-flex items-center gap-[9px]">
+        <a href="#top" aria-label="lineitem home" className="inline-flex items-center gap-[9px]">
           <Mark size={28} className="rounded-[8px]" />
           <span className="text-[19px] font-bold lowercase tracking-[-0.02em] text-text">
             lineitem

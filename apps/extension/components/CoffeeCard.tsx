@@ -15,7 +15,7 @@ interface CoffeeCardProps {
 
 /** Donation ask, shared by the post-approval popup and the Help & About hero. */
 export default function CoffeeCard({
-  title = "Enjoying LineItem?",
+  title = "Enjoying lineitem?",
   sub,
   onDismiss,
   onCoffeeClick,

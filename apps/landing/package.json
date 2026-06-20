@@ -1,6 +1,6 @@
 {
   "name": "landing",
-  "description": "LineItem marketing site (lineitem.dev) — static Vite + React SPA",
+  "description": "lineitem marketing site (lineitem.dev) — static Vite + React SPA",
   "private": true,
   "version": "0.0.0",
   "type": "module",

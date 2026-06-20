@@ -32,7 +32,7 @@ export default function GetInvolved({ onFeedback }: { onFeedback: (kind: Feedbac
       <Wrap>
         <SectionHead
           eyebrow="Get involved"
-          title="Help shape LineItem."
+          title="Help shape lineitem."
           sub="It's free and open — your input is what drives the roadmap."
         />
         <div className="mx-auto flex max-w-[620px] flex-col gap-[10px]">

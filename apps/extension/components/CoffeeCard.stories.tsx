@@ -26,7 +26,7 @@ export const PostApproval: Story = {
   args: {
     sub: (
       <>
-        LineItem has categorized <b className="font-semibold text-text">324</b> line items for you so
+        lineitem has categorized <b className="font-semibold text-text">324</b> line items for you so
         far — all free and ad-free.
       </>
     ),

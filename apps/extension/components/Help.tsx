@@ -120,7 +120,7 @@ export default function Help({ onBack, version = "0.0.0" }: HelpProps) {
       </div>
 
       <div className="py-[6px] text-center text-[11.5px] leading-[1.7] text-faint">
-        LineItem v{version} ·{" "}
+        lineitem v{version} ·{" "}
         <a
           href={LINKS.website}
           target="_blank"

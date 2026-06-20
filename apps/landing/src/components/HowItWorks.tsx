@@ -9,7 +9,7 @@ const STEPS: { icon: ReactNode; title: string; body: string }[] = [
   {
     icon: <Icon.sync width={22} height={22} />,
     title: "Sync",
-    body: "LineItem finds your recent retailer charges in YNAB and matches each one to the order behind it.",
+    body: "lineitem finds your recent retailer charges in YNAB and matches each one to the order behind it.",
   },
   {
     icon: <Icon.wand width={22} height={22} />,

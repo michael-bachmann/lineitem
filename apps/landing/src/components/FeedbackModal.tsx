@@ -13,7 +13,7 @@ const HEAD: Record<FeedbackKind, { title: string; desc: string; Glyph: Glyph }> 
   },
   suggestion: {
     title: "Make a suggestion",
-    desc: "Got an idea to make LineItem better? We're listening.",
+    desc: "Got an idea to make lineitem better? We're listening.",
     Glyph: Icon.bulb,
   },
   issue: {
