@@ -115,4 +115,4 @@ YNAB redirect URI to register on the OAuth app: `https://<extension-id>.chromium
 
 ## Repository
 
-[github.com/michael-bachmann/lineitem](https://github.com/michael-bachmann/lineitem) — private during pre-distribution.
+[github.com/michael-bachmann/lineitem](https://github.com/michael-bachmann/lineitem) — open source under the MIT License.
