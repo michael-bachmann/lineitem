@@ -3,6 +3,7 @@ import { Icon } from "@lineitem/ui";
 import { Wrap } from "./Wrap";
 import { SectionHead } from "./SectionHead";
 import StepCard from "./StepCard";
+import PanelMock from "./PanelMock";
 
 const STEPS: { icon: ReactNode; title: string; body: string }[] = [
   {
@@ -30,11 +31,18 @@ export default function HowItWorks() {
           eyebrow="How it works"
           title="From a mystery charge to a clean budget in three steps."
         />
-        <ol className="grid grid-cols-1 gap-[18px] min-[861px]:grid-cols-3">
-          {STEPS.map((step, i) => (
-            <StepCard key={step.title} n={i + 1} {...step} />
-          ))}
-        </ol>
+        {/* Queue mock beside the steps: the detail hero showed the "magic"; this
+            shows where it fits the routine. Mock drops below the steps ≤860px. */}
+        <div className="grid grid-cols-1 items-center gap-8 min-[861px]:grid-cols-[320px_1fr] min-[861px]:gap-11">
+          <div className="order-2 flex justify-center min-[861px]:order-none">
+            <PanelMock variant="queue" />
+          </div>
+          <ol className="order-1 grid gap-[14px] min-[861px]:order-none">
+            {STEPS.map((step, i) => (
+              <StepCard key={step.title} n={i + 1} {...step} />
+            ))}
+          </ol>
+        </div>
       </Wrap>
     </section>
   );
