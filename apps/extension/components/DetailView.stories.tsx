@@ -96,7 +96,3 @@ type Story = StoryObj<typeof DetailView>;
 export const MatchedPartial: Story = { args: { entry: entry(matched(PARTIAL)) } };
 export const MatchedReady: Story = { args: { entry: entry(matched(READY)) } };
 export const MatchedRefund: Story = { args: { entry: entry(matched(READY), 42990) } };
-export const Loading: Story = { args: { entry: entry({ status: "loading" }) } };
-export const NoMatch: Story = { args: { entry: entry({ status: "no_match" }) } };
-export const AuthRequired: Story = { args: { entry: entry({ status: "auth_required" }) } };
-export const ScrapeError: Story = { args: { entry: entry({ status: "error", message: "parse failed" }) } };

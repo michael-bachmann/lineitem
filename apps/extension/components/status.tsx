@@ -1,12 +1,7 @@
-import { Icon, type IconComponent, type IconName, Spinner } from "@lineitem/ui";
+import { Icon, type IconComponent } from "@lineitem/ui";
 
 export type StatusKind = "ready" | "warn" | "neutral" | "err";
 export type TileKind = "ready" | "ok" | "warn" | "neutral" | "err";
-
-export interface StatusAction {
-  label: string;
-  icon: IconName;
-}
 
 export interface StatusInfo {
   /** Drives the transaction-row dot + status-text color (TransactionCard). */
@@ -16,10 +11,6 @@ export interface StatusInfo {
   tile: TileKind;
   text: string;
   glyph?: IconComponent;
-  spin?: boolean;
-  /** One-line "why" shown on failure states. */
-  reason?: string;
-  action?: StatusAction;
 }
 
 export interface StatusInput {
@@ -47,16 +38,12 @@ export function statusInfo({ status, needs }: StatusInput): StatusInfo {
         text: `${n} item${n > 1 ? "s" : ""} ${n > 1 ? "need" : "needs"} a category`,
       };
     }
-    case "loading":
-      return { kind: "neutral", tile: "neutral", spin: true, text: "Checking order…" };
     case "nomatch":
       return {
         kind: "neutral",
         tile: "neutral",
         glyph: Icon.search,
         text: "No match found",
-        reason: "We couldn’t find an Amazon order near this amount and date.",
-        action: { label: "Find order manually", icon: "search" },
       };
     case "auth":
       // Retailer-neutral: this status is shown for Amazon and Target alike, and
@@ -67,8 +54,6 @@ export function statusInfo({ status, needs }: StatusInput): StatusInfo {
         tile: "neutral",
         glyph: Icon.lock,
         text: "Sign in to read",
-        reason: "You’re signed out, so this order can’t be read. Sign in, then tap Sync.",
-        action: { label: "Open store", icon: "ext" },
       };
     case "error":
       return {
@@ -76,8 +61,6 @@ export function statusInfo({ status, needs }: StatusInput): StatusInfo {
         tile: "err",
         glyph: Icon.alertCircle,
         text: "Couldn’t read order",
-        reason: "Amazon’s order page changed, so the order couldn’t be parsed.",
-        action: { label: "Try again", icon: "refresh" },
       };
     default:
       return { kind: "neutral", tile: "neutral", glyph: Icon.receipt, text: "Matched" };
@@ -109,7 +92,7 @@ export function StatusTile({
       className={`flex flex-none items-center justify-center rounded-control ${TILE[info.tile]} ${className}`}
       style={{ width: size, height: size }}
     >
-      {info.spin ? <Spinner size={16} /> : Glyph ? <Glyph width={19} height={19} /> : null}
+      {Glyph ? <Glyph width={19} height={19} /> : null}
     </div>
   );
 }

@@ -173,7 +173,6 @@ export default function App() {
           setView("queue");
         }}
         onApprove={handleApprove}
-        onOpenRetailer={handleOpenRetailer}
       />
     );
   }
