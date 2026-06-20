@@ -36,7 +36,7 @@ export default function Hero() {
       </div>
 
       <div className="flex justify-center">
-        <PanelMock />
+        <PanelMock variant="detail" />
       </div>
     </Wrap>
   );

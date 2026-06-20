@@ -9,4 +9,12 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof PanelMock>;
 
-export const Default: Story = {};
+/** Hero mock: a charge cracked open into itemized, categorized line items. */
+export const Detail: Story = {
+  args: { variant: "detail" },
+};
+
+/** How-it-works mock: the grouped review queue. */
+export const Queue: Story = {
+  args: { variant: "queue" },
+};
