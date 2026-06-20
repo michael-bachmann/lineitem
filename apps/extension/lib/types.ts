@@ -194,7 +194,6 @@ export type SyncStatus = "idle" | "syncing" | "done" | "error";
 // ---------------------------------------------------------------------------
 
 export type OrderMatchStatus =
-  | { status: "loading" }
   | { status: "matched"; order: AllocatedTransaction; classifiedItems: ClassifiedItem[] }
   | { status: "no_match" }
   | { status: "auth_required" }

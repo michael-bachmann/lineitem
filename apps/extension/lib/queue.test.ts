@@ -14,7 +14,6 @@ const item = (id: string | null) => ({ suggestedCategoryId: id }) as ClassifiedI
 
 describe("entryStatus", () => {
   it("maps the non-matched statuses", () => {
-    expect(entryStatus(entry({ status: "loading" })).status).toBe("loading");
     expect(entryStatus(entry({ status: "no_match" })).status).toBe("nomatch");
     expect(entryStatus(entry({ status: "auth_required" })).status).toBe("auth");
     expect(entryStatus(entry({ status: "error", message: "x" })).status).toBe("error");

@@ -31,38 +31,29 @@ describe("statusInfo", () => {
     expect(statusInfo({ status: "partial" }).text).toBe("1 item needs a category");
   });
 
-  it("maps loading → neutral spinner, no glyph", () => {
-    const info = statusInfo({ status: "loading" });
-    expect(info).toMatchObject({ kind: "neutral", tile: "neutral", spin: true, text: "Checking order…" });
-    expect(info.glyph).toBeUndefined();
-  });
-
-  it("maps nomatch → neutral with reason + manual-find action", () => {
+  it("maps nomatch → neutral", () => {
     expect(statusInfo({ status: "nomatch" })).toMatchObject({
       kind: "neutral",
       tile: "neutral",
       glyph: Icon.search,
       text: "No match found",
-      action: { label: "Find order manually", icon: "search" },
     });
   });
 
-  it("maps auth → neutral with a retailer-neutral sign-in action", () => {
+  it("maps auth → neutral sign-in", () => {
     expect(statusInfo({ status: "auth" })).toMatchObject({
       kind: "neutral",
       glyph: Icon.lock,
       text: "Sign in to read",
-      action: { label: "Open store", icon: "ext" },
     });
   });
 
-  it("maps error → err with try-again action", () => {
+  it("maps error → err", () => {
     expect(statusInfo({ status: "error" })).toMatchObject({
       kind: "err",
       tile: "err",
       glyph: Icon.alertCircle,
       text: "Couldn’t read order",
-      action: { label: "Try again", icon: "refresh" },
     });
   });
 

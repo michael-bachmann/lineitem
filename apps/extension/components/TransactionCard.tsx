@@ -45,7 +45,6 @@ export default function TransactionCard({
   onOpen?: () => void;
 }) {
   const info = statusInfo({ status: txn.status, needs: txn.needs });
-  const loading = txn.status === "loading";
 
   const body: ReactNode = (
     <>
@@ -69,18 +68,14 @@ export default function TransactionCard({
     </>
   );
 
-  // A still-resolving row isn't a disabled action — render it as a non-interactive
-  // element marked aria-busy, not a <button disabled> (which AT skips).
-  if (loading) {
-    return (
-      <div className={CARD} aria-busy="true">
-        {body}
-      </div>
-    );
+  // A row without an open handler (non-matched states) isn't actionable — render
+  // it as a static element, not a <button>.
+  if (!onOpen) {
+    return <div className={CARD}>{body}</div>;
   }
 
   return (
-    <button type="button" onClick={() => onOpen?.()} className={CARD}>
+    <button type="button" onClick={onOpen} className={CARD}>
       {body}
     </button>
   );

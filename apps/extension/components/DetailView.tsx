@@ -4,17 +4,14 @@ import { formatCents, millunitsToCents } from "@/lib/money";
 import ItemCard from "@/components/ItemCard";
 import SplitBreakdown from "@/components/SplitBreakdown";
 import { BulkApply } from "@/components/BulkApply";
-import { BackLink, Button, SectionLabel, StatusMessage, Spinner, Icon } from "@lineitem/ui";
-import { StatusTile, statusInfo } from "@/components/status";
-import { retailerLabel } from "@/lib/registry";
+import { BackLink, Button, SectionLabel } from "@lineitem/ui";
+import { StatusTile } from "@/components/status";
 
 interface DetailViewProps {
   entry: QueueEntry;
   categories: Category[];
   onBack: () => void;
   onApprove: (ynabTransactionId: string, items: ApprovalItem[]) => Promise<void>;
-  /** Open/focus the retailer tab so the user can sign in (auth_required state). */
-  onOpenRetailer?: (retailer: string) => void;
 }
 
 /** Parse the order id from an orderKey like "amazon:112-1234567-1234567". */
@@ -23,9 +20,7 @@ function parseOrderId(orderKey: string): string {
   return i >= 0 ? orderKey.slice(i + 1) : orderKey;
 }
 
-const STATUS_OF = { no_match: "nomatch", auth_required: "auth", error: "error" } as const;
-
-export default function DetailView({ entry, categories, onBack, onApprove, onOpenRetailer }: DetailViewProps) {
+export default function DetailView({ entry, categories, onBack, onApprove }: DetailViewProps) {
   const { ynabTransaction, matchStatus } = entry;
 
   const [selectedCategories, setSelectedCategories] = useState<Map<number, string>>(() => {
@@ -37,58 +32,10 @@ export default function DetailView({ entry, categories, onBack, onApprove, onOpe
   });
   const [approving, setApproving] = useState(false);
 
-  // ---- non-matched states ----
-  if (matchStatus.status !== "matched") {
-    if (matchStatus.status === "loading") {
-      return (
-        <div className="flex min-h-screen flex-col gap-3 bg-bg p-4 text-text">
-          <BackLink onClick={onBack} />
-          <StatusMessage kind="muted">
-            <Spinner size={16} /> Loading order match…
-          </StatusMessage>
-        </div>
-      );
-    }
-
-    const info = statusInfo({ status: STATUS_OF[matchStatus.status] });
-    const ActionIcon = info.action ? Icon[info.action.icon] : null;
-    return (
-      <div className="flex min-h-screen flex-col gap-3 bg-bg p-4 text-text">
-        <BackLink onClick={onBack} />
-        <div
-          role={matchStatus.status === "error" ? "alert" : undefined}
-          className="flex flex-col gap-[11px] px-[2px] pt-[14px]"
-        >
-          <div className="flex items-center gap-[11px]">
-            <span aria-hidden className="contents">
-              <StatusTile status={STATUS_OF[matchStatus.status]} size={38} />
-            </span>
-            <h2 className="m-0 text-[15.5px] font-semibold tracking-[-0.01em] text-text">
-              {info.text}
-            </h2>
-          </div>
-          {info.reason && (
-            <p className="m-0 text-[13.5px] leading-[1.55] text-muted">{info.reason}</p>
-          )}
-          {info.action && (
-            <Button
-              variant={matchStatus.status === "auth_required" ? "primary" : "secondary"}
-              onClick={
-                matchStatus.status === "auth_required" && onOpenRetailer
-                  ? () => onOpenRetailer(entry.retailer)
-                  : onBack
-              }
-            >
-              {ActionIcon && <ActionIcon aria-hidden width={15} height={15} />}{" "}
-              {matchStatus.status === "auth_required"
-                ? `Open ${retailerLabel(entry.retailer)}`
-                : info.action.label}
-            </Button>
-          )}
-        </div>
-      </div>
-    );
-  }
+  // Only matched entries open the detail screen — non-matched states resolve
+  // inline on the queue (sign-in via the resolution card; no_match/error are
+  // non-interactive). This guard just narrows the union for the render below.
+  if (matchStatus.status !== "matched") return null;
 
   // ---- matched ----
   const { order, classifiedItems } = matchStatus;

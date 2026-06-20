@@ -32,7 +32,6 @@ interface QueueViewProps {
 const GROUPS: { key: string; label: string; has: (s: QueueDisplayStatus) => boolean }[] = [
   { key: "review", label: "Needs review", has: (s) => s === "partial" },
   { key: "ready", label: "Ready to approve", has: (s) => s === "classified" },
-  { key: "working", label: "Checking", has: (s) => s === "loading" },
   { key: "unmatched", label: "Couldn’t match", has: (s) => ["nomatch", "auth", "error"].includes(s) },
 ];
 
@@ -58,8 +57,12 @@ export default function QueueView({
   onDismissCoffee,
   onCoffeeClick,
 }: QueueViewProps) {
-  const vms = queue.map((entry): TransactionVM & { onOpen: () => void } => {
+  const vms = queue.map((entry): TransactionVM & { onOpen?: () => void } => {
     const { status, needs } = entryStatus(entry);
+    // Only matched rows open the detail screen. Non-matched states (no_match,
+    // auth, error) resolve inline — sign-in via the resolution card above — so
+    // their rows are non-interactive.
+    const matched = status === "classified" || status === "partial";
     return {
       id: entry.ynabTransaction.id,
       payee: entry.ynabTransaction.payee_name ?? "Unknown payee",
@@ -70,7 +73,7 @@ export default function QueueView({
       dateShort: formatDate(entry.ynabTransaction.date),
       status,
       needs,
-      onOpen: () => onSelectEntry(entry),
+      onOpen: matched ? () => onSelectEntry(entry) : undefined,
     };
   });
 

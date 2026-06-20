@@ -10,7 +10,6 @@ export function isFullyClassified(entry: QueueEntry): boolean {
 
 /** Presentational status vocabulary used by the queue/detail UI (`statusInfo`). */
 export type QueueDisplayStatus =
-  | "loading"
   | "classified"
   | "partial"
   | "nomatch"
@@ -22,8 +21,6 @@ export type QueueDisplayStatus =
 export function entryStatus(entry: QueueEntry): { status: QueueDisplayStatus; needs: number } {
   const m = entry.matchStatus;
   switch (m.status) {
-    case "loading":
-      return { status: "loading", needs: 0 };
     case "no_match":
       return { status: "nomatch", needs: 0 };
     case "auth_required":
