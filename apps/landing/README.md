@@ -13,16 +13,32 @@ pnpm --filter landing compile      # type-check (tsc --noEmit)
 pnpm --filter landing build        # production build → dist/
 ```
 
-## Deploy (Cloudflare Pages)
+## Deploy (Cloudflare Workers — static assets)
 
-Static build, no SSR and no Pages Functions (the feedback form posts straight to
-Web3Forms). Configure the Pages project with:
+Deployed as a static-assets Worker (no script): the Vite build in `dist/` is
+served straight from Cloudflare's edge. No SSR, no functions — the feedback form
+posts directly to Web3Forms. Config lives in `wrangler.toml`.
+
+Manual deploy from the repo:
+
+```bash
+pnpm --filter landing build
+pnpm --filter landing run deploy   # wrangler deploy → lineitem-landing
+```
+
+(`run` is required — bare `pnpm deploy` invokes pnpm's own built-in deploy command.)
+
+Connected to Git via **Workers Builds** (Workers & Pages → `lineitem-landing` →
+Settings → Builds), which auto-deploys `main`:
 
 - **Build command:** `pnpm --filter landing build`
-- **Output directory:** `apps/landing/dist`
+- **Deploy command:** `pnpm --filter landing exec wrangler deploy`
+- **Root directory:** repo root (so pnpm resolves the `@lineitem/ui`
+  `workspace:*` link from source)
 
-A `_redirects` SPA fallback isn't needed — this is a single anchor-scrolled page
-with no client-side routing.
+Custom domain `lineitem.dev` is attached under the Worker's **Domains & Routes**.
+A SPA fallback isn't needed — this is a single anchor-scrolled page with no
+client-side routing.
 
 ## Environment
 
