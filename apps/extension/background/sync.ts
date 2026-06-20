@@ -1,4 +1,5 @@
 import { NO_MATCH_REASON } from "@/lib/matcher";
+import { NOT_CONNECTED } from "@/lib/messages";
 import { getSettings } from "@/lib/settings";
 import { getUnapprovedTransactions } from "@/lib/ynab";
 import { getAllocatedTransaction, putAllocatedTransactions } from "@/lib/db";
@@ -35,7 +36,7 @@ async function performSyncInner(): Promise<SyncResult> {
   try {
     const settings = await getSettings();
     if (!settings.accessToken || !settings.planId) {
-      return { error: "Not connected to YNAB" };
+      return { error: NOT_CONNECTED };
     }
 
     // 1. IDENTIFY: fetch YNAB charges, group by retailer

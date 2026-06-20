@@ -1,6 +1,7 @@
 import type { QueueEntry, BlockedRetailer } from "@/lib/types";
 import { entryStatus, isFullyClassified, type QueueDisplayStatus } from "@/lib/queue";
 import { millunitsToCents } from "@/lib/money";
+import { plural } from "@/lib/intl";
 import TransactionCard, { type TransactionVM } from "@/components/TransactionCard";
 import { BrandRow, IconButton, Button, SectionLabel, Icon } from "@lineitem/ui";
 import CoffeeCard from "@/components/CoffeeCard";
@@ -140,7 +141,8 @@ export default function QueueView({
         <>
           {total > 0 && (
             <div className="text-[13px] text-faint">
-              <b className="font-semibold text-muted">{total}</b> transaction{total === 1 ? "" : "s"}
+              <b className="font-semibold text-muted">{total}</b>{" "}
+              {plural(total, { one: "transaction", other: "transactions" })}
               <span className="mx-1 opacity-50">·</span>
               <b className="font-semibold text-muted">{readyCount}</b> ready
             </div>

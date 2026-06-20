@@ -1,3 +1,4 @@
+import { NOT_CONNECTED } from "@/lib/messages";
 import { getSettings } from "@/lib/settings";
 import { updateTransaction } from "@/lib/ynab";
 import {
@@ -180,7 +181,7 @@ export async function approveTransaction(
   try {
     const settings = await getSettings();
     if (!settings.accessToken || !settings.planId) {
-      return { error: "Not connected to YNAB" };
+      return { error: NOT_CONNECTED };
     }
 
     const tx = await getAllocatedTransaction(ynabTransactionId);
