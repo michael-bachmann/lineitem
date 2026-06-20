@@ -13,6 +13,8 @@ import type {
   AllocatedTransaction,
   BackfillProgress,
   BackfillResult,
+  BackfillRetailerProgress,
+  RetailerBlockReason,
   ScrapedOrder,
   YnabCharge,
   YnabTransaction,
@@ -73,9 +75,11 @@ export async function runBackfill(options: BackfillOptions): Promise<BackfillRes
   // them in parallel would open multiple tabs at once. Sync's natural
   // bound of "one retailer per sync cycle" doesn't apply here.
   let aggregate: RetailerTotals = { matched: 0, unmatched: 0, failed: 0, itemsWritten: 0 };
+  const runByRetailer = new Map<string, RetailerTotals>();
   for (const [retailerId, group] of Object.entries(byRetailer)) {
     signal?.throwIfAborted();
     const r = await runForRetailer(retailerId, group, { signal, onProgress });
+    runByRetailer.set(retailerId, r);
     aggregate = {
       matched: aggregate.matched + r.matched,
       unmatched: aggregate.unmatched + r.unmatched,
@@ -89,6 +93,21 @@ export async function runBackfill(options: BackfillOptions): Promise<BackfillRes
   const itemsLearned = assessment.alreadyBackfilledItems + aggregate.itemsWritten;
   const hasUnbackfilled = transactionsBackfilled < assessment.totalEligible;
 
+  // Per-retailer breakdown for the done card. `matched` is cumulative
+  // (pre-existing allocations + this run's matches); retailers fully backfilled
+  // before this run have no `runByRetailer` entry and contribute only their
+  // already-allocated count.
+  const byRetailerProgress: BackfillRetailerProgress[] = [...assessment.perRetailer]
+    .map(([retailer, counts]) => {
+      const run = runByRetailer.get(retailer);
+      return {
+        retailer,
+        matched: counts.alreadyMatched + (run?.matched ?? 0),
+        failed: run?.failed ?? 0,
+        ...(run?.blocked ? { blocked: run.blocked } : {}),
+      };
+    });
+
   // Debug breakdown — surface internal counters that the UI deliberately hides.
   console.log("[backfill] done", {
     totalEligible: assessment.totalEligible,
@@ -98,7 +117,13 @@ export async function runBackfill(options: BackfillOptions): Promise<BackfillRes
     failed: aggregate.failed,
   });
 
-  return { transactionsBackfilled, itemsLearned, hasUnbackfilled, failed: aggregate.failed };
+  return {
+    transactionsBackfilled,
+    itemsLearned,
+    hasUnbackfilled,
+    failed: aggregate.failed,
+    byRetailer: byRetailerProgress,
+  };
 }
 
 interface TaggedTx {
@@ -127,6 +152,9 @@ interface CandidateAssessment {
   /** Items in AllocatedTransactions for eligible tx that were already backfilled
    *  before this run. Added to this run's items for the cumulative total. */
   alreadyBackfilledItems: number;
+  /** Per-retailer already-allocated tx count (keyed by every retailer with any
+   *  eligible tx), for the done card's per-retailer "learned N orders" line. */
+  perRetailer: Map<string, { alreadyMatched: number }>;
 }
 
 /** Walk the YNAB tx set once: bucket each into eligible-pending,
@@ -136,7 +164,7 @@ interface CandidateAssessment {
 async function assessCandidates(txs: YnabTransaction[]): Promise<CandidateAssessment> {
   type Outcome =
     | { kind: "pending"; tagged: TaggedTx }
-    | { kind: "already"; items: number }
+    | { kind: "already"; retailer: string; items: number }
     | null;
 
   const outcomes = await Promise.all(
@@ -144,7 +172,7 @@ async function assessCandidates(txs: YnabTransaction[]): Promise<CandidateAssess
       const eligibility = backfillEligibility(tx);
       if (!eligibility) return null;
       const existing = await getAllocatedTransaction(tx.id);
-      if (existing) return { kind: "already", items: existing.items.length };
+      if (existing) return { kind: "already", retailer: eligibility.retailer, items: existing.items.length };
       return { kind: "pending", tagged: { tx, retailer: eligibility.retailer } };
     }),
   );
@@ -153,7 +181,15 @@ async function assessCandidates(txs: YnabTransaction[]): Promise<CandidateAssess
   const pending = eligible.flatMap((o) => (o.kind === "pending" ? [o.tagged] : []));
   const alreadyBackfilledItems = sumBy(eligible, (o) => (o.kind === "already" ? o.items : 0));
 
-  return { pending, totalEligible: eligible.length, alreadyBackfilledItems };
+  const perRetailer = new Map<string, { alreadyMatched: number }>();
+  for (const o of eligible) {
+    const retailer = o.kind === "pending" ? o.tagged.retailer : o.retailer;
+    const cur = perRetailer.get(retailer) ?? { alreadyMatched: 0 };
+    if (o.kind === "already") cur.alreadyMatched += 1;
+    perRetailer.set(retailer, cur);
+  }
+
+  return { pending, totalEligible: eligible.length, alreadyBackfilledItems, perRetailer };
 }
 
 interface RetailerTotals {
@@ -161,6 +197,8 @@ interface RetailerTotals {
   unmatched: number;
   failed: number;
   itemsWritten: number;
+  /** The retailer hit a sign-in wall this run (its orders were unreadable). */
+  blocked?: RetailerBlockReason;
 }
 
 /**
@@ -227,7 +265,7 @@ async function runForRetailer(
   const charges = group.map((g) => toYnabCharge(g.tx));
 
   try {
-    const { matched, unmatched } = await adapter.scrapeMatchedOrders(charges, {
+    const { matched, unmatched, blocked } = await adapter.scrapeMatchedOrders(charges, {
       maxPages: BACKFILL_MAX_PAGES,
       signal: ctx.signal,
       onScrapeProgress: ({ index, total }) =>
@@ -266,6 +304,7 @@ async function runForRetailer(
         (unmatched.length - readFailed),
       failed: readFailed,
       itemsWritten: entries.length,
+      blocked: blocked?.reason,
     };
   } catch (err) {
     // Re-throw abort so runBackfill stops the per-retailer loop instead of

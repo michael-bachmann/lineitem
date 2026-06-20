@@ -1,9 +1,10 @@
-import type { QueueEntry } from "@/lib/types";
+import type { QueueEntry, BlockedRetailer } from "@/lib/types";
 import { entryStatus, isFullyClassified, type QueueDisplayStatus } from "@/lib/queue";
 import { millunitsToCents } from "@/lib/money";
 import TransactionCard, { type TransactionVM } from "@/components/TransactionCard";
 import { BrandRow, IconButton, Button, SectionLabel, Icon } from "@lineitem/ui";
 import CoffeeCard from "@/components/CoffeeCard";
+import ResolutionCard from "@/components/ResolutionCard";
 
 interface QueueViewProps {
   queue: QueueEntry[];
@@ -14,6 +15,10 @@ interface QueueViewProps {
   onApproveAll: () => void;
   onSelectEntry: (entry: QueueEntry) => void;
   onSettings: () => void;
+  /** Per-retailer sign-in walls the last sync hit, surfaced above the queue. */
+  blocked?: BlockedRetailer[];
+  /** Open/focus a retailer's tab so the user can sign in. */
+  onOpenRetailer: (retailer: string) => void;
   /** Show the post-approval donation ask above the queue. */
   showCoffee?: boolean;
   /** Lifetime classified-item count, for the ask copy. */
@@ -46,6 +51,8 @@ export default function QueueView({
   onApproveAll,
   onSelectEntry,
   onSettings,
+  blocked,
+  onOpenRetailer,
   showCoffee,
   coffeeClassified,
   onDismissCoffee,
@@ -96,6 +103,10 @@ export default function QueueView({
           <Icon.alertCircle aria-hidden />
           <span>Sync failed: {error}</span>
         </div>
+      )}
+
+      {blocked && blocked.length > 0 && (
+        <ResolutionCard blocked={blocked} onOpenRetailer={onOpenRetailer} />
       )}
 
       {showCoffee && (

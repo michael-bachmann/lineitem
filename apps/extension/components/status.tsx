@@ -59,13 +59,16 @@ export function statusInfo({ status, needs }: StatusInput): StatusInfo {
         action: { label: "Find order manually", icon: "search" },
       };
     case "auth":
+      // Retailer-neutral: this status is shown for Amazon and Target alike, and
+      // the row already names the payee. The retailer-specific call to action
+      // lives in the resolution card above the queue.
       return {
         kind: "neutral",
         tile: "neutral",
         glyph: Icon.lock,
-        text: "Sign in to Amazon",
-        reason: "You’re signed out of Amazon, so the order can’t be read.",
-        action: { label: "Open Amazon", icon: "ext" },
+        text: "Sign in to read",
+        reason: "You’re signed out, so this order can’t be read. Sign in, then tap Sync.",
+        action: { label: "Open store", icon: "ext" },
       };
     case "error":
       return {

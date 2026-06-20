@@ -3,6 +3,7 @@ import type {
   ApprovalItem,
   BackfillProgress,
   BackfillResult,
+  BlockedRetailer,
   Category,
   MessageRequest,
   QueueEntry,
@@ -67,8 +68,17 @@ export async function getCategories(): Promise<{ categories?: Category[]; error?
   return (await send({ type: "GET_CATEGORIES" })) as { categories?: Category[]; error?: string };
 }
 
-export async function sync(): Promise<{ queue?: QueueEntry[]; error?: string }> {
-  return (await send({ type: "SYNC" })) as { queue?: QueueEntry[]; error?: string };
+export async function sync(): Promise<{ queue?: QueueEntry[]; blocked?: BlockedRetailer[]; error?: string }> {
+  return (await send({ type: "SYNC" })) as {
+    queue?: QueueEntry[];
+    blocked?: BlockedRetailer[];
+    error?: string;
+  };
+}
+
+/** Open/focus the retailer's tab so the user can sign in, then they tap Sync. */
+export async function openRetailer(retailer: string): Promise<{ error?: string }> {
+  return (await send({ type: "OPEN_RETAILER", retailer })) as { error?: string };
 }
 
 export async function approveTransaction(

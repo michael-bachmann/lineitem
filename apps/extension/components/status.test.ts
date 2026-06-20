@@ -47,12 +47,12 @@ describe("statusInfo", () => {
     });
   });
 
-  it("maps auth → neutral with open-Amazon action", () => {
+  it("maps auth → neutral with a retailer-neutral sign-in action", () => {
     expect(statusInfo({ status: "auth" })).toMatchObject({
       kind: "neutral",
       glyph: Icon.lock,
-      text: "Sign in to Amazon",
-      action: { label: "Open Amazon", icon: "ext" },
+      text: "Sign in to read",
+      action: { label: "Open store", icon: "ext" },
     });
   });
 

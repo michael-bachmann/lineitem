@@ -14,12 +14,14 @@ import type {
   YnabCharge,
   AllocatedTransaction,
   QueueEntry,
+  BlockedRetailer,
+  SyncResult,
 } from "@/lib/types";
 
 /** Deduplicate concurrent sync calls. */
-let activeSyncPromise: Promise<{ queue: QueueEntry[] } | { error: string }> | null = null;
+let activeSyncPromise: Promise<SyncResult> | null = null;
 
-export async function performSync(): Promise<{ queue: QueueEntry[] } | { error: string }> {
+export async function performSync(): Promise<SyncResult> {
   if (activeSyncPromise) return activeSyncPromise;
   activeSyncPromise = performSyncInner();
   try {
@@ -29,7 +31,7 @@ export async function performSync(): Promise<{ queue: QueueEntry[] } | { error: 
   }
 }
 
-async function performSyncInner(): Promise<{ queue: QueueEntry[] } | { error: string }> {
+async function performSyncInner(): Promise<SyncResult> {
   try {
     const settings = await getSettings();
     if (!settings.accessToken || !settings.planId) {
@@ -74,13 +76,31 @@ async function performSyncInner(): Promise<{ queue: QueueEntry[] } | { error: st
 
     const allAllocated: AllocatedTransaction[] = [];
     const errorEntries: QueueEntry[] = [];
+    const blockedRetailers: BlockedRetailer[] = [];
 
     for (const [retailerId, retailerEntries] of Object.entries(chargesByRetailer)) {
       const adapter = getAdapter(retailerId);
       const retailerCharges = retailerEntries.map((e) => e.charge);
 
       // 2. SCRAPE + MATCH (adapter owns tab lifecycle and cleanup)
-      const { matched, unmatched } = await adapter.scrapeMatchedOrders(retailerCharges);
+      const { matched, unmatched, blocked } = await adapter.scrapeMatchedOrders(retailerCharges);
+
+      // A sign-in wall (signed out / mid-walk step-up). Surface the affected
+      // charges as `auth_required` queue entries (the "Sign in to {retailer}"
+      // state) and a per-retailer summary for the resolution card. These charges
+      // are disjoint from `unmatched`, so no double-counting below.
+      if (blocked) {
+        blockedRetailers.push({ retailer: retailerId, reason: blocked.reason, count: blocked.charges.length });
+        for (const charge of blocked.charges) {
+          const tx = entryById.get(charge.ynabTransactionId)?.tx;
+          if (!tx) continue;
+          errorEntries.push({
+            ynabTransaction: tx,
+            retailer: retailerId,
+            matchStatus: { status: "auth_required" },
+          });
+        }
+      }
 
       // 2.5 GUARD: drop orders whose scraped items don't reconcile to the
       // retailer's displayed Item(s) Subtotal. Surfaces as error queue
@@ -154,7 +174,10 @@ async function performSyncInner(): Promise<{ queue: QueueEntry[] } | { error: st
     }
 
     // 6. QUEUE
-    return { queue: [...fastPath, ...matchedEntries, ...errorEntries] };
+    return {
+      queue: [...fastPath, ...matchedEntries, ...errorEntries],
+      ...(blockedRetailers.length > 0 ? { blocked: blockedRetailers } : {}),
+    };
   } catch (e) {
     return { error: e instanceof Error ? e.message : "Sync failed" };
   }

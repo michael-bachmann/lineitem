@@ -6,12 +6,15 @@ import SplitBreakdown from "@/components/SplitBreakdown";
 import { BulkApply } from "@/components/BulkApply";
 import { BackLink, Button, SectionLabel, StatusMessage, Spinner, Icon } from "@lineitem/ui";
 import { StatusTile, statusInfo } from "@/components/status";
+import { retailerLabel } from "@/lib/registry";
 
 interface DetailViewProps {
   entry: QueueEntry;
   categories: Category[];
   onBack: () => void;
   onApprove: (ynabTransactionId: string, items: ApprovalItem[]) => Promise<void>;
+  /** Open/focus the retailer tab so the user can sign in (auth_required state). */
+  onOpenRetailer?: (retailer: string) => void;
 }
 
 /** Parse the order id from an orderKey like "amazon:112-1234567-1234567". */
@@ -22,7 +25,7 @@ function parseOrderId(orderKey: string): string {
 
 const STATUS_OF = { no_match: "nomatch", auth_required: "auth", error: "error" } as const;
 
-export default function DetailView({ entry, categories, onBack, onApprove }: DetailViewProps) {
+export default function DetailView({ entry, categories, onBack, onApprove, onOpenRetailer }: DetailViewProps) {
   const { ynabTransaction, matchStatus } = entry;
 
   const [selectedCategories, setSelectedCategories] = useState<Map<number, string>>(() => {
@@ -70,9 +73,16 @@ export default function DetailView({ entry, categories, onBack, onApprove }: Det
           {info.action && (
             <Button
               variant={matchStatus.status === "auth_required" ? "primary" : "secondary"}
-              onClick={onBack}
+              onClick={
+                matchStatus.status === "auth_required" && onOpenRetailer
+                  ? () => onOpenRetailer(entry.retailer)
+                  : onBack
+              }
             >
-              {ActionIcon && <ActionIcon aria-hidden width={15} height={15} />} {info.action.label}
+              {ActionIcon && <ActionIcon aria-hidden width={15} height={15} />}{" "}
+              {matchStatus.status === "auth_required"
+                ? `Open ${retailerLabel(entry.retailer)}`
+                : info.action.label}
             </Button>
           )}
         </div>

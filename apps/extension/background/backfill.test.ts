@@ -342,6 +342,71 @@ describe("runBackfill — happy path", () => {
   });
 });
 
+describe("runBackfill — per-retailer breakdown", () => {
+  it("reports matched per retailer", async () => {
+    getTransactionsSinceMock.mockResolvedValue([
+      tx({ id: "amz-1", payee_name: "AMAZON.COM" }),
+      tx({ id: "amz-2", payee_name: "AMAZON.COM" }),
+      tx({ id: "tgt-1", payee_name: "TARGET" }),
+    ]);
+    getRetailerForPayeeMock.mockImplementation((payee: string) => {
+      if (/amazon/i.test(payee)) return { retailer: "amazon", strategy: "scrape" };
+      if (/target/i.test(payee)) return { retailer: "target", strategy: "scrape" };
+      return null;
+    });
+    // Match only the first charge of each retailer group; the rest stay unmatched.
+    scrapeMatchedOrdersMock.mockImplementation(async (charges: YnabCharge[]) => ({
+      matched: [{ order: order(), charges: [charges[0]] }],
+      unmatched: charges.slice(1).map((c) => ({ charge: c, reason: "no match" })),
+    }));
+
+    const result = await runBackfill({ fromDate: "2025-01-01" });
+
+    const byR = Object.fromEntries(result.byRetailer.map((r) => [r.retailer, r]));
+    expect(byR.amazon).toMatchObject({ matched: 1 });
+    expect(byR.target).toMatchObject({ matched: 1 });
+  });
+
+  it("propagates a retailer sign-in wall to byRetailer (so the card prompts to sign in, not 'won't match')", async () => {
+    getTransactionsSinceMock.mockResolvedValue([
+      tx({ id: "tgt-1", payee_name: "TARGET" }),
+      tx({ id: "tgt-2", payee_name: "TARGET" }),
+    ]);
+    getRetailerForPayeeMock.mockImplementation((payee: string) =>
+      /target/i.test(payee) ? { retailer: "target", strategy: "scrape" } : null,
+    );
+    scrapeMatchedOrdersMock.mockResolvedValue({
+      matched: [],
+      unmatched: [],
+      blocked: { reason: "signed_out", charges: [] },
+    });
+
+    const result = await runBackfill({ fromDate: "2025-01-01" });
+
+    const target = result.byRetailer.find((r) => r.retailer === "target");
+    expect(target).toMatchObject({ matched: 0, blocked: "signed_out" });
+  });
+
+  it("folds pre-existing allocations into a retailer's cumulative matched", async () => {
+    getTransactionsSinceMock.mockResolvedValue([
+      tx({ id: "amz-1", payee_name: "AMAZON.COM" }),
+      tx({ id: "amz-2", payee_name: "AMAZON.COM" }),
+    ]);
+    getAllocatedTransactionMock.mockImplementation(async (id: string) =>
+      id === "amz-1" ? { ynabTransactionId: "amz-1", items: [{ productId: "p1" }] } : undefined,
+    );
+    scrapeMatchedOrdersMock.mockImplementation(async (charges: YnabCharge[]) => ({
+      matched: charges.map((c) => ({ order: order(), charges: [c] })),
+      unmatched: [],
+    }));
+
+    const result = await runBackfill({ fromDate: "2025-01-01" });
+
+    const amazon = result.byRetailer.find((r) => r.retailer === "amazon");
+    expect(amazon).toMatchObject({ matched: 2 }); // 1 pre-existing + 1 new
+  });
+});
+
 describe("runBackfill — failure handling", () => {
   it("counts the retailer batch as failed when the adapter throws", async () => {
     getTransactionsSinceMock.mockResolvedValue([tx({ id: "tx-1" }), tx({ id: "tx-2" })]);

@@ -127,7 +127,8 @@ export type MessageRequest =
   | { type: "GET_CATEGORIES" }
   | { type: "CLEAR_SETTINGS" }
   | { type: "START_BACKFILL"; fromDate: string }
-  | { type: "CANCEL_BACKFILL" };
+  | { type: "CANCEL_BACKFILL" }
+  | { type: "OPEN_RETAILER"; retailer: string };
 
 /** Messages broadcast from the background to interested listeners (e.g. the
  *  side panel). Distinct from MessageRequest because no response is expected. */
@@ -157,6 +158,23 @@ export interface BackfillResult {
   hasUnbackfilled: boolean;
   /** Transactions in a retailer batch that aborted the scrape THIS run. */
   failed: number;
+  /** Per-retailer progress, so the done card can show "Target: 15 of 29 ·
+   *  Amazon: 4 of 6" instead of one collapsed total. `matched` is cumulative
+   *  (pre-existing allocations + this run); `eligible` is the eligible-by-shape
+   *  count in the window for that retailer. */
+  byRetailer: BackfillRetailerProgress[];
+}
+
+export interface BackfillRetailerProgress {
+  retailer: string;
+  /** Cumulative matched (pre-existing + this run) for this retailer. */
+  matched: number;
+  /** Transactions whose pages couldn't be read this run (retryable). */
+  failed: number;
+  /** Set when this retailer's scrape hit a sign-in wall — its orders couldn't
+   *  be read at all, so its low match count means "sign in", not "won't match".
+   *  Drives a sign-in prompt on the done card instead of the generic copy. */
+  blocked?: RetailerBlockReason;
 }
 
 /**
@@ -192,6 +210,12 @@ export interface ClassifiedItem extends AllocatedItem {
    *  title and its cosine, used for the UI "similar to your past X" hint. */
   matchedSource?: { title: string; cosine: number };
 }
+
+/** Result of a sync: the display queue, plus any per-retailer sign-in walls the
+ *  scrape hit (surfaced as "needs you" cards above the queue). */
+export type SyncResult =
+  | { queue: QueueEntry[]; blocked?: BlockedRetailer[] }
+  | { error: string };
 
 /** A YNAB transaction paired with its retailer match status for display in the queue. */
 export interface QueueEntry {
@@ -288,6 +312,9 @@ export interface RetailerAdapter {
   /** Retailer identifier, e.g. "amazon". */
   id: string;
   payees: PayeeMapping[];
+  /** Landing URL for this retailer — where a scrape starts, and where the
+   *  "Open {retailer}" resolution action sends the user to sign in. */
+  startUrl: string;
 
   /**
    * Scrape the retailer for orders covering the given YNAB charges, and
@@ -325,7 +352,33 @@ export interface RetailerAdapter {
   ): Promise<{
     matched: { order: ScrapedOrder; charges: YnabCharge[] }[];
     unmatched: { charge: YnabCharge; reason: string }[];
+    /**
+     * Set when the scrape hit a sign-in wall only the user can clear (signed
+     * out, or a mid-walk step-up). Carries the charges that couldn't be read
+     * because of it. Any `matched`/`unmatched` discovered before the wall are
+     * still returned alongside — partial results survive.
+     */
+    blocked?: RetailerBlock;
   }>;
+}
+
+/** Why a scrape is blocked on a user sign-in action. `signed_out`: the session
+ *  isn't authenticated at all. `step_up`: authenticated, but the retailer forced
+ *  a fresh sign-in to view a gated page mid-walk (Target invoices). */
+export type RetailerBlockReason = "signed_out" | "step_up";
+
+/** A sign-in wall a retailer scrape hit, plus the charges it left unreadable. */
+export interface RetailerBlock {
+  reason: RetailerBlockReason;
+  charges: YnabCharge[];
+}
+
+/** Per-retailer sign-in prompt the side panel surfaces above the queue. */
+export interface BlockedRetailer {
+  retailer: string;
+  reason: RetailerBlockReason;
+  /** How many charges this block left unreadable. */
+  count: number;
 }
 
 // ---------------------------------------------------------------------------

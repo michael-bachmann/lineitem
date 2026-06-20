@@ -6,6 +6,8 @@ import { performSync } from "@/background/sync";
 import { approveTransaction, approveBatch } from "@/background/approval";
 import { ensureModelLoaded } from "@/background/embedder";
 import { runBackfill } from "@/background/backfill";
+import { getAdapter } from "@/retailers/registry";
+import { openRetailerTab } from "@/background/tabs";
 import type { MessageBroadcast, MessageRequest } from "@/lib/types";
 
 /** Single in-flight backfill controller. Held at module scope so a
@@ -146,6 +148,20 @@ async function handleMessage(message: MessageRequest): Promise<unknown> {
     case "CANCEL_BACKFILL": {
       backfillController?.abort();
       return { ok: true };
+    }
+
+    case "OPEN_RETAILER": {
+      try {
+        const adapter = getAdapter(message.retailer);
+        const result = await openRetailerTab(adapter.startUrl);
+        // Foreground the tab so the user can sign in. Resume is manual (they tap
+        // Sync afterward) — once signed in, the profile-level cookies make any
+        // later scrape authed regardless of which tab it uses.
+        if (result) await browser.tabs.update(result.tabId, { active: true });
+        return { ok: true };
+      } catch (e) {
+        return { error: e instanceof Error ? e.message : "Failed to open retailer" };
+      }
     }
 
     default:

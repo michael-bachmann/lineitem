@@ -33,6 +33,35 @@ function send<T>(tabId: number, type: string): Promise<T> {
   return sendToTab<T>(tabId, { type });
 }
 
+/** Thrown when a gated page (invoice / invoice-detail / order-image) redirected
+ *  to Target's step-up sign-in. One step-up elevates the whole session, so we
+ *  bail the entire walk rather than retry per page, and the adapter converts it
+ *  into a single `step_up` block. Propagated past local catches the way the
+ *  abort signal is (see the `instanceof` re-throws below). */
+export class StepUpRequired extends Error {
+  constructor() {
+    super("step_up_required");
+    this.name = "StepUpRequired";
+  }
+}
+
+/**
+ * Unwrap a content-script scrape response. The content script returns the
+ * payload, or `{ error: "auth_required" }` when the page 302'd to Target's
+ * step-up sign-in (any gated page — invoices, invoice detail, or order images).
+ * Turn that into a StepUpRequired bail; turn any other error shape into a thrown
+ * Error so a malformed response degrades the order instead of becoming
+ * `undefined` and crashing downstream (e.g. `undefined.filter`).
+ */
+export function unwrap<T>(resp: T | { error: string }): T {
+  if (resp && typeof resp === "object" && "error" in resp) {
+    const { error } = resp as { error: string };
+    if (error === "auth_required") throw new StepUpRequired();
+    throw new Error(`Target scrape error: ${error}`);
+  }
+  return resp as T;
+}
+
 /**
  * Run one page read, retrying it once on failure. A failed/hung load or a
  * frozen parser usually recovers on a fresh navigation, so one cheap retry
@@ -43,6 +72,9 @@ export async function readWithRetry<T>(label: string, read: () => Promise<T>): P
   try {
     return await read();
   } catch (err) {
+    // A step-up won't clear on retry (the whole session is gated) — propagate
+    // it so the adapter can bail the walk to a single sign-in block.
+    if (err instanceof StepUpRequired) throw err;
     console.warn(`[target] ${label} failed; retrying once`, err);
     return await read();
   }
@@ -85,6 +117,7 @@ export function invoiceMightSplitMatch(inv: RawTargetInvoice, charges: YnabCharg
 export const targetAdapter: RetailerAdapter = {
   id: "target",
   payees: PAYEES,
+  startUrl: ordersUrl(),
 
   async scrapeMatchedOrders(charges, options) {
     const maxPages = options?.maxPages ?? DEFAULT_MAX_PAGES;
@@ -100,14 +133,16 @@ export const targetAdapter: RetailerAdapter = {
     }
     const { tabId, weOpenedTab } = tabResult;
 
+    // Hoisted so the step-up catch can return whatever was assembled before the
+    // walk hit a sign-in wall (partial results survive).
+    const matched: { order: ScrapedOrder; charges: YnabCharge[] }[] = [];
+
     try {
       const auth = await send<{ authenticated: boolean } | { error: string }>(tabId, "CHECK_AUTH");
       if ("error" in auth || !auth.authenticated) {
-        await browser.tabs.update(tabId, { active: true });
-        return {
-          matched: [],
-          unmatched: charges.map((c) => ({ charge: c, reason: "Target auth required" })),
-        };
+        // Signed out — surface a sign-in wall. The resolution card foregrounds
+        // the tab on user action; we no longer pop it here mid-sync.
+        return { matched: [], unmatched: [], blocked: { reason: "signed_out", charges } };
       }
 
       // Phase 1: walk the orders list (paginate Load more) until past cutoff.
@@ -131,9 +166,12 @@ export const targetAdapter: RetailerAdapter = {
         try {
           invoices = await readWithRetry(`invoices ${order.orderId}`, async () => {
             await navigateTab(tabId, orderInvoicesUrl(order.orderId));
-            return (await send<{ invoices: RawTargetInvoice[] }>(tabId, "SCRAPE_INVOICES_LIST")).invoices;
+            return unwrap(
+              await send<{ invoices: RawTargetInvoice[] } | { error: string }>(tabId, "SCRAPE_INVOICES_LIST"),
+            ).invoices;
           });
         } catch (err) {
+          if (err instanceof StepUpRequired) throw err;
           // Couldn't read this order's invoices — skip it; its charges stay
           // unmatched and a re-run will reattempt.
           console.warn(`[target] skipping order ${order.orderId}: invoices unreadable`, err);
@@ -177,9 +215,12 @@ export const targetAdapter: RetailerAdapter = {
             try {
               detail = await readWithRetry(`invoice detail ${orderId}/${inv.invoiceId}`, async () => {
                 await navigateTab(tabId, invoiceDetailUrl(orderId, inv.invoiceId));
-                return (await send<{ detail: RawTargetInvoiceDetail }>(tabId, "SCRAPE_INVOICE_DETAIL")).detail;
+                return unwrap(
+                  await send<{ detail: RawTargetInvoiceDetail } | { error: string }>(tabId, "SCRAPE_INVOICE_DETAIL"),
+                ).detail;
               });
             } catch (err) {
+              if (err instanceof StepUpRequired) throw err;
               // Couldn't read this invoice's detail — skip it; the charge stays
               // unmatched and a re-run will reattempt.
               console.warn(`[target] skipping invoice ${orderId}/${inv.invoiceId}: detail unreadable`, err);
@@ -204,7 +245,6 @@ export const targetAdapter: RetailerAdapter = {
       }
 
       // Phase 4: assemble one ScrapedOrder per matched invoice.
-      const matched: { order: ScrapedOrder; charges: YnabCharge[] }[] = [];
       const detailFailures: { charge: YnabCharge; reason: string }[] = [];
       const imageCache = new Map<string, Record<string, string>>();
 
@@ -219,6 +259,7 @@ export const targetAdapter: RetailerAdapter = {
             ?? (await readWithRetry(`detail ${mi.orderId}/${mi.invoiceId}`, () =>
               loadDetail(tabId, mi.orderId, mi.invoiceId)));
         } catch (err) {
+          if (err instanceof StepUpRequired) throw err;
           // This charge matched an invoice but its detail page couldn't be read —
           // surface it as a read failure (counts toward "couldn't be read") so a
           // re-run reattempts it, rather than tanking the whole scrape.
@@ -236,9 +277,12 @@ export const targetAdapter: RetailerAdapter = {
           try {
             imageMap = await readWithRetry(`images ${mi.orderId}`, async () => {
               await navigateTab(tabId, orderDetailUrl(mi.orderId));
-              return (await send<{ imageMap: Record<string, string> }>(tabId, "SCRAPE_ORDER_IMAGES")).imageMap;
+              return unwrap(
+                await send<{ imageMap: Record<string, string> } | { error: string }>(tabId, "SCRAPE_ORDER_IMAGES"),
+              ).imageMap;
             });
           } catch (err) {
+            if (err instanceof StepUpRequired) throw err;
             console.warn(`[target] couldn't read order images for ${mi.orderId}`, err);
             detailFailures.push({ charge: mi.charge, reason: READ_FAILED_REASON });
             continue;
@@ -257,6 +301,17 @@ export const targetAdapter: RetailerAdapter = {
         ...detailFailures,
       ];
       return { matched, unmatched };
+    } catch (err) {
+      if (err instanceof StepUpRequired) {
+        // The walk hit Target's step-up sign-in. Keep whatever we assembled
+        // before the wall; everything not yet matched becomes one sign-in block.
+        // One step-up elevates the session, so a re-sync after sign-in reads the
+        // rest (genuinely unmatchable charges then fall to no_match).
+        const done = new Set(matched.flatMap((m) => m.charges.map((c) => c.ynabTransactionId)));
+        const blockedCharges = charges.filter((c) => !done.has(c.ynabTransactionId));
+        return { matched, unmatched: [], blocked: { reason: "step_up", charges: blockedCharges } };
+      }
+      throw err;
     } finally {
       if (weOpenedTab) browser.tabs.remove(tabId).catch(() => {});
     }
@@ -274,7 +329,9 @@ async function loadDetail(
   tabId: number, orderId: string, invoiceId: string,
 ): Promise<RawTargetInvoiceDetail> {
   await navigateTab(tabId, invoiceDetailUrl(orderId, invoiceId));
-  const { detail } = await send<{ detail: RawTargetInvoiceDetail }>(tabId, "SCRAPE_INVOICE_DETAIL");
+  const { detail } = unwrap(
+    await send<{ detail: RawTargetInvoiceDetail } | { error: string }>(tabId, "SCRAPE_INVOICE_DETAIL"),
+  );
   return detail;
 }
 
@@ -288,14 +345,19 @@ async function collectOrders(
   let orders: RawTargetOrder[] = [];
   for (let page = 0; page < maxPages; page++) {
     signal?.throwIfAborted();
-    const { orders: cur } = await send<{ orders: RawTargetOrder[] }>(tabId, "SCRAPE_ORDERS_LIST");
+    const { orders: cur } = unwrap(
+      await send<{ orders: RawTargetOrder[] } | { error: string }>(tabId, "SCRAPE_ORDERS_LIST"),
+    );
     orders = cur; // Load more appends, so each scrape returns the cumulative list
     const oldest = orders.reduce(
       (min, o) => (o.date && o.date < min ? o.date : min),
       orders[0]?.date ?? "9999-12-31",
     );
     if (oldest < cutoff) break;
-    const { hasNext } = await send<{ hasNext: boolean }>(tabId, "LOAD_MORE");
+    // "Load more" is an in-page XHR that appends rows — it does NOT navigate the
+    // tab, so (unlike Amazon's pager) there's no content-script teardown to
+    // tolerate and no waitForTabLoad needed after it.
+    const { hasNext } = unwrap(await send<{ hasNext: boolean } | { error: string }>(tabId, "LOAD_MORE"));
     if (!hasNext) break;
   }
   return orders;

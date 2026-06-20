@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { cancelBackfill, onBackfillProgress, startBackfill } from "@/lib/messaging";
+import { cancelBackfill, onBackfillProgress, openRetailer, startBackfill } from "@/lib/messaging";
 import { BackfillCardView, type BackfillUiState } from "./BackfillCardView";
 
 /** Date 12 months before today, formatted YYYY-MM-DD. The Date constructor
@@ -50,5 +50,12 @@ export default function BackfillCard({ onStateChange }: BackfillCardProps = {}) 
     void cancelBackfill();
   }
 
-  return <BackfillCardView state={state} onStart={start} onCancel={cancel} />;
+  return (
+    <BackfillCardView
+      state={state}
+      onStart={start}
+      onCancel={cancel}
+      onOpenRetailer={(retailer) => void openRetailer(retailer)}
+    />
+  );
 }
