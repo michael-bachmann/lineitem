@@ -26,7 +26,11 @@ export default function PrivacyPolicy() {
           This policy applies to the lineitem browser extension (Chrome and Firefox) and this
           website, <a href={LINKS.website}>lineitem.dev</a>. lineitem is an independent project and
           is not affiliated, associated, or in any way officially connected with YNAB, Amazon, or
-          Target.
+          Target. The official YNAB website is at{" "}
+          <a href={LINKS.ynab} target="_blank" rel="noreferrer">
+            www.ynab.com
+          </a>
+          .
         </p>
       </LegalSection>
 
@@ -50,15 +54,22 @@ export default function PrivacyPolicy() {
         <p>
           With your authorization, lineitem connects to YNAB to read your budgets and categories and
           to write the transaction splits you approve. We request read-and-write access because the
-          app writes splits; nothing is written back to your budget until you press Approve. You can
-          disconnect lineitem from YNAB at any time, from the extension's Settings or from your YNAB
-          account's connected-apps page.
+          app writes splits; nothing is written back to your budget until you press Approve. Your
+          budget stays with YNAB under <a href={LINKS.ynab} target="_blank" rel="noreferrer">YNAB's
+          own privacy policy</a>; lineitem only reads what you authorize. You can disconnect lineitem
+          from YNAB at any time, from the extension's Settings or from your YNAB account's
+          connected-apps page.
         </p>
         <p>
           Connecting to YNAB uses OAuth. The one-time authorization code and the tokens that keep
           you signed in pass through lineitem's authorization service (auth.lineitem.dev) — a thin
-          relay that completes the secure exchange with YNAB and stores nothing. Your access token is then kept only on your device; your budget
-          and order data never pass through that service.
+          relay that completes the secure exchange with YNAB and stores nothing. Your access token is
+          then kept only on your device; your budget and order data never pass through that service.
+        </p>
+        <p>
+          Every connection lineitem makes — to YNAB, to that authorization service, and to the
+          retailers — uses encrypted HTTPS. Your YNAB tokens are held in your browser's protected
+          extension storage and are never exposed to, sold to, or shared with any third party.
         </p>
       </LegalSection>
 
@@ -86,6 +97,15 @@ export default function PrivacyPolicy() {
               "When you connect YNAB and when your sign-in is silently refreshed.",
             ],
             [
+              "Hugging Face",
+              <>
+                Nothing about you. lineitem downloads the on-device model that powers category
+                matching (~30 MB) from Hugging Face's file host. No order, budget, or personal data
+                is ever sent — it's a one-way file download.
+              </>,
+              "Once, the first time you sync; then cached on your device.",
+            ],
+            [
               "Web3Forms",
               "Only the message and (optional) email you type into a feedback form.",
               "Only when you submit “Request a retailer,” “Make a suggestion,” or “Report an issue.”",
@@ -96,6 +116,12 @@ export default function PrivacyPolicy() {
           There are no analytics SDKs, advertising networks, fingerprinting, or third-party trackers
           anywhere in lineitem.
         </LegalCallout>
+        <p>
+          Our use of the data lineitem accesses follows the Chrome Web Store's Limited Use
+          requirements and Mozilla's Add-on Policies: we use it solely to provide the
+          matching-and-splitting feature, never for advertising, and we never sell it or transfer it
+          to anyone else.
+        </p>
       </LegalSection>
 
       <LegalSection title="What we store">
