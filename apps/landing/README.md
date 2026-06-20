@@ -1,6 +1,6 @@
-# LineItem landing page
+# lineitem landing page
 
-The public marketing site for LineItem (lineitem.dev) — a static **Vite + React**
+The public marketing site for lineitem (lineitem.dev) — a static **Vite + React**
 SPA. It reuses the shared design tokens and components from `@lineitem/ui`, so the
 site and the extension never drift.
 

@@ -15,7 +15,7 @@ export default function Hero() {
           Every online order, itemized in&nbsp;YNAB.
         </h1>
         <p className="max-w-[30em] text-[clamp(16px,1.6vw,19px)] leading-[1.55] text-muted">
-          LineItem matches your YNAB transactions to the Amazon and Target orders behind them,
+          lineitem matches your YNAB transactions to the Amazon and Target orders behind them,
           then splits each charge into the right budget categories — so a single{" "}
           <span className="font-semibold text-text tabular">$42.98</span> charge becomes groceries,
           household, and the rest, automatically.

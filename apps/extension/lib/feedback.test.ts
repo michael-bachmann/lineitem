@@ -12,7 +12,7 @@ describe("buildFeedbackForm", () => {
   it("includes access_key, subject, request_type and the primary field per kind", () => {
     const fd = buildFeedbackForm({ kind: "retailer", primary: "Costco", email: "" });
     expect(fd.get("access_key")).toBeTruthy();
-    expect(fd.get("subject")).toBe("LineItem · retailer");
+    expect(fd.get("subject")).toBe("lineitem · retailer");
     expect(fd.get("request_type")).toBe("retailer");
     expect(fd.get(FB_CONFIG.retailer.primaryName)).toBe("Costco");
   });

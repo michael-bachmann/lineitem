@@ -2,7 +2,7 @@ import { Icon, LinkButton } from "@lineitem/ui";
 import { Wrap } from "./Wrap";
 import { LINKS } from "@/lib/links";
 
-/** "Enjoying LineItem?" support callout — the landing band variant of the
+/** "Enjoying lineitem?" support callout — the landing band variant of the
  *  extension's CoffeeCard (brand-tinted gradient, coffee icon, Ko-fi button). */
 export default function CoffeeBand() {
   return (
@@ -18,7 +18,7 @@ export default function CoffeeBand() {
             </span>
             <div>
               <h3 className="text-[19px] font-bold tracking-[-0.02em] text-text">
-                Enjoying LineItem?
+                Enjoying lineitem?
               </h3>
               <p className="mt-[3px] max-w-[34em] text-[14.5px] leading-[1.5] text-muted">
                 It's free and ad-free. A coffee keeps it maintained and the new retailers coming.

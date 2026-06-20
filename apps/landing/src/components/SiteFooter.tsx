@@ -91,7 +91,7 @@ export default function SiteFooter({ onFeedback }: { onFeedback: (kind: Feedback
         </div>
       </Wrap>
       <Wrap className="mt-10 flex flex-wrap items-center justify-between gap-x-4 gap-y-1 border-t border-line pt-[22px] text-[13px] text-faint">
-        <span className="min-w-0">© 2026 LineItem · Not affiliated with YNAB, Amazon, or Target</span>
+        <span className="min-w-0">© 2026 lineitem · Not affiliated with YNAB, Amazon, or Target</span>
         <span className="tabular">{VERSION}</span>
       </Wrap>
     </footer>

@@ -116,7 +116,7 @@ export default function QueueView({
         <CoffeeCard
           sub={
             <>
-              LineItem has categorized{" "}
+              lineitem has categorized{" "}
               <b className="font-semibold text-text">{(coffeeClassified ?? 0).toLocaleString()}</b>{" "}
               line items for you so far — all free and ad-free.
             </>
