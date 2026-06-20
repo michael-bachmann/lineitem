@@ -9,6 +9,32 @@
    the utility classes used in the shared components get generated. */
 @source "../../../packages/ui/src";
 
+/* Smooth anchor scrolling, disabled under reduced-motion. Anchored sections get
+   a scroll offset so the sticky 66px nav doesn't cover their heading. */
+html {
+  scroll-behavior: smooth;
+}
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+}
+section[id],
+#install,
+#top {
+  scroll-margin-top: 84px;
+}
+
+/* Visible keyboard focus ring for interactive elements (mouse focus unaffected).
+   --ink (not --brand) so the ring clears the 3:1 non-text-contrast minimum on
+   the cream page background. */
+a:focus-visible,
+button:focus-visible,
+summary:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
 /* Dramatic lift for the hero PanelMock (marketing-only, so it lives here rather
    than in the shared token layer). Generates the `shadow-mock` utility. */
 @theme {

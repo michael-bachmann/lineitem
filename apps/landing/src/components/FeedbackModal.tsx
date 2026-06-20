@@ -52,11 +52,11 @@ export default function FeedbackModal({ kind, onClose, onSubmit }: FeedbackModal
     if (!dlg.open) dlg.showModal();
     // Land focus on the first real field, not the × or the hidden honeypot.
     dlg.querySelector<HTMLElement>("input:not([tabindex='-1']), textarea")?.focus();
-    // Native <dialog> doesn't lock the page behind it — do it ourselves.
-    document.body.style.overflow = "hidden";
+    // Deliberately NOT locking body scroll: showModal() already makes the page
+    // behind inert, and toggling `overflow: hidden` removes the scrollbar, which
+    // reflows the layout + re-centers the dialog on classic scrollbars (BAC-137).
     return () => {
       if (dlg.open) dlg.close();
-      document.body.style.overflow = "";
       trigger?.focus?.();
     };
   }, [open]);
@@ -74,7 +74,11 @@ export default function FeedbackModal({ kind, onClose, onSubmit }: FeedbackModal
         if (e.target === ref.current) onClose();
       }}
       // m-auto restores native dialog centering (Tailwind preflight resets the UA margin).
-      className="m-auto w-[min(440px,calc(100vw-32px))] bg-transparent p-0 backdrop:bg-[rgba(47,42,51,0.44)]"
+      // overflow-clip: the native <dialog> defaults to overflow:auto, so the 8px
+      // entrance translate briefly makes it scrollable and flashes its scrollbar
+      // (BAC-137). `clip` is never a scroll container; the clip-margin keeps the
+      // card's shadow-pop visible.
+      className="m-auto w-[min(440px,calc(100vw-32px))] overflow-clip [overflow-clip-margin:40px] bg-transparent p-0 backdrop:bg-[rgba(47,42,51,0.44)]"
     >
       {/* px-[10px] + the form's own px-[14px] = 24px field inset; the header
           carries a matching px-[14px] so it lines up. */}
