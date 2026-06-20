@@ -1,0 +1,7 @@
+name = "lineitem-landing"
+compatibility_date = "2026-06-01"
+
+# Static marketing site: no Worker script, just the Vite build served as assets.
+# `directory` is resolved relative to this file, so it points at apps/landing/dist.
+[assets]
+directory = "./dist"
