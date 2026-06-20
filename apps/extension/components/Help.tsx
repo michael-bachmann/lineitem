@@ -98,7 +98,7 @@ export default function Help({ onBack, version = "0.0.0" }: HelpProps) {
       <p className="px-1 text-center text-[12px] leading-[1.5] text-faint">
         Prefer GitHub?{" "}
         <a
-          href={LINKS.issue}
+          href={LINKS.issues}
           target="_blank"
           rel="noopener noreferrer"
           className="text-muted underline hover:text-link"

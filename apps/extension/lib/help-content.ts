@@ -1,10 +1,6 @@
-// Help & About copy + links.
-export const LINKS = {
-  coffee: "https://ko-fi.com/mbachmann",
-  issue: "https://github.com/michael-bachmann/lineitem/issues/new",
-  website: "https://lineitem.dev",
-  readme: "https://github.com/michael-bachmann/lineitem",
-};
+// Help & About copy. Links are the shared canonical set from @lineitem/ui;
+// the in-app FAQ below intentionally differs from the marketing-site FAQ.
+export { LINKS } from "@lineitem/ui/links";
 
 export interface FaqItem {
   q: string;
