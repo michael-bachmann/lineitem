@@ -100,10 +100,27 @@ describe("sendToTab", () => {
     await assertion;
   });
 
-  it("propagates a sendMessage rejection without waiting for the timeout", async () => {
-    vi.stubGlobal("browser", {
-      tabs: { sendMessage: vi.fn(async () => { throw new Error("no receiver"); }) },
-    });
+  it("propagates a non-injection sendMessage rejection immediately (no retry)", async () => {
+    const sendMessage = vi.fn(async () => { throw new Error("no receiver"); });
+    vi.stubGlobal("browser", { tabs: { sendMessage } });
     await expect(sendToTab(7, { type: "PING" })).rejects.toThrow("no receiver");
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it("retries the injection race ('Receiving end does not exist') until the content script answers", async () => {
+    vi.useFakeTimers();
+    const err = new Error("Could not establish connection. Receiving end does not exist.");
+    const sendMessage = vi.fn()
+      .mockRejectedValueOnce(err)
+      .mockRejectedValueOnce(err)
+      .mockResolvedValueOnce({ ok: true });
+    vi.stubGlobal("browser", { tabs: { sendMessage } });
+
+    const p = sendToTab(7, { type: "CHECK_AUTH" });
+    // Two injection-grace waits, then the third attempt lands.
+    await vi.advanceTimersByTimeAsync(200);
+    await vi.advanceTimersByTimeAsync(200);
+    await expect(p).resolves.toEqual({ ok: true });
+    expect(sendMessage).toHaveBeenCalledTimes(3);
   });
 });

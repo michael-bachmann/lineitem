@@ -4,17 +4,54 @@
  *  that hung), which `browser.tabs.sendMessage` alone would wait on forever. */
 const MESSAGE_TIMEOUT_MS = 30_000;
 
+/** A tab reports `status: "complete"` before its content script has finished
+ *  injecting — most visibly on Firefox — so the first message can race the
+ *  injection and reject with "Receiving end does not exist". Since the reject is
+ *  synchronous (no handler ran), retrying is safe even for non-idempotent
+ *  messages, and a few hundred ms of grace covers the gap. ~2s total ceiling. */
+const INJECT_RETRY_LIMIT = 10;
+const INJECT_RETRY_MS = 200;
+const NO_RECEIVER = /Receiving end does not exist|Could not establish connection/i;
+
+const delay = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+
 /**
  * Send a message to a tab's content script, rejecting if no reply arrives
  * within `timeoutMs`. `browser.tabs.sendMessage` never times out on its own, so
  * a hung scraper would otherwise freeze the whole flow; this turns that hang
  * into a catchable error the caller can retry or skip.
+ *
+ * Transparently retries the "content script not injected yet" connection error
+ * (see INJECT_RETRY_LIMIT) so a tab that just finished loading doesn't lose its
+ * whole scrape to an injection race.
  */
-export function sendToTab<T>(
+export async function sendToTab<T>(
   tabId: number,
   message: object,
   timeoutMs = MESSAGE_TIMEOUT_MS,
 ): Promise<T> {
+  const type = (message as { type?: string }).type ?? "message";
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await sendOnce<T>(tabId, message, timeoutMs);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (attempt < INJECT_RETRY_LIMIT && NO_RECEIVER.test(msg)) {
+        // Logged so an intermittent injection race is observable (vs. silently
+        // recovered) — proof the retry engaged rather than the race not firing.
+        console.info(
+          `[tabs] tab ${tabId} content script not ready for ${type} ` +
+            `(attempt ${attempt + 1}/${INJECT_RETRY_LIMIT}); retrying in ${INJECT_RETRY_MS}ms`,
+        );
+        await delay(INJECT_RETRY_MS);
+        continue;
+      }
+      throw err;
+    }
+  }
+}
+
+function sendOnce<T>(tabId: number, message: object, timeoutMs: number): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const type = (message as { type?: string }).type ?? "message";
     const timer = setTimeout(() => {
