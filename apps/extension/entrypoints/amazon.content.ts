@@ -27,6 +27,7 @@ interface NextPageMessage {
 }
 
 type ContentMessage =
+  | { type: "PING" }
   | CheckAuthMessage
   | ScrapeTransactionsMessage
   | ScrapeItemsMessage
@@ -47,6 +48,9 @@ export default defineContentScript({
 
 async function handleMessage(message: ContentMessage): Promise<unknown> {
   switch (message.type) {
+    case "PING":
+      // Readiness handshake — see waitForContentReady. Side-effect-free.
+      return { pong: true };
     case "CHECK_AUTH":
       return { authenticated: !AUTH_PAGE_REGEX.test(window.location.href) };
     case "SCRAPE_TRANSACTIONS":
@@ -99,16 +103,41 @@ function scrapeItems():
   return { items: parseItemsFromDocument(document), subtotalCents, refund };
 }
 
-function randomDelay(min = 1000, max = 3000): Promise<void> {
-  const ms = Math.floor(Math.random() * (max - min + 1)) + min;
+function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function randomDelay(min = 1000, max = 3000): Promise<void> {
+  return delay(Math.floor(Math.random() * (max - min + 1)) + min);
+}
+
+/** Poll until `fn()` is truthy or timeout; true if it became truthy in time. */
+async function waitFor(fn: () => boolean, timeoutMs = 10000): Promise<boolean> {
+  const start = Date.now();
+  for (;;) {
+    if (fn()) return true;
+    if (Date.now() - start > timeoutMs) return false;
+    await delay(150);
+  }
 }
 
 async function nextPage(): Promise<{ hasNext: boolean }> {
   const nextButton = document.querySelector<HTMLInputElement>(SELECTORS.nextPageButton);
   if (!nextButton) return { hasNext: false };
 
+  // The pager swaps the transactions list in place (AJAX POST → JSON → DOM
+  // swap) — no navigation. Wait for the swap to actually land before returning,
+  // so the adapter's next SCRAPE_TRANSACTIONS reads the new rows instead of
+  // racing the swap and re-reading the old page. The swap detaches the current
+  // rows, so we track one and wait for it to leave the DOM. (Fixed-settle
+  // fallback only if there are no rows to track — which shouldn't happen when a
+  // next button exists.)
+  const sentinel = document.querySelector(SELECTORS.lineItem);
   nextButton.click();
-  await randomDelay();
+  if (sentinel) {
+    await waitFor(() => !sentinel.isConnected && document.querySelector(SELECTORS.lineItem) !== null);
+  } else {
+    await randomDelay();
+  }
   return { hasNext: true };
 }

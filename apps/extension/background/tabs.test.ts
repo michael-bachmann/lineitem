@@ -1,15 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { navigateTab, sendToTab } from "./tabs";
+import { navigateTab, sendToTab, waitForContentReady } from "./tabs";
 
 /** Minimal browser.tabs mock with a controllable onUpdated event. `get` returns
  *  a STALE "complete" status to mimic Firefox reporting the previous page as
- *  loaded right after a navigation — navigateTab must not resolve on that. */
+ *  loaded right after a navigation — navigateTab must not resolve on that.
+ *  `sendMessage` pongs so navigateTab's readiness handshake completes. */
 function makeTabsMock() {
   const updateListeners = new Set<(id: number, info: { status?: string }) => void>();
   const removeListeners = new Set<(id: number) => void>();
   return {
     update: vi.fn(async () => {}),
     get: vi.fn(async () => ({ status: "complete" })),
+    sendMessage: vi.fn(async () => ({ pong: true })),
     onUpdated: {
       addListener: (f: (id: number, info: { status?: string }) => void) => updateListeners.add(f),
       removeListener: (f: (id: number, info: { status?: string }) => void) =>
@@ -73,6 +75,33 @@ describe("navigateTab", () => {
     await p;
     expect(resolved).toBe(true);
   });
+
+  it("does not resolve on 'complete' until the content script is ready (the handshake gates it)", async () => {
+    vi.useFakeTimers();
+    let ready = false;
+    tabs.sendMessage = vi.fn(async () => {
+      if (!ready) throw new Error("Receiving end does not exist.");
+      return { pong: true };
+    });
+
+    let resolved = false;
+    const p = navigateTab(7, "https://example.com/").then(() => {
+      resolved = true;
+    });
+
+    // The page loaded, but the content script hasn't injected yet — navigateTab
+    // must stay pending despite the "complete" event.
+    tabs.fireUpdated(7, { status: "complete" });
+    await vi.advanceTimersByTimeAsync(300);
+    expect(resolved).toBe(false);
+
+    // Script comes alive → the readiness poll pongs → navigateTab resolves.
+    ready = true;
+    await vi.advanceTimersByTimeAsync(100);
+    await p;
+    expect(resolved).toBe(true);
+    vi.useRealTimers();
+  });
 });
 
 describe("sendToTab", () => {
@@ -94,44 +123,57 @@ describe("sendToTab", () => {
       tabs: { sendMessage: vi.fn(() => new Promise(() => {})) },
     });
 
-    const p = sendToTab(7, { type: "SCRAPE" }, { timeoutMs: 1000 });
+    const p = sendToTab(7, { type: "SCRAPE" }, 1000);
     const assertion = expect(p).rejects.toThrow(/did not reply to SCRAPE within 1 seconds/);
     await vi.advanceTimersByTimeAsync(1000);
     await assertion;
   });
 
-  it("propagates a non-injection sendMessage rejection immediately (no retry)", async () => {
-    const sendMessage = vi.fn(async () => { throw new Error("no receiver"); });
+  it("propagates a sendMessage rejection immediately (no retry — readiness is handled upstream)", async () => {
+    const sendMessage = vi.fn(async () => { throw new Error("Receiving end does not exist."); });
     vi.stubGlobal("browser", { tabs: { sendMessage } });
-    await expect(sendToTab(7, { type: "PING" })).rejects.toThrow("no receiver");
+    await expect(sendToTab(7, { type: "SCRAPE" })).rejects.toThrow("Receiving end does not exist");
     expect(sendMessage).toHaveBeenCalledTimes(1);
   });
+});
 
-  it("retries the injection race ('Receiving end does not exist') until the content script answers", async () => {
+describe("waitForContentReady", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("resolves immediately when the content script already pongs", async () => {
+    const sendMessage = vi.fn(async () => ({ pong: true }));
+    vi.stubGlobal("browser", { tabs: { sendMessage } });
+    await expect(waitForContentReady(7)).resolves.toBeUndefined();
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    expect(sendMessage).toHaveBeenCalledWith(7, { type: "PING" });
+  });
+
+  it("polls past the injection gap until the script answers", async () => {
     vi.useFakeTimers();
-    const err = new Error("Could not establish connection. Receiving end does not exist.");
+    const noReceiver = new Error("Could not establish connection. Receiving end does not exist.");
     const sendMessage = vi.fn()
-      .mockRejectedValueOnce(err)
-      .mockRejectedValueOnce(err)
-      .mockResolvedValueOnce({ ok: true });
+      .mockRejectedValueOnce(noReceiver) // still injecting
+      .mockRejectedValueOnce(noReceiver)
+      .mockResolvedValueOnce({ pong: true }); // ready
     vi.stubGlobal("browser", { tabs: { sendMessage } });
 
-    const p = sendToTab(7, { type: "CHECK_AUTH" });
-    // Two injection-grace waits, then the third attempt lands.
-    await vi.advanceTimersByTimeAsync(200);
-    await vi.advanceTimersByTimeAsync(200);
-    await expect(p).resolves.toEqual({ ok: true });
+    const p = waitForContentReady(7);
+    await vi.advanceTimersByTimeAsync(100);
+    await vi.advanceTimersByTimeAsync(100);
+    await expect(p).resolves.toBeUndefined();
     expect(sendMessage).toHaveBeenCalledTimes(3);
   });
 
-  it("does NOT retry when retryInjection is false — the channel-closed error must propagate (NEXT_PAGE page-turn signal)", async () => {
-    const sendMessage = vi.fn(async () => {
-      throw new Error("Could not establish connection. Receiving end does not exist.");
+  it("throws if the content script never becomes ready within the budget", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("browser", {
+      tabs: { sendMessage: vi.fn(async () => { throw new Error("Receiving end does not exist."); }) },
     });
-    vi.stubGlobal("browser", { tabs: { sendMessage } });
-    await expect(
-      sendToTab(7, { type: "NEXT_PAGE" }, { retryInjection: false }),
-    ).rejects.toThrow(/Receiving end does not exist/);
-    expect(sendMessage).toHaveBeenCalledTimes(1);
+    const p = waitForContentReady(7, 300);
+    const assertion = expect(p).rejects.toThrow(/content script not ready within/);
+    await vi.advanceTimersByTimeAsync(400);
+    await assertion;
   });
 });

@@ -4,26 +4,14 @@
  *  that hung), which `browser.tabs.sendMessage` alone would wait on forever. */
 const MESSAGE_TIMEOUT_MS = 30_000;
 
-/** A tab reports `status: "complete"` before its content script has finished
- *  injecting — most visibly on Firefox — so the first message can race the
- *  injection and reject with "Receiving end does not exist". Since the reject is
- *  synchronous (no handler ran), retrying is safe even for non-idempotent
- *  messages, and a few hundred ms of grace covers the gap. ~2s total ceiling. */
-const INJECT_RETRY_LIMIT = 10;
-const INJECT_RETRY_MS = 200;
-const NO_RECEIVER = /Receiving end does not exist|Could not establish connection/i;
+/** Readiness handshake budget. A tab reports `status: "complete"` before its
+ *  content script has finished injecting (most visibly on Firefox), so callers
+ *  that just navigated poll PING until the script answers PONG before sending a
+ *  real message — see waitForContentReady. */
+const READY_PING_INTERVAL_MS = 100;
+const READY_TIMEOUT_MS = 15_000;
 
 const delay = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
-
-export interface SendToTabOptions {
-  timeoutMs?: number;
-  /** Retry the "content script not injected yet" connection error (default
-   *  true). Set false for a message whose OWN navigation legitimately closes
-   *  the channel — Amazon's NEXT_PAGE clicks the pager, so its rejection IS the
-   *  page-turn signal (see isPageTurnNavigationError); retrying would re-click
-   *  the pager and skip pages. */
-  retryInjection?: boolean;
-}
 
 /**
  * Send a message to a tab's content script, rejecting if no reply arrives
@@ -31,37 +19,17 @@ export interface SendToTabOptions {
  * a hung scraper would otherwise freeze the whole flow; this turns that hang
  * into a catchable error the caller can retry or skip.
  *
- * Transparently retries the "content script not injected yet" connection error
- * (see INJECT_RETRY_LIMIT) so a tab that just finished loading doesn't lose its
- * whole scrape to an injection race — unless `retryInjection: false`.
+ * Callers reach here only after openRetailerTab/navigateTab/waitForTabLoad have
+ * confirmed the content script is live (waitForContentReady), so "Receiving end
+ * does not exist" is no longer the common outcome — when it does occur the
+ * script went away after the handshake (e.g. a page that navigated out from
+ * under a multi-message sequence, like a mid-walk step-up redirect).
  */
-export async function sendToTab<T>(
+export function sendToTab<T>(
   tabId: number,
   message: object,
-  { timeoutMs = MESSAGE_TIMEOUT_MS, retryInjection = true }: SendToTabOptions = {},
+  timeoutMs = MESSAGE_TIMEOUT_MS,
 ): Promise<T> {
-  const type = (message as { type?: string }).type ?? "message";
-  for (let attempt = 0; ; attempt++) {
-    try {
-      return await sendOnce<T>(tabId, message, timeoutMs);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      if (retryInjection && attempt < INJECT_RETRY_LIMIT && NO_RECEIVER.test(msg)) {
-        // Logged so an intermittent injection race is observable (vs. silently
-        // recovered) — proof the retry engaged rather than the race not firing.
-        console.info(
-          `[tabs] tab ${tabId} content script not ready for ${type} ` +
-            `(attempt ${attempt + 1}/${INJECT_RETRY_LIMIT}); retrying in ${INJECT_RETRY_MS}ms`,
-        );
-        await delay(INJECT_RETRY_MS);
-        continue;
-      }
-      throw err;
-    }
-  }
-}
-
-function sendOnce<T>(tabId: number, message: object, timeoutMs: number): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const type = (message as { type?: string }).type ?? "message";
     const timer = setTimeout(() => {
@@ -78,6 +46,40 @@ function sendOnce<T>(tabId: number, message: object, timeoutMs: number): Promise
       },
     );
   });
+}
+
+/**
+ * Resolve once the tab's content script answers a PING — i.e. it's injected and
+ * listening. The load event (`status: "complete"`) fires before content scripts
+ * inject, so navigating then immediately messaging the page races the
+ * injection. Polling an idempotent PING (no side effects, unlike retrying a real
+ * scrape message) closes that gap deterministically for every navigation, which
+ * is why the navigation primitives below await it before returning.
+ */
+export async function waitForContentReady(
+  tabId: number,
+  timeoutMs = READY_TIMEOUT_MS,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  let waited = false;
+  for (;;) {
+    try {
+      const res = await browser.tabs.sendMessage(tabId, { type: "PING" });
+      if ((res as { pong?: boolean } | undefined)?.pong) {
+        // Surface only when readiness actually lagged the load event — proof the
+        // handshake did real work, without a line per poll.
+        if (waited) console.info(`[tabs] tab ${tabId} content script ready after wait`);
+        return;
+      }
+    } catch {
+      // No receiver yet — content script still injecting. Fall through and retry.
+    }
+    if (Date.now() >= deadline) {
+      throw new Error(`Tab ${tabId} content script not ready within ${timeoutMs / 1000}s`);
+    }
+    waited = true;
+    await delay(READY_PING_INTERVAL_MS);
+  }
 }
 
 /** Find or create a tab for the given retailer URL. Reuses existing tabs on the same domain. */
@@ -98,7 +100,11 @@ export async function openRetailerTab(
   if (!tab.id) return null;
 
   if (tab.url !== startUrl || tab.status !== "complete") {
-    await navigateTab(tab.id, startUrl);
+    await navigateTab(tab.id, startUrl); // includes the readiness handshake
+  } else {
+    // Already at the target URL and loaded — confirm the content script is live
+    // (it normally is, but a reused tab could still be mid-(re)injection).
+    await waitForContentReady(tab.id);
   }
 
   return { tabId: tab.id, weOpenedTab: false };
@@ -129,7 +135,10 @@ export function navigateTab(tabId: number, url: string): Promise<void> {
     const updateListener = (updatedTabId: number, changeInfo: { status?: string }) => {
       if (updatedTabId === tabId && changeInfo.status === "complete") {
         cleanup();
-        resolve();
+        // "complete" fires before the content script injects — resolve only once
+        // the readiness handshake confirms it's listening, so the caller's next
+        // message can't race the injection.
+        waitForContentReady(tabId).then(resolve, reject);
       }
     };
 
@@ -175,7 +184,7 @@ export function waitForTabLoad(tabId: number): Promise<void> {
     ) => {
       if (updatedTabId === tabId && changeInfo.status === "complete") {
         cleanup();
-        resolve();
+        waitForContentReady(tabId).then(resolve, reject);
       }
     };
 
@@ -194,7 +203,7 @@ export function waitForTabLoad(tabId: number): Promise<void> {
     browser.tabs.get(tabId).then((tab) => {
       if (tab.status === "complete") {
         cleanup();
-        resolve();
+        waitForContentReady(tabId).then(resolve, reject);
       }
     }).catch(() => {
       cleanup();

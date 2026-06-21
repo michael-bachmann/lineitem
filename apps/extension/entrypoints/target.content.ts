@@ -8,6 +8,7 @@ import {
 import { isLoginUrl, SELECTORS } from "@/retailers/target/selectors";
 
 type ContentMessage =
+  | { type: "PING" }
   | { type: "CHECK_AUTH" }
   | { type: "SCRAPE_ORDERS_LIST" }
   | { type: "LOAD_MORE" }
@@ -42,6 +43,10 @@ async function waitFor<T>(fn: () => T | null | undefined, timeoutMs = 8000): Pro
 }
 
 async function handleMessage(message: ContentMessage): Promise<unknown> {
+  // Readiness handshake — answer before the login-page guard so the background
+  // knows the script is live even on a login/step-up page (where every other
+  // message resolves to auth_required).
+  if (message.type === "PING") return { pong: true };
   if (isLoginUrl(window.location.href)) {
     return message.type === "CHECK_AUTH" ? { authenticated: false } : { error: "auth_required" };
   }
