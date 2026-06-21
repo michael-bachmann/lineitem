@@ -58,8 +58,15 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Typecheck
         run: pnpm --filter extension compile
-      - name: Unit tests
-        run: pnpm --filter extension test:run
+      - name: Unit tests + coverage
+        run: pnpm --filter extension test:coverage
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: apps/extension/coverage/lcov.info
+          flags: extension
+          fail_ci_if_error: false
       - name: Build + package zip
         run: pnpm --filter extension zip
       - uses: actions/upload-artifact@v7

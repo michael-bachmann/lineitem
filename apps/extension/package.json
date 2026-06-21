@@ -16,6 +16,7 @@
     "build-storybook": "storybook build",
     "test": "vitest",
     "test:run": "vitest run",
+    "test:coverage": "vitest run --coverage",
     "postinstall": "wxt prepare"
   },
   "dependencies": {
