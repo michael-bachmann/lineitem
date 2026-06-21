@@ -91,7 +91,12 @@ async function performSyncInner(): Promise<SyncResult> {
       // state) and a per-retailer summary for the resolution card. These charges
       // are disjoint from `unmatched`, so no double-counting below.
       if (blocked) {
-        blockedRetailers.push({ retailer: retailerId, reason: blocked.reason, count: blocked.charges.length });
+        blockedRetailers.push({
+          retailer: retailerId,
+          reason: blocked.reason,
+          count: blocked.charges.length,
+          ...(blocked.url ? { url: blocked.url } : {}),
+        });
         for (const charge of blocked.charges) {
           const tx = entryById.get(charge.ynabTransactionId)?.tx;
           if (!tx) continue;

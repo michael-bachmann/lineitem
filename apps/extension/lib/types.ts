@@ -126,9 +126,9 @@ export type MessageRequest =
   | { type: "REFRESH_CATEGORIES" }
   | { type: "GET_CATEGORIES" }
   | { type: "CLEAR_SETTINGS" }
-  | { type: "START_BACKFILL"; fromDate: string }
+  | { type: "START_BACKFILL"; fromDate: string; retailers?: string[] }
   | { type: "CANCEL_BACKFILL" }
-  | { type: "OPEN_RETAILER"; retailer: string };
+  | { type: "OPEN_RETAILER"; retailer: string; url?: string };
 
 /** Messages broadcast from the background to interested listeners (e.g. the
  *  side panel). Distinct from MessageRequest because no response is expected. */
@@ -175,6 +175,9 @@ export interface BackfillRetailerProgress {
    *  be read at all, so its low match count means "sign in", not "won't match".
    *  Drives a sign-in prompt on the done card instead of the generic copy. */
   blocked?: RetailerBlockReason;
+  /** For `step_up`: the gated page to open so the challenge actually appears
+   *  (see RetailerBlock.url). */
+  blockedUrl?: string;
 }
 
 /**
@@ -370,6 +373,11 @@ export type RetailerBlockReason = "signed_out" | "step_up";
 export interface RetailerBlock {
   reason: RetailerBlockReason;
   charges: YnabCharge[];
+  /** For `step_up` only: the gated page (e.g. a Target invoices URL) whose load
+   *  triggered the challenge. Open THIS to drop the user on the re-auth prompt —
+   *  the orders list renders at the soft tier and would look already signed in.
+   *  Unset for `signed_out` (the orders list itself redirects to login). */
+  url?: string;
 }
 
 /** Per-retailer sign-in prompt the side panel surfaces above the queue. */
@@ -378,6 +386,9 @@ export interface BlockedRetailer {
   reason: RetailerBlockReason;
   /** How many charges this block left unreadable. */
   count: number;
+  /** For `step_up`: the gated page to open so the challenge actually appears
+   *  (see RetailerBlock.url). */
+  url?: string;
 }
 
 // ---------------------------------------------------------------------------

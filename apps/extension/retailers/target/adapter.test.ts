@@ -102,6 +102,17 @@ describe("unwrap", () => {
     expect(() => unwrap({ error: "auth_required" })).toThrow(StepUpRequired);
   });
 
+  it("carries the gated URL onto StepUpRequired so the block can point the user at the challenge page", () => {
+    const url = "https://www.target.com/orders/123/invoices";
+    try {
+      unwrap({ error: "auth_required" }, url);
+      expect.unreachable("should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(StepUpRequired);
+      expect((err as StepUpRequired).url).toBe(url);
+    }
+  });
+
   it("throws a plain error (not StepUpRequired) on any other error shape — guards the old undefined.filter crash", () => {
     expect(() => unwrap({ error: "boom" })).toThrow(/Target scrape error/);
     expect(() => unwrap({ error: "boom" })).not.toThrow(StepUpRequired);

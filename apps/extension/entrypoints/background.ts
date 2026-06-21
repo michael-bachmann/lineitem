@@ -129,6 +129,7 @@ async function handleMessage(message: MessageRequest): Promise<unknown> {
       try {
         const result = await runBackfill({
           fromDate: message.fromDate,
+          retailers: message.retailers,
           signal: backfillController.signal,
           onProgress: (event) => {
             const broadcast: MessageBroadcast = { type: "BACKFILL_PROGRESS", event };
@@ -153,8 +154,11 @@ async function handleMessage(message: MessageRequest): Promise<unknown> {
 
     case "OPEN_RETAILER": {
       try {
-        const adapter = getAdapter(message.retailer);
-        const result = await openRetailerTab(adapter.startUrl);
+        // A step-up block passes the gated page that forces the challenge; fall
+        // back to the retailer's normal start URL (signed-out, which redirects
+        // to login on its own).
+        const destination = message.url ?? getAdapter(message.retailer).startUrl;
+        const result = await openRetailerTab(destination);
         // Foreground the tab so the user can sign in. Resume is manual (they tap
         // Sync afterward) — once signed in, the profile-level cookies make any
         // later scrape authed regardless of which tab it uses.

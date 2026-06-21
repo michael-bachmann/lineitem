@@ -44,8 +44,11 @@ export async function savePlan(planId: string, planName: string): Promise<{ erro
 
 export type StartBackfillResponse = { ok: true; result: BackfillResult } | { error: string };
 
-export async function startBackfill(fromDate: string): Promise<StartBackfillResponse> {
-  return (await send({ type: "START_BACKFILL", fromDate })) as StartBackfillResponse;
+export async function startBackfill(
+  fromDate: string,
+  retailers?: string[],
+): Promise<StartBackfillResponse> {
+  return (await send({ type: "START_BACKFILL", fromDate, retailers })) as StartBackfillResponse;
 }
 
 export async function cancelBackfill(): Promise<void> {
@@ -76,9 +79,11 @@ export async function sync(): Promise<{ queue?: QueueEntry[]; blocked?: BlockedR
   };
 }
 
-/** Open/focus the retailer's tab so the user can sign in, then they tap Sync. */
-export async function openRetailer(retailer: string): Promise<{ error?: string }> {
-  return (await send({ type: "OPEN_RETAILER", retailer })) as { error?: string };
+/** Open/focus the retailer's tab so the user can sign in, then they tap Sync.
+ *  `url` overrides the destination — for a step-up block, the gated page that
+ *  forces the challenge (the orders list alone looks already signed in). */
+export async function openRetailer(retailer: string, url?: string): Promise<{ error?: string }> {
+  return (await send({ type: "OPEN_RETAILER", retailer, url })) as { error?: string };
 }
 
 export async function approveTransaction(

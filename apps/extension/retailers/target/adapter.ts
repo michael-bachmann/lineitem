@@ -39,7 +39,10 @@ function send<T>(tabId: number, type: string): Promise<T> {
  *  into a single `step_up` block. Propagated past local catches the way the
  *  abort signal is (see the `instanceof` re-throws below). */
 export class StepUpRequired extends Error {
-  constructor() {
+  /** The gated page whose load triggered the challenge — surfaced as the
+   *  block's `url` so the "Open Target" button lands on the re-auth prompt
+   *  rather than the soft-tier orders list. */
+  constructor(readonly url?: string) {
     super("step_up_required");
     this.name = "StepUpRequired";
   }
@@ -52,11 +55,14 @@ export class StepUpRequired extends Error {
  * Turn that into a StepUpRequired bail; turn any other error shape into a thrown
  * Error so a malformed response degrades the order instead of becoming
  * `undefined` and crashing downstream (e.g. `undefined.filter`).
+ *
+ * `gatedUrl` is the page we just navigated to — carried onto the StepUpRequired
+ * so the block can point "Open Target" at the page that actually challenges.
  */
-export function unwrap<T>(resp: T | { error: string }): T {
+export function unwrap<T>(resp: T | { error: string }, gatedUrl?: string): T {
   if (resp && typeof resp === "object" && "error" in resp) {
     const { error } = resp as { error: string };
-    if (error === "auth_required") throw new StepUpRequired();
+    if (error === "auth_required") throw new StepUpRequired(gatedUrl);
     throw new Error(`Target scrape error: ${error}`);
   }
   return resp as T;
@@ -165,9 +171,11 @@ export const targetAdapter: RetailerAdapter = {
         let invoices: RawTargetInvoice[];
         try {
           invoices = await readWithRetry(`invoices ${order.orderId}`, async () => {
-            await navigateTab(tabId, orderInvoicesUrl(order.orderId));
+            const url = orderInvoicesUrl(order.orderId);
+            await navigateTab(tabId, url);
             return unwrap(
               await send<{ invoices: RawTargetInvoice[] } | { error: string }>(tabId, "SCRAPE_INVOICES_LIST"),
+              url,
             ).invoices;
           });
         } catch (err) {
@@ -214,9 +222,11 @@ export const targetAdapter: RetailerAdapter = {
             let detail: RawTargetInvoiceDetail;
             try {
               detail = await readWithRetry(`invoice detail ${orderId}/${inv.invoiceId}`, async () => {
-                await navigateTab(tabId, invoiceDetailUrl(orderId, inv.invoiceId));
+                const url = invoiceDetailUrl(orderId, inv.invoiceId);
+                await navigateTab(tabId, url);
                 return unwrap(
                   await send<{ detail: RawTargetInvoiceDetail } | { error: string }>(tabId, "SCRAPE_INVOICE_DETAIL"),
+                  url,
                 ).detail;
               });
             } catch (err) {
@@ -276,9 +286,11 @@ export const targetAdapter: RetailerAdapter = {
         if (!imageMap) {
           try {
             imageMap = await readWithRetry(`images ${mi.orderId}`, async () => {
-              await navigateTab(tabId, orderDetailUrl(mi.orderId));
+              const url = orderDetailUrl(mi.orderId);
+              await navigateTab(tabId, url);
               return unwrap(
                 await send<{ imageMap: Record<string, string> } | { error: string }>(tabId, "SCRAPE_ORDER_IMAGES"),
+                url,
               ).imageMap;
             });
           } catch (err) {
@@ -309,7 +321,15 @@ export const targetAdapter: RetailerAdapter = {
         // rest (genuinely unmatchable charges then fall to no_match).
         const done = new Set(matched.flatMap((m) => m.charges.map((c) => c.ynabTransactionId)));
         const blockedCharges = charges.filter((c) => !done.has(c.ynabTransactionId));
-        return { matched, unmatched: [], blocked: { reason: "step_up", charges: blockedCharges } };
+        return {
+          matched,
+          unmatched: [],
+          blocked: {
+            reason: "step_up",
+            charges: blockedCharges,
+            ...(err.url ? { url: err.url } : {}),
+          },
+        };
       }
       throw err;
     } finally {
@@ -328,9 +348,11 @@ interface MatchedInvoice {
 async function loadDetail(
   tabId: number, orderId: string, invoiceId: string,
 ): Promise<RawTargetInvoiceDetail> {
-  await navigateTab(tabId, invoiceDetailUrl(orderId, invoiceId));
+  const url = invoiceDetailUrl(orderId, invoiceId);
+  await navigateTab(tabId, url);
   const { detail } = unwrap(
     await send<{ detail: RawTargetInvoiceDetail } | { error: string }>(tabId, "SCRAPE_INVOICE_DETAIL"),
+    url,
   );
   return detail;
 }

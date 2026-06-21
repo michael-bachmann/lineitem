@@ -28,6 +28,11 @@ const BACKFILL_MAX_PAGES = 30;
 export interface BackfillOptions {
   /** ISO date string YYYY-MM-DD. Inclusive lower bound on tx.date. */
   fromDate: string;
+  /** When set, only scrape these retailers this run (candidate assessment still
+   *  spans all retailers, so the done-card totals stay whole). Used by the
+   *  "Run again" after a sign-in wall: signing into one retailer shouldn't
+   *  re-walk the others. Omitted → scrape every retailer with pending orders. */
+  retailers?: string[];
   signal?: AbortSignal;
   onProgress?: (event: BackfillProgress) => void;
 }
@@ -60,7 +65,7 @@ function toYnabCharge(tx: YnabTransaction): YnabCharge {
  * re-runs instead of resetting to "0 of N" each time.
  */
 export async function runBackfill(options: BackfillOptions): Promise<BackfillResult> {
-  const { fromDate, signal, onProgress } = options;
+  const { fromDate, retailers, signal, onProgress } = options;
 
   const settings = await getSettings();
   if (!settings.accessToken || !settings.planId) throw new Error(NOT_CONNECTED);
@@ -78,6 +83,10 @@ export async function runBackfill(options: BackfillOptions): Promise<BackfillRes
   let aggregate: RetailerTotals = { matched: 0, unmatched: 0, failed: 0, itemsWritten: 0 };
   const runByRetailer = new Map<string, RetailerTotals>();
   for (const [retailerId, group] of Object.entries(byRetailer)) {
+    // Scoped re-run: skip retailers the caller didn't ask for this pass. Their
+    // pending orders stay pending (no allocation marker written), so a later
+    // unscoped run still picks them up.
+    if (retailers && !retailers.includes(retailerId)) continue;
     signal?.throwIfAborted();
     const r = await runForRetailer(retailerId, group, { signal, onProgress });
     runByRetailer.set(retailerId, r);
@@ -106,6 +115,7 @@ export async function runBackfill(options: BackfillOptions): Promise<BackfillRes
         matched: counts.alreadyMatched + (run?.matched ?? 0),
         failed: run?.failed ?? 0,
         ...(run?.blocked ? { blocked: run.blocked } : {}),
+        ...(run?.blockedUrl ? { blockedUrl: run.blockedUrl } : {}),
       };
     });
 
@@ -200,6 +210,8 @@ interface RetailerTotals {
   itemsWritten: number;
   /** The retailer hit a sign-in wall this run (its orders were unreadable). */
   blocked?: RetailerBlockReason;
+  /** For a `step_up` block: the gated page to open (see RetailerBlock.url). */
+  blockedUrl?: string;
 }
 
 /**
@@ -306,6 +318,7 @@ async function runForRetailer(
       failed: readFailed,
       itemsWritten: entries.length,
       blocked: blocked?.reason,
+      blockedUrl: blocked?.url,
     };
   } catch (err) {
     // Re-throw abort so runBackfill stops the per-retailer loop instead of

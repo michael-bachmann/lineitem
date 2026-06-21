@@ -35,10 +35,10 @@ export default function BackfillCard({ onStateChange }: BackfillCardProps = {}) 
     [],
   );
 
-  async function start() {
+  async function start(retailers?: string[]) {
     setState({ kind: "running", progress: { status: "preparing" } });
     try {
-      const res = await startBackfill(defaultFromDate());
+      const res = await startBackfill(defaultFromDate(), retailers);
       if ("error" in res) setState({ kind: "error", message: res.error });
       else setState({ kind: "done", result: res.result });
     } catch (e) {
@@ -55,7 +55,7 @@ export default function BackfillCard({ onStateChange }: BackfillCardProps = {}) 
       state={state}
       onStart={start}
       onCancel={cancel}
-      onOpenRetailer={(retailer) => void openRetailer(retailer)}
+      onOpenRetailer={(retailer, url) => void openRetailer(retailer, url)}
     />
   );
 }
