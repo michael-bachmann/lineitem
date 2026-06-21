@@ -64,10 +64,15 @@ async function handleMessage(message: ContentMessage): Promise<unknown> {
   }
 }
 
-function scrapeTransactions(): { transactions: RawTransaction[] } | { error: string } {
+async function scrapeTransactions(): Promise<{ transactions: RawTransaction[] } | { error: string }> {
   if (AUTH_PAGE_REGEX.test(window.location.href)) {
     return { error: "auth_required" };
   }
+  // The transactions list renders asynchronously after load. The readiness
+  // handshake confirms the content script is live, NOT that Amazon's widget has
+  // painted its rows — so read too early and we get zero transactions and miss
+  // the whole page. Wait for the rows first (mirrors Target's SCRAPE_ORDERS_LIST).
+  await waitFor(() => document.querySelector(SELECTORS.lineItem) !== null);
   return { transactions: parseTransactionsFromDocument(document) };
 }
 
