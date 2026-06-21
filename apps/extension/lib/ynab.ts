@@ -1,5 +1,5 @@
 import type { YnabTransaction, Category } from "./types";
-import { getValidAccessToken, NeedsReauthError } from "./oauth";
+import { getValidAccessToken } from "./oauth";
 import { saveSettings } from "./settings";
 
 const BASE_URL = "https://api.ynab.com/v1";

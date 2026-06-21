@@ -23,8 +23,8 @@ export const Issue: Story = { args: { kind: "issue" } };
 /** Fill the form and submit to reach the success state. */
 export const Success: Story = {
   args: { kind: "retailer" },
-  play: async ({ canvasElement }) => {
-    // The dialog renders in the top layer, outside canvasElement — query the doc.
+  play: async () => {
+    // The dialog renders in the top layer, outside Storybook's canvas — query the doc.
     const dialog = within(document.body);
     await userEvent.type(dialog.getByRole("textbox", { name: /which retailer/i }), "Costco");
     await userEvent.click(dialog.getByRole("button", { name: /send request/i }));
