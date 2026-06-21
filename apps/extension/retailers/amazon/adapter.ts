@@ -6,7 +6,7 @@ import type {
   PayeeMapping,
 } from "@/lib/types";
 import { assignByAmountAndDate, cutoffDateFor, NO_MATCH_REASON, READ_FAILED_REASON } from "@/lib/matcher";
-import { openRetailerTab, navigateTab, sendToTab } from "@/background/tabs";
+import { openRetailerTab, navigateTab, sendToTab, waitForTabLoad } from "@/background/tabs";
 import { orderDetailUrl, itemmodUrl } from "@/retailers/amazon/selectors";
 import type { RawTransaction, RawItem } from "@/retailers/amazon/scraper";
 import { groupBy } from "remeda";
@@ -140,6 +140,20 @@ export const amazonAdapter: RetailerAdapter = {
  *  Sync's natural cutoff (`cutoffDateFor`) short-circuits well before this. */
 const DEFAULT_MAX_PAGES = 10;
 
+/** Turning the pager drops the content-script message channel, so the NEXT_PAGE
+ *  reply is lost and the send rejects with one of these. The exact cause in
+ *  Firefox is NOT pinned down: the URL never changes and the amazon.com console
+ *  persists across turns, which argues against a full reload — it may be the
+ *  AJAX swap transiently dropping/re-injecting the content script rather than a
+ *  navigation. What we DO know empirically: the page turns (pagination
+ *  advances), so treat this rejection as "the page turned" and re-sync rather
+ *  than fail. A genuine hang trips sendToTab's reply timeout instead, which we
+ *  let propagate. (TODO: instrument to confirm the mechanism — see BAC-146.) */
+export function isPageTurnChannelError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  return /message channel closed|receiving end does not exist/i.test(msg);
+}
+
 interface PaginateResult {
   matchedPairs: [YnabCharge, RawTransaction][];
   unmatchedCharges: YnabCharge[];
@@ -200,20 +214,24 @@ async function paginateAndMatch(
     );
     if (oldestOnPage < cutoffIso) break;
 
-    // NEXT_PAGE turns the pager in place (AJAX POST → JSON → DOM swap) and only
-    // replies once the new rows have landed, so the content script stays alive
-    // and the next loop's SCRAPE_TRANSACTIONS reads the fresh page directly — no
-    // navigation, no readiness wait. A throw here is a genuine failure (hung or
-    // vanished content script), so keep what we've matched and stop paginating
-    // rather than tank the whole retailer; a re-run reattempts the rest.
-    let hasNext: boolean;
+    // Turn the pager. The content script clicks Amazon's pager button.
+    //  - If NEXT_PAGE resolves (Chrome's in-place AJAX swap; content script
+    //    stayed alive and confirmed the new rows), loop and scrape.
+    //  - If it rejects because the page-turn dropped the message channel (see
+    //    isPageTurnChannelError), the page still turned — re-sync via
+    //    waitForTabLoad (which re-establishes content-script readiness) and keep
+    //    going. Any other rejection is a real failure: keep what we matched and
+    //    stop.
     try {
-      ({ hasNext } = (await sendToTab(tabId, { type: "NEXT_PAGE" })) as { hasNext: boolean });
+      const { hasNext } = (await sendToTab(tabId, { type: "NEXT_PAGE" })) as { hasNext: boolean };
+      if (!hasNext) break;
     } catch (err) {
-      console.warn("[amazon] NEXT_PAGE failed; stopping pagination", err);
-      break;
+      if (!isPageTurnChannelError(err)) {
+        console.warn("[amazon] NEXT_PAGE failed; stopping pagination", err);
+        break;
+      }
+      await waitForTabLoad(tabId);
     }
-    if (!hasNext) break;
   }
 
   return { matchedPairs: allMatched, unmatchedCharges: remaining };
