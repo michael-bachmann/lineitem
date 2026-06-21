@@ -211,12 +211,21 @@ async function paginateAndMatch(
 
     // NEXT_PAGE clicks Amazon's pager, which navigates the whole page. That
     // teardown can close the message channel before the content script replies
-    // — Chrome surfaces it as a messaging error that here means "we turned the
-    // page", not a failure. Treat it as a successful page-turn; if a real next
-    // page didn't exist the content script replies cleanly with hasNext:false.
+    // — surfaced as a messaging error that here means "we turned the page", not
+    // a failure. Treat it as a successful page-turn; if a real next page didn't
+    // exist the content script replies cleanly with hasNext:false.
+    //
+    // `retryInjection: false` is load-bearing: sendToTab otherwise retries that
+    // exact channel-closed error (it can't tell it from an injection race) and
+    // would re-click the pager each retry, skipping pages. Here we WANT the
+    // rejection to propagate so isPageTurnNavigationError can claim it.
     let hasNext = true;
     try {
-      const pageResult = (await sendToTab(tabId, { type: "NEXT_PAGE" })) as { hasNext: boolean };
+      const pageResult = (await sendToTab(
+        tabId,
+        { type: "NEXT_PAGE" },
+        { retryInjection: false },
+      )) as { hasNext: boolean };
       hasNext = pageResult.hasNext;
     } catch (err) {
       if (!isPageTurnNavigationError(err)) throw err;

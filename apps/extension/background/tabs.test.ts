@@ -94,7 +94,7 @@ describe("sendToTab", () => {
       tabs: { sendMessage: vi.fn(() => new Promise(() => {})) },
     });
 
-    const p = sendToTab(7, { type: "SCRAPE" }, 1000);
+    const p = sendToTab(7, { type: "SCRAPE" }, { timeoutMs: 1000 });
     const assertion = expect(p).rejects.toThrow(/did not reply to SCRAPE within 1 seconds/);
     await vi.advanceTimersByTimeAsync(1000);
     await assertion;
@@ -122,5 +122,16 @@ describe("sendToTab", () => {
     await vi.advanceTimersByTimeAsync(200);
     await expect(p).resolves.toEqual({ ok: true });
     expect(sendMessage).toHaveBeenCalledTimes(3);
+  });
+
+  it("does NOT retry when retryInjection is false — the channel-closed error must propagate (NEXT_PAGE page-turn signal)", async () => {
+    const sendMessage = vi.fn(async () => {
+      throw new Error("Could not establish connection. Receiving end does not exist.");
+    });
+    vi.stubGlobal("browser", { tabs: { sendMessage } });
+    await expect(
+      sendToTab(7, { type: "NEXT_PAGE" }, { retryInjection: false }),
+    ).rejects.toThrow(/Receiving end does not exist/);
+    expect(sendMessage).toHaveBeenCalledTimes(1);
   });
 });

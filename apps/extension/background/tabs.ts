@@ -15,6 +15,16 @@ const NO_RECEIVER = /Receiving end does not exist|Could not establish connection
 
 const delay = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
+export interface SendToTabOptions {
+  timeoutMs?: number;
+  /** Retry the "content script not injected yet" connection error (default
+   *  true). Set false for a message whose OWN navigation legitimately closes
+   *  the channel — Amazon's NEXT_PAGE clicks the pager, so its rejection IS the
+   *  page-turn signal (see isPageTurnNavigationError); retrying would re-click
+   *  the pager and skip pages. */
+  retryInjection?: boolean;
+}
+
 /**
  * Send a message to a tab's content script, rejecting if no reply arrives
  * within `timeoutMs`. `browser.tabs.sendMessage` never times out on its own, so
@@ -23,12 +33,12 @@ const delay = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms
  *
  * Transparently retries the "content script not injected yet" connection error
  * (see INJECT_RETRY_LIMIT) so a tab that just finished loading doesn't lose its
- * whole scrape to an injection race.
+ * whole scrape to an injection race — unless `retryInjection: false`.
  */
 export async function sendToTab<T>(
   tabId: number,
   message: object,
-  timeoutMs = MESSAGE_TIMEOUT_MS,
+  { timeoutMs = MESSAGE_TIMEOUT_MS, retryInjection = true }: SendToTabOptions = {},
 ): Promise<T> {
   const type = (message as { type?: string }).type ?? "message";
   for (let attempt = 0; ; attempt++) {
@@ -36,7 +46,7 @@ export async function sendToTab<T>(
       return await sendOnce<T>(tabId, message, timeoutMs);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      if (attempt < INJECT_RETRY_LIMIT && NO_RECEIVER.test(msg)) {
+      if (retryInjection && attempt < INJECT_RETRY_LIMIT && NO_RECEIVER.test(msg)) {
         // Logged so an intermittent injection race is observable (vs. silently
         // recovered) — proof the retry engaged rather than the race not firing.
         console.info(
