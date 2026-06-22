@@ -4,6 +4,136 @@
  *  that hung), which `browser.tabs.sendMessage` alone would wait on forever. */
 const MESSAGE_TIMEOUT_MS = 30_000;
 
+// ---------------------------------------------------------------------------
+// Page-result coordination — the "page owns readiness" model.
+//
+// A content script describes the page it's on by sending ONE `PAGE_RESULT` once
+// the page is loaded and its meaningful DOM has rendered (it owns readiness and
+// parsing). The background never polls for readiness or waits on a reply to an
+// action that might navigate; it triggers an action (navigate, or an in-page
+// command) and then `awaitPageResult` for the next result matching a predicate.
+//
+// A navigation that destroys the content script is therefore a non-event:
+// whichever content script lands on the resulting page sends the next result,
+// and the await resolves on that. Auth walls are ordinary results too (the page
+// reports a "login" kind), so a mid-walk step-up never hangs or throws.
+// ---------------------------------------------------------------------------
+
+interface PageResultWaiter<T> {
+  predicate: (result: T) => boolean;
+  resolve: (result: T) => void;
+  reject: (err: Error) => void;
+}
+
+// The newest result for which no waiter was registered yet — covers a result
+// that lands a tick before the adapter's await (the cold-start / fast-load
+// race). Single-slot: our walks await one result at a time, so a newer result
+// supersedes an unconsumed older one.
+const bufferedResult = new Map<number, unknown>();
+const pageResultWaiters = new Map<number, PageResultWaiter<unknown>[]>();
+
+/**
+ * Deliver a page result to the first waiting `awaitPageResult` whose predicate
+ * matches, else buffer it for an imminent one. Exported for tests; production
+ * wiring is `initPageResultListener`.
+ */
+export function deliverPageResult(tabId: number, result: unknown): void {
+  const queue = pageResultWaiters.get(tabId);
+  if (queue) {
+    const i = queue.findIndex((w) => w.predicate(result));
+    if (i !== -1) {
+      const [waiter] = queue.splice(i, 1);
+      waiter.resolve(result);
+      return;
+    }
+  }
+  bufferedResult.set(tabId, result);
+}
+
+/**
+ * Resolve with the next `PAGE_RESULT` from `tabId` whose payload matches
+ * `predicate` (or a just-buffered one). Rejects if none arrives within
+ * `timeoutMs` — a real "the page never reached the expected state" failure the
+ * caller surfaces, rather than a silent hang.
+ */
+export function awaitPageResult<T>(
+  tabId: number,
+  predicate: (result: T) => boolean,
+  timeoutMs = MESSAGE_TIMEOUT_MS,
+): Promise<T> {
+  const buffered = bufferedResult.get(tabId);
+  if (buffered !== undefined && predicate(buffered as T)) {
+    bufferedResult.delete(tabId);
+    return Promise.resolve(buffered as T);
+  }
+  return new Promise<T>((resolve, reject) => {
+    const queue = pageResultWaiters.get(tabId) ?? [];
+    const waiter: PageResultWaiter<unknown> = {
+      predicate: predicate as (r: unknown) => boolean,
+      resolve: (r) => {
+        clearTimeout(timer);
+        resolve(r as T);
+      },
+      reject: (err) => {
+        clearTimeout(timer);
+        reject(err);
+      },
+    };
+    const timer = setTimeout(() => {
+      const q = pageResultWaiters.get(tabId);
+      const i = q?.indexOf(waiter) ?? -1;
+      if (q && i !== -1) q.splice(i, 1);
+      reject(new Error(`Tab ${tabId} produced no matching page result within ${timeoutMs / 1000}s`));
+    }, timeoutMs);
+    queue.push(waiter);
+    pageResultWaiters.set(tabId, queue);
+  });
+}
+
+/** Drop any buffered result and fail any pending waiters for a closed tab. */
+export function clearTabPageResults(tabId: number): void {
+  bufferedResult.delete(tabId);
+  const queue = pageResultWaiters.get(tabId);
+  if (queue) {
+    pageResultWaiters.delete(tabId);
+    for (const w of queue) w.reject(new Error(`Tab ${tabId} was closed`));
+  }
+}
+
+/**
+ * Drop only the buffered (unconsumed) result for a tab, leaving any waiters.
+ * An adapter calls this at the start of a scrape so a result left in the buffer
+ * by a PREVIOUS run on a reused tab (which is never closed) can't be matched as
+ * if it were the current page.
+ */
+export function clearBufferedPageResult(tabId: number): void {
+  bufferedResult.delete(tabId);
+}
+
+let pageResultListenerReady = false;
+
+/** Wire `PAGE_RESULT` messages and tab-close cleanup to the coordinator above.
+ *  Called once at service-worker startup so the listener is live before any
+ *  scrape — a result from the very first page load can't be missed. Idempotent. */
+export function initPageResultListener(): void {
+  if (pageResultListenerReady) return;
+  pageResultListenerReady = true;
+  browser.runtime.onMessage.addListener((message: unknown, sender) => {
+    if (
+      typeof message === "object" &&
+      message !== null &&
+      (message as { type?: string }).type === "PAGE_RESULT" &&
+      sender.tab?.id !== undefined
+    ) {
+      // `result` is unvalidated here — the adapter recovers its retailer-specific
+      // type via awaitPageResult<T>. Safe because the sender is our own extension
+      // (content scripts), gated by the extension-id check on the content side.
+      deliverPageResult(sender.tab.id, (message as { result: unknown }).result);
+    }
+  });
+  browser.tabs.onRemoved.addListener((tabId) => clearTabPageResults(tabId));
+}
+
 /** Readiness handshake budget. A tab reports `status: "complete"` before its
  *  content script has finished injecting (most visibly on Firefox), so callers
  *  that just navigated poll PING until the script answers PONG before sending a
@@ -13,40 +143,14 @@ const READY_TIMEOUT_MS = 15_000;
 
 const delay = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
-/**
- * Send a message to a tab's content script, rejecting if no reply arrives
- * within `timeoutMs`. `browser.tabs.sendMessage` never times out on its own, so
- * a hung scraper would otherwise freeze the whole flow; this turns that hang
- * into a catchable error the caller can retry or skip.
- *
- * Callers reach here only after openRetailerTab/navigateTab/waitForTabLoad have
- * confirmed the content script is live (waitForContentReady), so "Receiving end
- * does not exist" is no longer the common outcome — when it does occur the
- * script went away after the handshake (e.g. a page that navigated out from
- * under a multi-message sequence, like a mid-walk step-up redirect).
- */
-export function sendToTab<T>(
-  tabId: number,
-  message: object,
-  timeoutMs = MESSAGE_TIMEOUT_MS,
-): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const type = (message as { type?: string }).type ?? "message";
-    const timer = setTimeout(() => {
-      reject(new Error(`Tab ${tabId} did not reply to ${type} within ${timeoutMs / 1000} seconds`));
-    }, timeoutMs);
-    browser.tabs.sendMessage(tabId, message).then(
-      (res) => {
-        clearTimeout(timer);
-        resolve(res as T);
-      },
-      (err) => {
-        clearTimeout(timer);
-        reject(err);
-      },
-    );
-  });
-}
+// ---------------------------------------------------------------------------
+// Tab navigation + readiness handshake.
+//
+// Both retailer adapters now drive pages through the page-result model above.
+// These remain because openRetailerTab still has to bring a tab to its start URL
+// and confirm the content script is live (PING/PONG) before the first describe;
+// the adapters' own navigations go through browser.tabs.update + awaitPageResult.
+// ---------------------------------------------------------------------------
 
 /**
  * Resolve once the tab's content script answers a PING — i.e. it's injected and

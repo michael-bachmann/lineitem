@@ -3,10 +3,10 @@ import { READ_FAILED_REASON } from "@/lib/matcher";
 import { NOT_CONNECTED } from "@/lib/messages";
 import { getSettings } from "@/lib/settings";
 import { getTransactionsSince } from "@/lib/ynab";
+import { toYnabCharge } from "@/lib/money";
 import { getAllocatedTransaction, putAllocatedTransactions } from "@/lib/db";
 import { getRetailerForPayee } from "@/lib/registry";
 import { getAdapter } from "@/retailers/registry";
-import { millunitsToCents } from "@/lib/money";
 import { verifyScrape } from "@/lib/verify-scrape";
 import { distributeOrder } from "@/lib/distribution";
 import { learnFromApproval, type LearnEntry } from "./approval";
@@ -35,16 +35,6 @@ export interface BackfillOptions {
   retailers?: string[];
   signal?: AbortSignal;
   onProgress?: (event: BackfillProgress) => void;
-}
-
-function toYnabCharge(tx: YnabTransaction): YnabCharge {
-  return {
-    ynabTransactionId: tx.id,
-    date: tx.date,
-    amountCents: millunitsToCents(tx.amount),
-    payeeName: tx.payee_name ?? "",
-    isRefund: tx.amount > 0,
-  };
 }
 
 /**
@@ -119,8 +109,8 @@ export async function runBackfill(options: BackfillOptions): Promise<BackfillRes
       };
     });
 
-  // Debug breakdown — surface internal counters that the UI deliberately hides.
-  console.log("[backfill] done", {
+  // Breakdown — surface internal counters that the UI deliberately hides.
+  console.info("[backfill] done", {
     totalEligible: assessment.totalEligible,
     alreadyBackfilled: alreadyBackfilledCount,
     newlyMatched: aggregate.matched,
@@ -282,7 +272,7 @@ async function runForRetailer(
       maxPages: BACKFILL_MAX_PAGES,
       signal: ctx.signal,
       onScrapeProgress: ({ index, total }) =>
-        ctx.onProgress?.({ status: "scraping", index, total }),
+        ctx.onProgress?.({ status: "scraping", retailer: retailerId, index, total }),
     });
 
     // The adapter checks the signal between detail-page scrapes but not
@@ -300,7 +290,7 @@ async function runForRetailer(
     // with nothing actually learned.
     if (entries.length > 0) {
       await learnFromApproval(retailerId, entries, ({ index, total }) =>
-        ctx.onProgress?.({ status: "learning", index, total }),
+        ctx.onProgress?.({ status: "learning", retailer: retailerId, index, total }),
       );
     }
     if (allocations.length > 0) await putAllocatedTransactions(allocations);

@@ -576,8 +576,8 @@ describe("runBackfill — progress events", () => {
 
     expect(events).toEqual([
       { status: "preparing" },
-      { status: "scraping", index: 1, total: 2 },
-      { status: "scraping", index: 2, total: 2 },
+      { status: "scraping", retailer: "amazon", index: 1, total: 2 },
+      { status: "scraping", retailer: "amazon", index: 2, total: 2 },
     ]);
   });
 
@@ -604,6 +604,6 @@ describe("runBackfill — progress events", () => {
       onProgress: (e) => events.push(e),
     });
 
-    expect(events).toContainEqual({ status: "learning", index: 2, total: 2 });
+    expect(events).toContainEqual({ status: "learning", retailer: "amazon", index: 2, total: 2 });
   });
 });

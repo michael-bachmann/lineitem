@@ -1,32 +1,166 @@
-import { describe, expect, it } from "vitest";
-import { isPageTurnChannelError } from "./adapter";
+import { describe, expect, it, vi, beforeEach } from "vitest";
+import type { YnabCharge } from "@/lib/types";
+import type { AmazonPageResult } from "./page";
 
-describe("isPageTurnChannelError", () => {
-  // Turning Amazon's pager drops the content-script message channel, so the
-  // NEXT_PAGE reply is lost and the send rejects with one of these. That means
-  // "the page turned" (re-sync and continue), not "the scrape failed".
-  it("matches the message-channel-closed error", () => {
-    expect(
-      isPageTurnChannelError(
-        new Error(
-          "A listener indicated an asynchronous response by returning true, but the message channel closed before a response was received",
-        ),
-      ),
-    ).toBe(true);
+// The walk drives the page through @/background/tabs; mock it so we can script a
+// sequence of page results and assert how the adapter coordinates them.
+const { openRetailerTab, awaitPageResult } = vi.hoisted(() => ({
+  openRetailerTab: vi.fn(),
+  awaitPageResult: vi.fn(),
+}));
+vi.mock("@/background/tabs", () => ({
+  openRetailerTab,
+  awaitPageResult,
+  clearBufferedPageResult: vi.fn(),
+}));
+
+import { amazonAdapter } from "./adapter";
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  vi.stubGlobal("browser", {
+    tabs: {
+      update: vi.fn(async () => {}),
+      sendMessage: vi.fn(async () => {}),
+      remove: vi.fn(async () => {}),
+    },
+  });
+  openRetailerTab.mockResolvedValue({ tabId: 1, weOpenedTab: true });
+});
+
+const charge = (o: Partial<YnabCharge> = {}): YnabCharge => ({
+  ynabTransactionId: "tx1",
+  date: "2026-06-01",
+  amountCents: 1000,
+  payeeName: "AMAZON",
+  isRefund: false,
+  ...o,
+});
+
+/** Return the queued page results in order, one per awaitPageResult call. */
+function queueResults(...results: AmazonPageResult[]) {
+  const q = [...results];
+  awaitPageResult.mockImplementation(async () => q.shift());
+}
+
+const txRow = (orderId: string, o: Partial<{ date: string; amountCents: number }> = {}) => ({
+  date: o.date ?? "2026-06-01",
+  amountCents: o.amountCents ?? 1000,
+  orderId,
+  isRefund: false,
+});
+
+const item = () => ({
+  productId: "B0X",
+  title: "Widget",
+  priceCents: 1000,
+  quantity: 1,
+  imageUrl: "img",
+  refundedAmountCents: 0,
+});
+
+describe("amazonAdapter.scrapeMatchedOrders", () => {
+  it("returns a signed_out block when the transactions list shows login", async () => {
+    queueResults({ pageKind: "login" });
+    const c = charge();
+    const res = await amazonAdapter.scrapeMatchedOrders([c]);
+    expect(res.matched).toEqual([]);
+    expect(res.blocked).toEqual({ reason: "signed_out", charges: [c] });
   });
 
-  it("matches the receiving-end-does-not-exist error (observed on Firefox NEXT_PAGE)", () => {
-    expect(
-      isPageTurnChannelError(new Error("Could not establish connection. Receiving end does not exist.")),
-    ).toBe(true);
+  it("matches a charge to its order-linked row and scrapes the order detail", async () => {
+    const c = charge({ amountCents: 1000, date: "2026-06-01" });
+    queueResults(
+      { pageKind: "transactions", fingerprint: "p1", hasNext: false, transactions: [txRow("111-A")] },
+      {
+        pageKind: "order-summary",
+        orderId: "111-A",
+        subtotalCents: 1000,
+        requiresItemmod: false,
+        items: [item()],
+        refund: null,
+      },
+    );
+    const res = await amazonAdapter.scrapeMatchedOrders([c]);
+    expect(res.matched).toHaveLength(1);
+    expect(res.matched[0].order.orderId).toBe("111-A");
+    expect(res.matched[0].order.items[0].unitPriceCents).toBe(1000);
+    expect(res.matched[0].charges).toEqual([c]);
+    expect(res.unmatched).toEqual([]);
   });
 
-  it("does NOT match a sendToTab reply timeout — a genuine hang must still propagate", () => {
-    expect(isPageTurnChannelError(new Error("Tab 7 did not reply to NEXT_PAGE within 30 seconds"))).toBe(false);
+  it("keeps partial matches and blocks the rest when a detail page hits login mid-walk", async () => {
+    const c = charge();
+    queueResults(
+      { pageKind: "transactions", fingerprint: "p1", hasNext: false, transactions: [txRow("111-A")] },
+      { pageKind: "login" }, // the order-detail navigation landed on a sign-in wall
+    );
+    const res = await amazonAdapter.scrapeMatchedOrders([c]);
+    expect(res.matched).toEqual([]);
+    expect(res.blocked?.reason).toBe("signed_out");
+    expect(res.blocked?.charges).toEqual([c]);
   });
 
-  it("does NOT match an unrelated error", () => {
-    expect(isPageTurnChannelError(new Error("boom"))).toBe(false);
-    expect(isPageTurnChannelError("not an error")).toBe(false);
+  it("reports a charge with no order-linked row as unmatched (no_match)", async () => {
+    const c = charge({ amountCents: 9999 }); // no row matches this amount
+    queueResults({
+      pageKind: "transactions",
+      fingerprint: "p1",
+      hasNext: false,
+      transactions: [txRow("111-A", { amountCents: 1000 })],
+    });
+    const res = await amazonAdapter.scrapeMatchedOrders([c]);
+    expect(res.matched).toEqual([]);
+    expect(res.unmatched).toHaveLength(1);
+    expect(res.unmatched[0].charge).toEqual(c);
+  });
+
+  it("retries a detail page whose first read is unverifiable (no subtotal), then succeeds", async () => {
+    const c = charge();
+    const summary = (subtotalCents: number | null): AmazonPageResult => ({
+      pageKind: "order-summary",
+      orderId: "111-A",
+      subtotalCents,
+      requiresItemmod: false,
+      items: subtotalCents === null ? [] : [item()],
+      refund: null,
+    });
+    queueResults(
+      { pageKind: "transactions", fingerprint: "p1", hasNext: false, transactions: [txRow("111-A")] },
+      summary(null), // first detail read: subtotal not rendered → unverifiable → retry
+      summary(1000), // retry: clean read
+    );
+    const res = await amazonAdapter.scrapeMatchedOrders([c]);
+    expect(res.matched).toHaveLength(1);
+    expect(res.matched[0].order.orderId).toBe("111-A");
+    expect(res.unmatched).toEqual([]);
+  });
+
+  it("keeps partial results (no throw) when a page-result await times out mid-pagination", async () => {
+    const c = charge();
+    // The very first transactions read never arrives — awaitPageResult rejects.
+    awaitPageResult.mockRejectedValue(new Error("Tab 1 produced no matching page result within 30s"));
+    const res = await amazonAdapter.scrapeMatchedOrders([c]);
+    expect(res.matched).toEqual([]);
+    expect(res.unmatched).toHaveLength(1); // surfaced as no_match, not a crash
+    expect(res.blocked).toBeUndefined();
+  });
+
+  it("aborts mid-walk on an aborted signal and still cleans up the tab", async () => {
+    const c = charge();
+    const remove = vi.fn(async () => {});
+    vi.stubGlobal("browser", {
+      tabs: { update: vi.fn(async () => {}), sendMessage: vi.fn(async () => {}), remove },
+    });
+    queueResults({
+      pageKind: "transactions",
+      fingerprint: "p1",
+      hasNext: false,
+      transactions: [txRow("111-A")],
+    });
+    await expect(
+      amazonAdapter.scrapeMatchedOrders([c], { signal: AbortSignal.abort() }),
+    ).rejects.toThrow();
+    expect(remove).toHaveBeenCalledWith(1); // finally-block cleanup ran
   });
 });

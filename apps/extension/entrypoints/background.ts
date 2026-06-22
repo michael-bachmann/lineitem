@@ -8,7 +8,7 @@ import { approveTransaction, approveBatch } from "@/background/approval";
 import { ensureModelLoaded } from "@/background/embedder";
 import { runBackfill } from "@/background/backfill";
 import { getAdapter } from "@/retailers/registry";
-import { openRetailerTab } from "@/background/tabs";
+import { openRetailerTab, initPageResultListener } from "@/background/tabs";
 import type { MessageBroadcast, MessageRequest } from "@/lib/types";
 
 /** Single in-flight backfill controller. Held at module scope so a
@@ -31,11 +31,16 @@ export default defineBackground(() => {
     console.warn("Initial embedder load failed; will retry on first use", err);
   });
 
+  // Wire content-script page-result messages to the coordinator before any
+  // scrape, so a result from the very first page load can't be missed.
+  initPageResultListener();
+
   browser.runtime.onMessage.addListener(
     (message: MessageRequest | MessageBroadcast, _sender, sendResponse) => {
-      // Broadcasts (e.g. our own BACKFILL_PROGRESS, which fan out to every
-      // extension page including this one) don't expect a response.
-      if (message.type === "BACKFILL_PROGRESS") return false;
+      // Broadcasts (our own BACKFILL_PROGRESS, which fans out to every extension
+      // page including this one) and content-script PAGE_RESULT pushes (handled
+      // by initPageResultListener) don't expect a response.
+      if (message.type === "BACKFILL_PROGRESS" || message.type === "PAGE_RESULT") return false;
       handleMessage(message).then(sendResponse);
       // Return true to keep the message channel open for the async response
       return true;

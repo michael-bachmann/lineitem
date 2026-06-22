@@ -2,13 +2,13 @@ import { NO_MATCH_REASON } from "@/lib/matcher";
 import { NOT_CONNECTED } from "@/lib/messages";
 import { getSettings } from "@/lib/settings";
 import { getUnapprovedTransactions } from "@/lib/ynab";
+import { toYnabCharge } from "@/lib/money";
 import { getAllocatedTransaction, putAllocatedTransactions } from "@/lib/db";
 import { getRetailerForPayee } from "@/lib/registry";
 import { getAdapter } from "@/retailers/registry";
 import { classifyItems } from "@/lib/classifier";
 import { distributeOrder } from "@/lib/distribution";
 import { verifyScrape } from "@/lib/verify-scrape";
-import { millunitsToCents } from "@/lib/money";
 import { groupBy, partition } from "remeda";
 import type {
   YnabTransaction,
@@ -189,13 +189,3 @@ async function performSyncInner(): Promise<SyncResult> {
   }
 }
 
-/** Convert a YNAB transaction to a normalized YnabCharge. */
-function toYnabCharge(tx: YnabTransaction): YnabCharge {
-  return {
-    ynabTransactionId: tx.id,
-    date: tx.date,
-    amountCents: millunitsToCents(tx.amount),
-    payeeName: tx.payee_name ?? "",
-    isRefund: tx.amount > 0, // YNAB outflows negative; positive amount = refund/inflow
-  };
-}

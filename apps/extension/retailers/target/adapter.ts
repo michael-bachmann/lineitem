@@ -5,7 +5,7 @@ import type {
 import {
   matchByAmountAndDate, cutoffDateFor, NO_MATCH_REASON, READ_FAILED_REASON, THREE_DAYS_MS,
 } from "@/lib/matcher";
-import { openRetailerTab, navigateTab, sendToTab } from "@/background/tabs";
+import { openRetailerTab, awaitPageResult, clearBufferedPageResult } from "@/background/tabs";
 import {
   ordersUrl, orderInvoicesUrl, invoiceDetailUrl, orderDetailUrl,
 } from "@/retailers/target/selectors";
@@ -15,6 +15,7 @@ import {
 import type {
   RawTargetOrder, RawTargetInvoice, RawTargetInvoiceDetail,
 } from "@/retailers/target/scraper";
+import type { TargetPageResult } from "@/retailers/target/page";
 
 const PAYEES: PayeeMapping[] = [
   { pattern: /target|tgt\b/i, retailer: "target", strategy: "scrape" },
@@ -29,60 +30,18 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const PREFILTER_BEFORE_MS = 7 * DAY_MS;
 const PREFILTER_AFTER_MS = 45 * DAY_MS;
 
-function send<T>(tabId: number, type: string): Promise<T> {
-  return sendToTab<T>(tabId, { type });
-}
-
-/** Thrown when a gated page (invoice / invoice-detail / order-image) redirected
- *  to Target's step-up sign-in. One step-up elevates the whole session, so we
+/** Thrown when a gated page (orders list mid-walk, invoices, invoice detail, or
+ *  order detail) redirected to Target's step-up sign-in — surfaced to the content
+ *  script as a `login` page result. One step-up elevates the whole session, so we
  *  bail the entire walk rather than retry per page, and the adapter converts it
- *  into a single `step_up` block. Propagated past local catches the way the
- *  abort signal is (see the `instanceof` re-throws below). */
+ *  into a single `step_up` block. Propagated past local catches via `instanceof`. */
 export class StepUpRequired extends Error {
-  /** The gated page whose load triggered the challenge — surfaced as the
-   *  block's `url` so the "Open Target" button lands on the re-auth prompt
-   *  rather than the soft-tier orders list. */
+  /** The gated page whose load triggered the challenge — surfaced as the block's
+   *  `url` so "Open Target" lands on the re-auth prompt rather than the soft-tier
+   *  orders list. */
   constructor(readonly url?: string) {
     super("step_up_required");
     this.name = "StepUpRequired";
-  }
-}
-
-/**
- * Unwrap a content-script scrape response. The content script returns the
- * payload, or `{ error: "auth_required" }` when the page 302'd to Target's
- * step-up sign-in (any gated page — invoices, invoice detail, or order images).
- * Turn that into a StepUpRequired bail; turn any other error shape into a thrown
- * Error so a malformed response degrades the order instead of becoming
- * `undefined` and crashing downstream (e.g. `undefined.filter`).
- *
- * `gatedUrl` is the page we just navigated to — carried onto the StepUpRequired
- * so the block can point "Open Target" at the page that actually challenges.
- */
-export function unwrap<T>(resp: T | { error: string }, gatedUrl?: string): T {
-  if (resp && typeof resp === "object" && "error" in resp) {
-    const { error } = resp as { error: string };
-    if (error === "auth_required") throw new StepUpRequired(gatedUrl);
-    throw new Error(`Target scrape error: ${error}`);
-  }
-  return resp as T;
-}
-
-/**
- * Run one page read, retrying it once on failure. A failed/hung load or a
- * frozen parser usually recovers on a fresh navigation, so one cheap retry
- * absorbs transient blips. (Cancellation is handled by the loop-level
- * `signal.throwIfAborted()` calls, which sit outside every read.)
- */
-export async function readWithRetry<T>(label: string, read: () => Promise<T>): Promise<T> {
-  try {
-    return await read();
-  } catch (err) {
-    // A step-up won't clear on retry (the whole session is gated) — propagate
-    // it so the adapter can bail the walk to a single sign-in block.
-    if (err instanceof StepUpRequired) throw err;
-    console.warn(`[target] ${label} failed; retrying once`, err);
-    return await read();
   }
 }
 
@@ -144,20 +103,23 @@ export const targetAdapter: RetailerAdapter = {
     const matched: { order: ScrapedOrder; charges: YnabCharge[] }[] = [];
 
     try {
-      const auth = await send<{ authenticated: boolean } | { error: string }>(tabId, "CHECK_AUTH");
-      if ("error" in auth || !auth.authenticated) {
-        // Signed out — surface a sign-in wall. The resolution card foregrounds
-        // the tab on user action; we no longer pop it here mid-sync.
+      // First read: the orders list. A `login` (or a list that never described)
+      // means we can't read anything — surface a sign-in wall.
+      clearBufferedPageResult(tabId);
+      describe(tabId);
+      const first = await awaitOrders(tabId, null);
+      if (!first || first.pageKind !== "orders") {
+        // login, or the list never described in time — nothing is readable.
         return { matched: [], unmatched: [], blocked: { reason: "signed_out", charges } };
       }
 
       // Phase 1: walk the orders list (paginate Load more) until past cutoff.
-      const orders = await collectOrders(tabId, charges, maxPages, signal);
+      const orders = await collectOrders(tabId, first, charges, maxPages, signal);
+      console.info(`[target] phase 1: ${orders.length} orders in the window`);
 
-      // Phase 2: for orders that could contain a still-unmatched charge, read
-      // the invoices list and match charges to invoice TOTALS (single-card
-      // invoices). The invoice-list cache lets Phase 3 reuse it without
-      // re-fetching.
+      // Phase 2: for orders that could contain a still-unmatched charge, read the
+      // invoices list and match charges to invoice TOTALS (single-card invoices).
+      // The invoice-list cache lets Phase 3 reuse it without re-fetching.
       let remaining = [...charges];
       const matchedInvoices: MatchedInvoice[] = [];
       const consumedInvoices = new Set<string>(); // `${orderId}/${invoiceId}`
@@ -170,14 +132,8 @@ export const targetAdapter: RetailerAdapter = {
 
         let invoices: RawTargetInvoice[];
         try {
-          invoices = await readWithRetry(`invoices ${order.orderId}`, async () => {
-            const url = orderInvoicesUrl(order.orderId);
-            await navigateTab(tabId, url);
-            return unwrap(
-              await send<{ invoices: RawTargetInvoice[] } | { error: string }>(tabId, "SCRAPE_INVOICES_LIST"),
-              url,
-            ).invoices;
-          });
+          invoices = await readWithRetry(`invoices ${order.orderId}`, () =>
+            readInvoices(tabId, order.orderId));
         } catch (err) {
           if (err instanceof StepUpRequired) throw err;
           // Couldn't read this order's invoices — skip it; its charges stay
@@ -221,14 +177,8 @@ export const targetAdapter: RetailerAdapter = {
 
             let detail: RawTargetInvoiceDetail;
             try {
-              detail = await readWithRetry(`invoice detail ${orderId}/${inv.invoiceId}`, async () => {
-                const url = invoiceDetailUrl(orderId, inv.invoiceId);
-                await navigateTab(tabId, url);
-                return unwrap(
-                  await send<{ detail: RawTargetInvoiceDetail } | { error: string }>(tabId, "SCRAPE_INVOICE_DETAIL"),
-                  url,
-                ).detail;
-              });
+              detail = await readWithRetry(`invoice detail ${orderId}/${inv.invoiceId}`, () =>
+                readInvoiceDetail(tabId, orderId, inv.invoiceId));
             } catch (err) {
               if (err instanceof StepUpRequired) throw err;
               // Couldn't read this invoice's detail — skip it; the charge stays
@@ -267,7 +217,7 @@ export const targetAdapter: RetailerAdapter = {
         try {
           detail = mi.detail
             ?? (await readWithRetry(`detail ${mi.orderId}/${mi.invoiceId}`, () =>
-              loadDetail(tabId, mi.orderId, mi.invoiceId)));
+              readInvoiceDetail(tabId, mi.orderId, mi.invoiceId)));
         } catch (err) {
           if (err instanceof StepUpRequired) throw err;
           // This charge matched an invoice but its detail page couldn't be read —
@@ -285,14 +235,8 @@ export const targetAdapter: RetailerAdapter = {
         let imageMap = imageCache.get(mi.orderId);
         if (!imageMap) {
           try {
-            imageMap = await readWithRetry(`images ${mi.orderId}`, async () => {
-              const url = orderDetailUrl(mi.orderId);
-              await navigateTab(tabId, url);
-              return unwrap(
-                await send<{ imageMap: Record<string, string> } | { error: string }>(tabId, "SCRAPE_ORDER_IMAGES"),
-                url,
-              ).imageMap;
-            });
+            imageMap = await readWithRetry(`images ${mi.orderId}`, () =>
+              readOrderImages(tabId, mi.orderId));
           } catch (err) {
             if (err instanceof StepUpRequired) throw err;
             console.warn(`[target] couldn't read order images for ${mi.orderId}`, err);
@@ -312,6 +256,7 @@ export const targetAdapter: RetailerAdapter = {
         ...remaining.map((c) => ({ charge: c, reason: NO_MATCH_REASON })),
         ...detailFailures,
       ];
+      console.info(`[target] done: ${matched.length} matched, ${detailFailures.length} read-failed of ${matchedInvoices.length} matched invoices`);
       return { matched, unmatched };
     } catch (err) {
       if (err instanceof StepUpRequired) {
@@ -345,42 +290,149 @@ interface MatchedInvoice {
   detail?: RawTargetInvoiceDetail; // present when matched in Phase 3
 }
 
-async function loadDetail(
+// ----------------------------------------------------------------------------
+// Internal: page reads (navigate → await the page's result)
+// ----------------------------------------------------------------------------
+
+/**
+ * Run one page read, retrying it once on failure. A failed/hung load usually
+ * recovers on a fresh navigation, so one cheap retry absorbs transient blips. A
+ * step-up won't clear on retry (the whole session is gated), so it propagates.
+ * (Cancellation is handled by the loop-level `signal.throwIfAborted()` calls.)
+ */
+export async function readWithRetry<T>(label: string, read: () => Promise<T>): Promise<T> {
+  try {
+    return await read();
+  } catch (err) {
+    if (err instanceof StepUpRequired) throw err;
+    console.warn(`[target] ${label} failed; retrying once`, err);
+    return await read();
+  }
+}
+
+async function readInvoices(tabId: number, orderId: string): Promise<RawTargetInvoice[]> {
+  const url = orderInvoicesUrl(orderId);
+  navigate(tabId, url);
+  const r = await awaitPageResult<TargetPageResult>(
+    tabId,
+    (x) => x.pageKind === "login" || (x.pageKind === "invoices" && x.orderId === orderId),
+  );
+  if (r.pageKind === "login") throw new StepUpRequired(url);
+  if (r.pageKind !== "invoices") throw new Error(`Target invoices ${orderId}: got ${r.pageKind}`);
+  return r.invoices;
+}
+
+async function readInvoiceDetail(
   tabId: number, orderId: string, invoiceId: string,
 ): Promise<RawTargetInvoiceDetail> {
   const url = invoiceDetailUrl(orderId, invoiceId);
-  await navigateTab(tabId, url);
-  const { detail } = unwrap(
-    await send<{ detail: RawTargetInvoiceDetail } | { error: string }>(tabId, "SCRAPE_INVOICE_DETAIL"),
-    url,
+  navigate(tabId, url);
+  const r = await awaitPageResult<TargetPageResult>(
+    tabId,
+    (x) =>
+      x.pageKind === "login" ||
+      (x.pageKind === "invoice-detail" && x.orderId === orderId && x.invoiceId === invoiceId),
   );
-  return detail;
+  if (r.pageKind === "login") throw new StepUpRequired(url);
+  if (r.pageKind !== "invoice-detail") throw new Error(`Target invoice detail ${orderId}/${invoiceId}: got ${r.pageKind}`);
+  return r.detail;
 }
+
+async function readOrderImages(tabId: number, orderId: string): Promise<Record<string, string>> {
+  const url = orderDetailUrl(orderId);
+  navigate(tabId, url);
+  const r = await awaitPageResult<TargetPageResult>(
+    tabId,
+    (x) => x.pageKind === "login" || (x.pageKind === "order-images" && x.orderId === orderId),
+  );
+  if (r.pageKind === "login") throw new StepUpRequired(url);
+  if (r.pageKind !== "order-images") throw new Error(`Target order images ${orderId}: got ${r.pageKind}`);
+  return r.imageMap;
+}
+
+// ----------------------------------------------------------------------------
+// Internal: orders-list pagination (Load more, in-page)
+// ----------------------------------------------------------------------------
 
 async function collectOrders(
   tabId: number,
+  first: TargetPageResult & { pageKind: "orders" },
   charges: YnabCharge[],
   maxPages: number,
   signal?: AbortSignal,
 ): Promise<RawTargetOrder[]> {
   const cutoff = cutoffDateFor(charges);
-  let orders: RawTargetOrder[] = [];
+  let result: TargetPageResult | null = first;
+  let orders: RawTargetOrder[] = first.orders;
+
   for (let page = 0; page < maxPages; page++) {
     signal?.throwIfAborted();
-    const { orders: cur } = unwrap(
-      await send<{ orders: RawTargetOrder[] } | { error: string }>(tabId, "SCRAPE_ORDERS_LIST"),
-    );
-    orders = cur; // Load more appends, so each scrape returns the cumulative list
+    if (!result) {
+      // Load more fired but no larger list arrived in time — the most likely
+      // cause of under-collecting. Logged so one run says why.
+      console.warn(`[target] phase 1 stop: Load more produced no new orders (timeout) at ${orders.length}`);
+      break;
+    }
+    if (result.pageKind !== "orders") break;
+    orders = result.orders; // Load more appends, so each result is the cumulative list
+
+    // Seed with the max sentinel (not orders[0].date): Target returns "" for an
+    // unparseable date, which sorts before every real date — seeding with it
+    // would make `oldest` empty and halt pagination after the first page.
     const oldest = orders.reduce(
       (min, o) => (o.date && o.date < min ? o.date : min),
-      orders[0]?.date ?? "9999-12-31",
+      "9999-12-31",
     );
-    if (oldest < cutoff) break;
-    // "Load more" is an in-page XHR that appends rows — it does NOT navigate the
-    // tab, so (unlike Amazon's pager) there's no content-script teardown to
-    // tolerate and no waitForTabLoad needed after it.
-    const { hasNext } = unwrap(await send<{ hasNext: boolean } | { error: string }>(tabId, "LOAD_MORE"));
-    if (!hasNext) break;
+    if (oldest < cutoff) {
+      console.info(`[target] phase 1 stop: reached date cutoff at ${orders.length} orders`);
+      break;
+    }
+    if (!result.hasMore) {
+      console.info(`[target] phase 1 stop: no Load-more button at ${orders.length} orders`);
+      break;
+    }
+
+    const prevFingerprint = result.fingerprint;
+    console.info(`[target] Load more (have ${orders.length})`);
+    loadMore(tabId);
+    result = await awaitOrders(tabId, prevFingerprint);
+    // A login here means a step-up fired mid-pagination — bail the walk so the
+    // caller surfaces a single sign-in wall (keeping any partial matches).
+    if (result?.pageKind === "login") throw new StepUpRequired(ordersUrl());
   }
+
   return orders;
+}
+
+/** Await the next orders list (or a login wall). `prevFingerprint` ignores a
+ *  re-render of the same list so only a real Load-more growth resolves; pass null
+ *  for the first read. Null on timeout — the caller keeps what it has. */
+async function awaitOrders(
+  tabId: number,
+  prevFingerprint: string | null,
+): Promise<TargetPageResult | null> {
+  try {
+    return await awaitPageResult<TargetPageResult>(
+      tabId,
+      (r) =>
+        r.pageKind === "login" ||
+        (r.pageKind === "orders" && (prevFingerprint === null || r.fingerprint !== prevFingerprint)),
+    );
+  } catch {
+    return null;
+  }
+}
+
+// ----------------------------------------------------------------------------
+// Internal: fire-and-forget triggers — the page answers with a PAGE_RESULT.
+// ----------------------------------------------------------------------------
+
+function navigate(tabId: number, url: string): void {
+  browser.tabs.update(tabId, { url }).catch(() => {});
+}
+function describe(tabId: number): void {
+  browser.tabs.sendMessage(tabId, { type: "DESCRIBE" }).catch(() => {});
+}
+function loadMore(tabId: number): void {
+  browser.tabs.sendMessage(tabId, { type: "LOAD_MORE" }).catch(() => {});
 }

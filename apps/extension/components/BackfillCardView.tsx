@@ -10,8 +10,9 @@ export type BackfillUiState =
 
 function progressLabel(p: BackfillProgress): string {
   if (p.status === "preparing") return "Preparing…";
-  if (p.status === "learning") return `Learning from item ${p.index} of ${p.total}…`;
-  return `Scraping order ${p.index} of ${p.total}…`;
+  const who = retailerLabel(p.retailer);
+  if (p.status === "learning") return `Learning from ${who} item ${p.index} of ${p.total}…`;
+  return `Scraping ${who} order ${p.index} of ${p.total}…`;
 }
 
 /** Rough 0–100 fill: scraping fills the first ~60%, learning the rest. */

@@ -131,9 +131,14 @@ export type MessageRequest =
   | { type: "OPEN_RETAILER"; retailer: string; url?: string };
 
 /** Messages broadcast from the background to interested listeners (e.g. the
- *  side panel). Distinct from MessageRequest because no response is expected. */
+ *  side panel), plus the content-script → background page-result push. Distinct
+ *  from MessageRequest because no response is expected. */
 export type MessageBroadcast =
-  | { type: "BACKFILL_PROGRESS"; event: BackfillProgress };
+  | { type: "BACKFILL_PROGRESS"; event: BackfillProgress }
+  // A content script describing the page it's on once ready (see awaitPageResult
+  // in background/tabs). `result` is a retailer-specific payload (e.g.
+  // AmazonPageResult) the adapter and its content script agree on.
+  | { type: "PAGE_RESULT"; result: unknown };
 
 /** What backfill is doing right now. "preparing" covers fetching YNAB
  *  transactions plus the retailer's transaction-list pagination — phases
@@ -143,8 +148,8 @@ export type MessageBroadcast =
  *  large batches, so the UI surfaces item-level progress through that phase. */
 export type BackfillProgress =
   | { status: "preparing" }
-  | { status: "scraping"; index: number; total: number }
-  | { status: "learning"; index: number; total: number };
+  | { status: "scraping"; retailer: string; index: number; total: number }
+  | { status: "learning"; retailer: string; index: number; total: number };
 
 export interface BackfillResult {
   /** Cumulative count of eligible transactions in the window that now have

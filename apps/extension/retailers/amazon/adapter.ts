@@ -6,12 +6,11 @@ import type {
   PayeeMapping,
 } from "@/lib/types";
 import { assignByAmountAndDate, cutoffDateFor, NO_MATCH_REASON, READ_FAILED_REASON } from "@/lib/matcher";
-import { openRetailerTab, navigateTab, sendToTab, waitForTabLoad } from "@/background/tabs";
-import { orderDetailUrl, itemmodUrl } from "@/retailers/amazon/selectors";
+import { openRetailerTab, awaitPageResult, clearBufferedPageResult } from "@/background/tabs";
+import { orderDetailUrl, itemmodUrl, TRANSACTIONS_URL } from "@/retailers/amazon/selectors";
+import type { AmazonPageResult } from "@/retailers/amazon/page";
 import type { RawTransaction, RawItem } from "@/retailers/amazon/scraper";
 import { groupBy } from "remeda";
-
-const START_URL = "https://www.amazon.com/cpe/yourpayments/transactions";
 
 const PAYEES: PayeeMapping[] = [
   { pattern: /amazon prime/i, retailer: "amazon", strategy: "skip" },
@@ -22,13 +21,14 @@ const PAYEES: PayeeMapping[] = [
 export const amazonAdapter: RetailerAdapter = {
   id: "amazon",
   payees: PAYEES,
-  startUrl: START_URL,
+  startUrl: TRANSACTIONS_URL,
 
   async scrapeMatchedOrders(charges, options) {
     const maxPages = options?.maxPages ?? DEFAULT_MAX_PAGES;
     const onScrapeProgress = options?.onScrapeProgress;
     const signal = options?.signal;
-    const tabResult = await openRetailerTab(START_URL);
+
+    const tabResult = await openRetailerTab(TRANSACTIONS_URL);
     if (!tabResult) {
       return {
         matched: [],
@@ -38,33 +38,18 @@ export const amazonAdapter: RetailerAdapter = {
     const { tabId, weOpenedTab } = tabResult;
 
     try {
-      // Auth check
-      const authResponse = (await sendToTab(tabId, { type: "CHECK_AUTH" })) as
-        | { authenticated: boolean }
-        | { error: string };
-
-      if ("error" in authResponse) {
-        return {
-          matched: [],
-          unmatched: charges.map((c) => ({ charge: c, reason: authResponse.error })),
-        };
+      // Phase 1: paginate the transactions list and match charges to order-linked
+      // rows. A `login` result here means the session is signed out.
+      const { matchedPairs, unmatchedCharges, signedOut } = await paginateAndMatch(
+        tabId,
+        charges,
+        maxPages,
+      );
+      if (signedOut) {
+        return { matched: [], unmatched: [], blocked: { reason: "signed_out", charges } };
       }
 
-      if (!authResponse.authenticated) {
-        // Signed out — nothing is readable. Surface a sign-in wall; the side
-        // panel's resolution card foregrounds the tab on user action (we no
-        // longer pop it here, which was intrusive on a background sync).
-        return {
-          matched: [],
-          unmatched: [],
-          blocked: { reason: "signed_out", charges },
-        };
-      }
-
-      // Phase 1: paginate list page and match
-      const { matchedPairs, unmatchedCharges, error } = await paginateAndMatch(tabId, charges, maxPages);
-
-      // Phase 2: group by orderId, scrape detail page per order
+      // Phase 2: one detail-page scrape per matched order.
       const byOrderId = groupBy(matchedPairs, ([_charge, raw]) => raw.orderId!);
       const orderEntries = Object.entries(byOrderId);
       const totalOrders = orderEntries.length;
@@ -73,56 +58,54 @@ export const amazonAdapter: RetailerAdapter = {
       const detailFailures: { charge: YnabCharge; reason: string }[] = [];
 
       for (let i = 0; i < totalOrders; i++) {
-        // Honor cancellation between detail-page scrapes — the long phase
-        // the user actually sees the spinner spinning through.
         signal?.throwIfAborted();
         const [orderId, pairs] = orderEntries[i];
-        // Emit progress BEFORE the scrape so the UI shows "Scraping order N
-        // of T" while N is in flight, not after it lands.
+        // Emit progress BEFORE the scrape so the UI shows "Scraping order N of T"
+        // while N is in flight, not after it lands.
         onScrapeProgress?.({ index: i + 1, total: totalOrders });
 
-        // A hung/failed detail page (e.g. a sendToTab timeout) throws rather
-        // than returning {error}. Isolate it to this order so one bad page
-        // skips just its charges instead of tanking the whole batch; they're
-        // not persisted, so a re-run reattempts them.
-        let result: Awaited<ReturnType<typeof scrapeOrderItems>>;
+        let result: ScrapeOrderResult;
         try {
-          result = await scrapeOrderItems(tabId, orderId);
+          result = await scrapeOrderWithRetry(tabId, orderId);
         } catch (err) {
+          // A page that never reached the expected state (awaitPageResult timed
+          // out). Isolate it to this order; its charges stay unpersisted so a
+          // re-run reattempts them.
           console.warn(`[amazon] couldn't read order ${orderId}`, err);
-          for (const [charge] of pairs) {
-            detailFailures.push({ charge, reason: READ_FAILED_REASON });
-          }
+          for (const [charge] of pairs) detailFailures.push({ charge, reason: READ_FAILED_REASON });
           continue;
         }
 
-        if ("error" in result || result.items.length === 0) {
-          const reason = "error" in result ? result.error : "Failed to scrape order items";
-          for (const [charge] of pairs) {
-            detailFailures.push({ charge, reason });
-          }
+        if (result.kind === "signed_out") {
+          // The session dropped mid-walk. Keep what we assembled; everything not
+          // yet matched becomes one sign-in wall (a re-run reads the rest).
+          const done = new Set(matchedOrders.flatMap((m) => m.charges.map((c) => c.ynabTransactionId)));
+          const blockedCharges = charges.filter((c) => !done.has(c.ynabTransactionId));
+          return { matched: matchedOrders, unmatched: [], blocked: { reason: "signed_out", charges: blockedCharges } };
+        }
+        if (result.kind === "error") {
+          console.warn(`[amazon] order ${orderId} not scraped: ${result.reason}`);
+          for (const [charge] of pairs) detailFailures.push({ charge, reason: result.reason });
           continue;
         }
 
-        const order: ScrapedOrder = {
-          retailer: "amazon",
-          orderId,
-          items: result.items,
-          displayedItemsSubtotalCents: result.subtotalCents,
-          refund: result.refund,
-        };
-        const orderCharges = pairs.map(([charge]) => charge);
-        matchedOrders.push({ order, charges: orderCharges });
+        matchedOrders.push({
+          order: {
+            retailer: "amazon",
+            orderId,
+            items: result.items,
+            displayedItemsSubtotalCents: result.subtotalCents,
+            refund: result.refund,
+          },
+          charges: pairs.map(([charge]) => charge),
+        });
       }
 
       const allUnmatched = [
-        ...unmatchedCharges.map((c) => ({
-          charge: c,
-          reason: error ?? NO_MATCH_REASON,
-        })),
+        ...unmatchedCharges.map((c) => ({ charge: c, reason: NO_MATCH_REASON })),
         ...detailFailures,
       ];
-
+      console.info(`[amazon] detail scrape: ${matchedOrders.length} of ${totalOrders} orders OK, ${detailFailures.length} failed`);
       return { matched: matchedOrders, unmatched: allUnmatched };
     } finally {
       if (weOpenedTab) {
@@ -133,31 +116,18 @@ export const amazonAdapter: RetailerAdapter = {
 };
 
 // ----------------------------------------------------------------------------
-// Internal: list-page pagination + matching
+// Internal: transactions-list pagination + matching
 // ----------------------------------------------------------------------------
 
 /** Default pagination cap for callers that don't pass `options.maxPages`.
  *  Sync's natural cutoff (`cutoffDateFor`) short-circuits well before this. */
 const DEFAULT_MAX_PAGES = 10;
 
-/** Turning the pager drops the content-script message channel, so the NEXT_PAGE
- *  reply is lost and the send rejects with one of these. The exact cause in
- *  Firefox is NOT pinned down: the URL never changes and the amazon.com console
- *  persists across turns, which argues against a full reload — it may be the
- *  AJAX swap transiently dropping/re-injecting the content script rather than a
- *  navigation. What we DO know empirically: the page turns (pagination
- *  advances), so treat this rejection as "the page turned" and re-sync rather
- *  than fail. A genuine hang trips sendToTab's reply timeout instead, which we
- *  let propagate. (TODO: instrument to confirm the mechanism — see BAC-146.) */
-export function isPageTurnChannelError(err: unknown): boolean {
-  const msg = err instanceof Error ? err.message : String(err);
-  return /message channel closed|receiving end does not exist/i.test(msg);
-}
-
 interface PaginateResult {
   matchedPairs: [YnabCharge, RawTransaction][];
   unmatchedCharges: YnabCharge[];
-  error?: string;
+  /** The transactions list redirected to sign-in — nothing is readable. */
+  signedOut?: boolean;
 }
 
 async function paginateAndMatch(
@@ -170,29 +140,41 @@ async function paginateAndMatch(
   let remaining = [...charges];
   let allMatched: [YnabCharge, RawTransaction][] = [];
 
-  for (let page = 0; page < maxPages; page++) {
-    const txResponse = (await sendToTab(tabId, {
-      type: "SCRAPE_TRANSACTIONS",
-    })) as { transactions: RawTransaction[] } | { error: string };
+  // Drop anything left in the buffer by a previous run on this (reused, never-
+  // closed) tab so a stale page can't be read as the current one. Then kick the
+  // tab into describing itself and read the first page. Nothing is awaited from
+  // the trigger — the page answers with a PAGE_RESULT, which is what we wait on.
+  clearBufferedPageResult(tabId);
+  describe(tabId);
+  let page = await awaitTransactionsPage(tabId, null);
+  let pagesWalked = 0;
 
-    if ("error" in txResponse) {
-      return { matchedPairs: allMatched, unmatchedCharges: remaining, error: txResponse.error };
+  for (let i = 0; i < maxPages; i++) {
+    // The page never reached a readable state in time — stop, keeping whatever
+    // we already matched (a re-run reattempts the rest) rather than throwing it
+    // all away. Log it: a premature stop here is a likely cause of under-matching.
+    if (!page) {
+      console.warn(`[amazon] pagination stopped after ${pagesWalked} page(s): next page did not arrive in time`);
+      break;
     }
-
-    if (txResponse.transactions.length === 0) break;
-
-    const allCandidates = [...candidates, ...txResponse.transactions];
-    const matchedThisPage: [YnabCharge, RawTransaction][] = [];
-    const stillUnmatched: YnabCharge[] = [];
-    const matchedRaws = new Set<RawTransaction>();
+    // The await predicate only resolves to a transactions or login page; anything
+    // else (login included) means the list isn't readable — surface signed out.
+    if (page.pageKind !== "transactions") {
+      return { matchedPairs: allMatched, unmatchedCharges: remaining, signedOut: true };
+    }
+    pagesWalked++;
 
     // Only order-linked rows are matchable (we need the orderId to scrape the
     // detail page). Assign charges to them 1:1, resolving balanced ambiguity.
+    const allCandidates = [...candidates, ...page.transactions];
     const eligible = allCandidates.filter((c) => c.orderId);
     const assignments = assignByAmountAndDate(remaining, eligible);
 
-    remaining.forEach((charge, i) => {
-      const j = assignments[i];
+    const matchedThisPage: [YnabCharge, RawTransaction][] = [];
+    const stillUnmatched: YnabCharge[] = [];
+    const matchedRaws = new Set<RawTransaction>();
+    remaining.forEach((charge, idx) => {
+      const j = assignments[idx];
       if (j !== null) {
         const raw = eligible[j];
         matchedThisPage.push([charge, raw]);
@@ -207,119 +189,158 @@ async function paginateAndMatch(
     candidates = allCandidates.filter((c) => !matchedRaws.has(c));
 
     if (remaining.length === 0) break;
-
-    const oldestOnPage = txResponse.transactions.reduce(
+    if (page.transactions.length === 0) break;
+    const oldestOnPage = page.transactions.reduce(
       (min, t) => (t.date < min ? t.date : min),
-      txResponse.transactions[0].date,
+      page.transactions[0].date,
     );
     if (oldestOnPage < cutoffIso) break;
+    if (!page.hasNext) break;
 
-    // Turn the pager. The content script clicks Amazon's pager button.
-    //  - If NEXT_PAGE resolves (Chrome's in-place AJAX swap; content script
-    //    stayed alive and confirmed the new rows), loop and scrape.
-    //  - If it rejects because the page-turn dropped the message channel (see
-    //    isPageTurnChannelError), the page still turned — re-sync via
-    //    waitForTabLoad (which re-establishes content-script readiness) and keep
-    //    going. Any other rejection is a real failure: keep what we matched and
-    //    stop.
-    try {
-      const { hasNext } = (await sendToTab(tabId, { type: "NEXT_PAGE" })) as { hasNext: boolean };
-      if (!hasNext) break;
-    } catch (err) {
-      if (!isPageTurnChannelError(err)) {
-        console.warn("[amazon] NEXT_PAGE failed; stopping pagination", err);
-        break;
-      }
-      await waitForTabLoad(tabId);
-    }
+    // Turn the pager and wait for the next page to announce itself. In Chrome
+    // that's an in-place AJAX swap; in Firefox the click reloads the page and a
+    // fresh content script describes it. Either way we just await the next
+    // transactions result whose fingerprint differs (or a login wall).
+    const prevFingerprint = page.fingerprint;
+    turnPage(tabId);
+    // Wait for the next page (AJAX swap in Chrome, full reload in Firefox) at the
+    // default timeout. We deliberately don't cap it tighter: dropping later pages
+    // silently is worse than a rare slow turn, and a genuine "no next page" is
+    // caught by the !page.hasNext break above before we ever turn.
+    page = await awaitTransactionsPage(tabId, prevFingerprint);
   }
 
+  console.info(`[amazon] paginated ${pagesWalked} page(s); matched ${allMatched.length} order rows, ${remaining.length} charges unmatched`);
   return { matchedPairs: allMatched, unmatchedCharges: remaining };
+}
+
+/**
+ * Await the next transactions page (or a login wall). `prevFingerprint` guards
+ * against reading the same page twice: pass the page we just processed so a
+ * re-render is ignored and only a real page turn (or login) resolves; pass null
+ * for the first read. Returns null on timeout — the caller keeps partial matches
+ * instead of throwing the batch away.
+ */
+async function awaitTransactionsPage(
+  tabId: number,
+  prevFingerprint: string | null,
+): Promise<AmazonPageResult | null> {
+  try {
+    return await awaitPageResult<AmazonPageResult>(
+      tabId,
+      (r) =>
+        r.pageKind === "login" ||
+        (r.pageKind === "transactions" && (prevFingerprint === null || r.fingerprint !== prevFingerprint)),
+    );
+  } catch {
+    return null;
+  }
 }
 
 // ----------------------------------------------------------------------------
 // Internal: detail-page item scrape
 // ----------------------------------------------------------------------------
 
-type SummaryResponse =
-  | { items: RawItem[]; subtotalCents: number; refund: ScrapedOrder["refund"] }
-  | { requiresItemmod: true; subtotalCents: number; refund: ScrapedOrder["refund"] }
-  | { error: string };
+type ScrapeOrderResult =
+  | { kind: "ok"; items: ScrapedItem[]; subtotalCents: number; refund: ScrapedOrder["refund"] }
+  | { kind: "error"; reason: string }
+  | { kind: "signed_out" };
 
-type ItemmodResponse =
-  | { items: RawItem[]; refund: ScrapedOrder["refund"] }
-  | { error: string };
-
-async function fetchItems(
-  tabId: number,
-  orderId: string,
-  summaryResp:
-    | { items: RawItem[]; subtotalCents: number; refund: ScrapedOrder["refund"] }
-    | { requiresItemmod: true; subtotalCents: number; refund: ScrapedOrder["refund"] },
-): Promise<{ items: RawItem[]; refund: ScrapedOrder["refund"] } | { error: string }> {
-  if (!("requiresItemmod" in summaryResp)) {
-    return { items: summaryResp.items, refund: summaryResp.refund };
+/**
+ * Read an order, retrying once on a transient failure. A detail page that didn't
+ * paint in time (no subtotal yet, or an await timeout) usually succeeds on a
+ * fresh navigation, so one cheap retry absorbs the run-to-run flakiness that
+ * otherwise drops a few orders. A `signed_out` result and a successful read both
+ * return immediately — only "error"/throw is worth retrying.
+ */
+async function scrapeOrderWithRetry(tabId: number, orderId: string): Promise<ScrapeOrderResult> {
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    const last = attempt === 2;
+    try {
+      const result = await scrapeOrder(tabId, orderId);
+      if (result.kind !== "error" || last) return result;
+      console.warn(`[amazon] order ${orderId} read failed (${result.reason}); retrying`);
+    } catch (err) {
+      if (last) throw err;
+      console.warn(`[amazon] order ${orderId} read threw; retrying`, err);
+    }
   }
-
-  await navigateTab(tabId, itemmodUrl(orderId));
-  const itemmodResp = (await sendToTab(tabId, {
-    type: "SCRAPE_ITEMS",
-  })) as ItemmodResponse;
-  if ("error" in itemmodResp) {
-    return { error: amazonErrorMessage(itemmodResp.error) };
-  }
-  // Prefer itemmod's refund (has per-item markers) over the summary page's
-  // when both exist. They should be equivalent but itemmod is authoritative.
-  return { items: itemmodResp.items, refund: itemmodResp.refund ?? summaryResp.refund };
+  // Unreachable: the last attempt either returns or throws above.
+  return { kind: "error", reason: READ_FAILED_REASON };
 }
 
-async function scrapeOrderItems(
-  tabId: number,
-  orderId: string,
-): Promise<
-  | { items: ScrapedItem[]; subtotalCents: number; refund: ScrapedOrder["refund"] }
-  | { error: string }
-> {
-  await navigateTab(tabId, orderDetailUrl(orderId));
+async function scrapeOrder(tabId: number, orderId: string): Promise<ScrapeOrderResult> {
+  // Each detail scrape navigates to a DIFFERENT URL than the tab is currently on
+  // (we arrive from the transactions list or another order), so the navigation
+  // always reloads the page and the fresh content script self-describes — no
+  // explicit DESCRIBE needed here, unlike the first transactions read.
+  navigate(tabId, orderDetailUrl(orderId));
+  const summary = await awaitPageResult<AmazonPageResult>(
+    tabId,
+    (r) => r.pageKind === "login" || (r.pageKind === "order-summary" && r.orderId === orderId),
+  );
+  if (summary.pageKind === "login") return { kind: "signed_out" };
+  if (summary.pageKind !== "order-summary") return { kind: "error", reason: READ_FAILED_REASON };
+  if (summary.subtotalCents === null) return { kind: "error", reason: amazonErrorMessage("missing_subtotal") };
 
-  const summaryResp = (await sendToTab(tabId, {
-    type: "SCRAPE_ITEMS",
-  })) as SummaryResponse;
+  let items = summary.items;
+  let refund = summary.refund;
 
-  if ("error" in summaryResp) {
-    return { error: amazonErrorMessage(summaryResp.error) };
+  // Grocery orders list their items on a separate itemmod page; the summary page
+  // only carries the subtotal and (authoritative) refund.
+  if (summary.requiresItemmod) {
+    navigate(tabId, itemmodUrl(orderId));
+    const itemmod = await awaitPageResult<AmazonPageResult>(
+      tabId,
+      (r) => r.pageKind === "login" || (r.pageKind === "itemmod" && r.orderId === orderId),
+    );
+    if (itemmod.pageKind === "login") return { kind: "signed_out" };
+    if (itemmod.pageKind !== "itemmod") return { kind: "error", reason: READ_FAILED_REASON };
+    items = itemmod.items;
+    // Prefer itemmod's refund (has per-item markers) when present.
+    refund = itemmod.refund ?? summary.refund;
   }
 
-  const itemsResp = await fetchItems(tabId, orderId, summaryResp);
-  if ("error" in itemsResp) return itemsResp;
+  if (items.length === 0) return { kind: "error", reason: "Failed to scrape order items" };
 
   return {
-    items: itemsResp.items.map(
-      (raw): ScrapedItem => ({
-        productId: raw.productId,
-        title: raw.title,
-        imageUrl: raw.imageUrl,
-        unitPriceCents: raw.priceCents,
-        quantity: raw.quantity,
-        refundedAmountCents: raw.refundedAmountCents,
-      }),
-    ),
-    subtotalCents: summaryResp.subtotalCents,
-    refund: itemsResp.refund,
+    kind: "ok",
+    items: items.map(toScrapedItem),
+    subtotalCents: summary.subtotalCents,
+    refund,
   };
 }
 
+function toScrapedItem(raw: RawItem): ScrapedItem {
+  return {
+    productId: raw.productId,
+    title: raw.title,
+    imageUrl: raw.imageUrl,
+    unitPriceCents: raw.priceCents,
+    quantity: raw.quantity,
+    refundedAmountCents: raw.refundedAmountCents,
+  };
+}
+
+/** Fire-and-forget triggers — the page answers with a PAGE_RESULT, not a reply. */
+function navigate(tabId: number, url: string): void {
+  browser.tabs.update(tabId, { url }).catch(() => {});
+}
+function describe(tabId: number): void {
+  browser.tabs.sendMessage(tabId, { type: "DESCRIBE" }).catch(() => {});
+}
+function turnPage(tabId: number): void {
+  browser.tabs.sendMessage(tabId, { type: "NEXT_PAGE" }).catch(() => {});
+}
+
 /**
- * Map content-script error tokens to user-readable messages. The content
- * script returns short stable tokens; the user-facing copy lives here
- * alongside the retailer that produces them.
+ * User-readable copy for a content-script error token. (Auth is no longer a
+ * token — a signed-out/step-up page is reported as a `login` page result.)
  */
 function amazonErrorMessage(token: string): string {
   switch (token) {
     case "missing_subtotal":
       return "Couldn't find Amazon's items subtotal on the page — the page layout may have changed. Try resyncing, or categorize manually in YNAB.";
-    case "auth_required":
-      return "Amazon auth required";
     default:
       return token;
   }
