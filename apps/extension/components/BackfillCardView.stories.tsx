@@ -30,7 +30,7 @@ type Story = StoryObj<typeof BackfillCardView>;
 
 export const Idle: Story = { args: { state: { kind: "idle" } } };
 export const Running: Story = {
-  args: { state: { kind: "running", progress: { status: "scraping", index: 3, total: 50 } } },
+  args: { state: { kind: "running", progress: { status: "scraping", retailer: "amazon", index: 3, total: 50 } } },
 };
 export const Done: Story = { args: { state: { kind: "done", result } } };
 export const DoneSomeFailed: Story = {

@@ -118,8 +118,10 @@ export default function App() {
   }
 
   // Open/focus a retailer tab so the user can sign in; they tap Sync to resume.
-  const handleOpenRetailer = (retailer: string) => {
-    void openRetailer(retailer);
+  // `url` (a step-up block's gated page) targets the page that forces the
+  // challenge — the orders list alone renders as already signed in.
+  const handleOpenRetailer = (retailer: string, url?: string) => {
+    void openRetailer(retailer, url);
   };
 
   // Handlers for the queue view

@@ -17,7 +17,7 @@ function subtitle(b: BlockedRetailer): string {
 
 interface ResolutionCardProps {
   blocked: BlockedRetailer[];
-  onOpenRetailer: (retailer: string) => void;
+  onOpenRetailer: (retailer: string, url?: string) => void;
 }
 
 /**
@@ -42,7 +42,7 @@ export default function ResolutionCard({ blocked, onOpenRetailer }: ResolutionCa
               <p className="m-0 mt-[2px] text-[12.5px] leading-[1.5] text-muted">{subtitle(b)}</p>
             </div>
           </div>
-          <Button variant="secondary" sm onClick={() => onOpenRetailer(b.retailer)}>
+          <Button variant="secondary" sm onClick={() => onOpenRetailer(b.retailer, b.url)}>
             <Icon.ext aria-hidden width={14} height={14} /> Open {retailerLabel(b.retailer)}
           </Button>
         </div>

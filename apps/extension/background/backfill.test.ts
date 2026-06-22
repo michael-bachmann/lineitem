@@ -174,6 +174,29 @@ describe("runBackfill — filtering", () => {
     expect(result.transactionsBackfilled).toBe(0);
   });
 
+  it("scopes the run to the requested retailers — leaves the others' orders pending", async () => {
+    getTransactionsSinceMock.mockResolvedValue([
+      tx({ id: "amz-1", payee_name: "AMAZON.COM" }),
+      tx({ id: "tgt-1", payee_name: "TARGET" }),
+    ]);
+    getRetailerForPayeeMock.mockImplementation((payee: string) => {
+      if (/amazon/i.test(payee)) return { retailer: "amazon", strategy: "scrape" };
+      if (/target/i.test(payee)) return { retailer: "target", strategy: "scrape" };
+      return null;
+    });
+    scrapeMatchedOrdersMock.mockImplementation(async (charges: YnabCharge[]) => ({
+      matched: charges.map((c) => ({ order: order(), charges: [c] })),
+      unmatched: [],
+    }));
+
+    await runBackfill({ fromDate: "2025-01-01", retailers: ["target"] });
+
+    // Only Target was scraped; Amazon's pending order was left untouched.
+    expect(scrapeMatchedOrdersMock).toHaveBeenCalledTimes(1);
+    const [scrapedCharges] = scrapeMatchedOrdersMock.mock.calls[0];
+    expect(scrapedCharges.map((c: YnabCharge) => c.ynabTransactionId)).toEqual(["tgt-1"]);
+  });
+
   it("counts already-allocated eligible tx toward the cumulative total without re-scraping", async () => {
     getTransactionsSinceMock.mockResolvedValue([tx()]);
     getAllocatedTransactionMock.mockResolvedValue({
@@ -387,6 +410,24 @@ describe("runBackfill — per-retailer breakdown", () => {
     expect(target).toMatchObject({ matched: 0, blocked: "signed_out" });
   });
 
+  it("propagates a step-up block's gated URL to byRetailer (so 'Open' lands on the challenge page)", async () => {
+    getTransactionsSinceMock.mockResolvedValue([tx({ id: "tgt-1", payee_name: "TARGET" })]);
+    getRetailerForPayeeMock.mockImplementation((payee: string) =>
+      /target/i.test(payee) ? { retailer: "target", strategy: "scrape" } : null,
+    );
+    const gatedUrl = "https://www.target.com/orders/123/invoices";
+    scrapeMatchedOrdersMock.mockResolvedValue({
+      matched: [],
+      unmatched: [],
+      blocked: { reason: "step_up", charges: [], url: gatedUrl },
+    });
+
+    const result = await runBackfill({ fromDate: "2025-01-01" });
+
+    const target = result.byRetailer.find((r) => r.retailer === "target");
+    expect(target).toMatchObject({ blocked: "step_up", blockedUrl: gatedUrl });
+  });
+
   it("folds pre-existing allocations into a retailer's cumulative matched", async () => {
     getTransactionsSinceMock.mockResolvedValue([
       tx({ id: "amz-1", payee_name: "AMAZON.COM" }),
@@ -535,8 +576,8 @@ describe("runBackfill — progress events", () => {
 
     expect(events).toEqual([
       { status: "preparing" },
-      { status: "scraping", index: 1, total: 2 },
-      { status: "scraping", index: 2, total: 2 },
+      { status: "scraping", retailer: "amazon", index: 1, total: 2 },
+      { status: "scraping", retailer: "amazon", index: 2, total: 2 },
     ]);
   });
 
@@ -563,6 +604,6 @@ describe("runBackfill — progress events", () => {
       onProgress: (e) => events.push(e),
     });
 
-    expect(events).toContainEqual({ status: "learning", index: 2, total: 2 });
+    expect(events).toContainEqual({ status: "learning", retailer: "amazon", index: 2, total: 2 });
   });
 });

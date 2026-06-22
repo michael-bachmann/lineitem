@@ -88,18 +88,23 @@ describe("performSync — sign-in walls", () => {
     expect(result.queue.every((e) => e.matchStatus.status === "auth_required")).toBe(true);
   });
 
-  it("surfaces a mid-walk step_up block while keeping matched results out of the block", async () => {
+  it("surfaces a mid-walk step_up block (with its gated URL) while keeping matched results out of the block", async () => {
     getUnapprovedTransactionsMock.mockResolvedValue([tx({ id: "tx-1" }), tx({ id: "tx-2" })]);
+    const gatedUrl = "https://www.target.com/orders/123/invoices";
     scrapeMock.mockResolvedValue({
       matched: [],
       unmatched: [],
-      blocked: { reason: "step_up", charges: [charge("tx-2")] },
+      blocked: { reason: "step_up", charges: [charge("tx-2")], url: gatedUrl },
     });
 
     const result = await performSync();
 
     if (!("queue" in result)) throw new Error("expected a queue");
-    expect(result.blocked).toEqual([{ retailer: "amazon", reason: "step_up", count: 1 }]);
+    // The gated URL rides along so the ResolutionCard's "Open" lands on the
+    // challenge page, not the soft-tier orders list.
+    expect(result.blocked).toEqual([
+      { retailer: "amazon", reason: "step_up", count: 1, url: gatedUrl },
+    ]);
     const authEntries = result.queue.filter((e) => e.matchStatus.status === "auth_required");
     expect(authEntries.map((e) => e.ynabTransaction.id)).toEqual(["tx-2"]);
   });

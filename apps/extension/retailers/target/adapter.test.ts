@@ -1,8 +1,21 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi, beforeEach } from "vitest";
+
+// Mock the tab driver so the coordinator test can script page results.
+const { openRetailerTab, awaitPageResult } = vi.hoisted(() => ({
+  openRetailerTab: vi.fn(),
+  awaitPageResult: vi.fn(),
+}));
+vi.mock("@/background/tabs", () => ({
+  openRetailerTab,
+  awaitPageResult,
+  clearBufferedPageResult: vi.fn(),
+}));
+
 import {
-  orderMightMatch, invoiceMightSplitMatch, readWithRetry, unwrap, StepUpRequired,
+  orderMightMatch, invoiceMightSplitMatch, readWithRetry, StepUpRequired, targetAdapter,
 } from "./adapter";
 import type { RawTargetOrder, RawTargetInvoice } from "./scraper";
+import type { TargetPageResult } from "./page";
 import type { YnabCharge } from "@/lib/types";
 
 const charge = (over: Partial<YnabCharge>): YnabCharge => ({
@@ -93,17 +106,85 @@ describe("readWithRetry", () => {
   });
 });
 
-describe("unwrap", () => {
-  it("returns the payload for a normal response", () => {
-    expect(unwrap({ invoices: [1, 2] })).toEqual({ invoices: [1, 2] });
+describe("targetAdapter.scrapeMatchedOrders (coordinator)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.stubGlobal("browser", {
+      tabs: {
+        update: vi.fn(async () => {}),
+        sendMessage: vi.fn(async () => {}),
+        remove: vi.fn(async () => {}),
+      },
+    });
+    openRetailerTab.mockResolvedValue({ tabId: 1, weOpenedTab: true });
   });
 
-  it("throws StepUpRequired when the page redirected to step-up sign-in", () => {
-    expect(() => unwrap({ error: "auth_required" })).toThrow(StepUpRequired);
+  function queueResults(...results: TargetPageResult[]) {
+    const q = [...results];
+    awaitPageResult.mockImplementation(async () => q.shift());
+  }
+
+  it("returns signed_out when the orders list shows login", async () => {
+    queueResults({ pageKind: "login" });
+    const c = charge({});
+    const res = await targetAdapter.scrapeMatchedOrders([c]);
+    expect(res.matched).toEqual([]);
+    expect(res.blocked).toEqual({ reason: "signed_out", charges: [c] });
   });
 
-  it("throws a plain error (not StepUpRequired) on any other error shape — guards the old undefined.filter crash", () => {
-    expect(() => unwrap({ error: "boom" })).toThrow(/Target scrape error/);
-    expect(() => unwrap({ error: "boom" })).not.toThrow(StepUpRequired);
+  it("surfaces a step_up block with the gated URL and keeps partial results when a gated page hits login", async () => {
+    const c = charge({ amountCents: 1000, date: "2026-06-01" });
+    queueResults(
+      {
+        pageKind: "orders",
+        hasMore: false,
+        fingerprint: "f1",
+        orders: [{ orderId: "O1", date: "2026-06-01", orderTotalCents: 5000 }],
+      },
+      { pageKind: "login" }, // the invoices navigation landed on Target's step-up
+    );
+    const res = await targetAdapter.scrapeMatchedOrders([c]);
+    expect(res.matched).toEqual([]);
+    expect(res.blocked?.reason).toBe("step_up");
+    expect(res.blocked?.charges).toEqual([c]);
+    expect(res.blocked?.url).toContain("/orders/O1/invoices");
+  });
+
+  it("walks orders → invoices → invoice-detail → images and builds the matched order", async () => {
+    const c = charge({ amountCents: 1000, date: "2026-06-01" });
+    queueResults(
+      {
+        pageKind: "orders",
+        hasMore: false,
+        fingerprint: "f1",
+        orders: [{ orderId: "O1", date: "2026-06-01", orderTotalCents: 5000 }],
+      },
+      {
+        pageKind: "invoices",
+        orderId: "O1",
+        invoices: [{ invoiceId: "INV1", date: "2026-06-01", amountCents: 1000, isRefund: false }],
+      },
+      {
+        pageKind: "invoice-detail",
+        orderId: "O1",
+        invoiceId: "INV1",
+        detail: {
+          isRefund: false,
+          items: [{ productId: "P1", title: "Thing", unitPriceCents: 1000, quantity: 1, amountCents: 1000 }],
+          itemSubtotalCents: 1000,
+          invoiceTotalCents: 1000,
+          paymentLines: [{ cardLabel: "visa", isGiftCard: false, amountCents: 1000 }],
+        },
+      },
+      { pageKind: "order-images", orderId: "O1", imageMap: { P1: "img-url" } },
+    );
+
+    const res = await targetAdapter.scrapeMatchedOrders([c]);
+    expect(res.blocked).toBeUndefined();
+    expect(res.unmatched).toEqual([]);
+    expect(res.matched).toHaveLength(1);
+    expect(res.matched[0].order.orderId).toBe("O1");
+    expect(res.matched[0].order.items[0]).toMatchObject({ productId: "P1", imageUrl: "img-url" });
+    expect(res.matched[0].charges).toEqual([c]);
   });
 });

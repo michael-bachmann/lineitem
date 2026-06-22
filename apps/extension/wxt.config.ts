@@ -88,8 +88,9 @@ export default defineConfig({
       "https://api.ynab.com/*",
       "https://app.ynab.com/oauth/*",
       "https://auth.lineitem.dev/*",
-      "https://huggingface.co/*",       // model metadata
-      "https://*.huggingface.co/*",     // model file CDN (cdn-lfs.huggingface.co)
+      "https://huggingface.co/*",       // model metadata + resolve redirect
+      "https://*.huggingface.co/*",     // legacy LFS CDN (cdn-lfs.huggingface.co)
+      "https://*.hf.co/*",              // Xet model-file CDN (cas-bridge.xethub.hf.co)
       "https://api.web3forms.com/*",    // feedback form submissions
     ],
   }),

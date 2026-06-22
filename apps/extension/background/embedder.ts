@@ -53,9 +53,17 @@ function getExtractor(): Promise<FeatureExtractionPipeline> {
     configureOnnxRuntime();
     // `pipeline()`'s overloaded generic over every task expands to a union
     // TS can't resolve in one shot; the cast narrows to the task we asked for.
-    extractorPromise = pipeline("feature-extraction", MODEL_ID, {
-      dtype: "q8",
-    }) as unknown as Promise<FeatureExtractionPipeline>;
+    extractorPromise = (
+      pipeline("feature-extraction", MODEL_ID, {
+        dtype: "q8",
+      }) as unknown as Promise<FeatureExtractionPipeline>
+    ).then((extractor) => {
+      // Positive proof the model finished downloading + initializing — the
+      // counterpart to the failure logs (Firefox previously couldn't fetch the
+      // Xet-hosted model file at all).
+      console.info(`[embedder] model ready (${MODEL_ID})`);
+      return extractor;
+    });
   }
   return extractorPromise;
 }

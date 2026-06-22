@@ -10,8 +10,9 @@ export type BackfillUiState =
 
 function progressLabel(p: BackfillProgress): string {
   if (p.status === "preparing") return "Preparing…";
-  if (p.status === "learning") return `Learning from item ${p.index} of ${p.total}…`;
-  return `Scraping order ${p.index} of ${p.total}…`;
+  const who = retailerLabel(p.retailer);
+  if (p.status === "learning") return `Learning from ${who} item ${p.index} of ${p.total}…`;
+  return `Scraping ${who} order ${p.index} of ${p.total}…`;
 }
 
 /** Rough 0–100 fill: scraping fills the first ~60%, learning the rest. */
@@ -34,10 +35,15 @@ function retailerSummary(byRetailer: BackfillResult["byRetailer"]): string {
 
 interface BackfillCardViewProps {
   state: BackfillUiState;
-  onStart: () => void;
+  /** Start (or re-run) the backfill. `retailers` scopes the run to a subset —
+   *  used by "Run again" after a sign-in wall so signing into one retailer
+   *  doesn't re-walk the others. */
+  onStart: (retailers?: string[]) => void;
   onCancel: () => void;
-  /** Open/focus a retailer tab so the user can sign in, then run backfill again. */
-  onOpenRetailer?: (retailer: string) => void;
+  /** Open/focus a retailer tab so the user can sign in, then run backfill again.
+   *  `url` targets a step-up block's gated page (the page that forces the
+   *  challenge) instead of the orders list. */
+  onOpenRetailer?: (retailer: string, url?: string) => void;
 }
 
 /** Presentational backfill card — all states, no IO. */
@@ -58,7 +64,7 @@ export function BackfillCardView({ state, onStart, onCancel, onOpenRetailer }: B
       </p>
 
       {state.kind === "idle" && (
-        <Button variant="secondary" onClick={onStart}>
+        <Button variant="secondary" onClick={() => onStart()}>
           Backfill last 12 months
         </Button>
       )}
@@ -125,7 +131,7 @@ export function BackfillCardView({ state, onStart, onCancel, onOpenRetailer }: B
                     Sign in, then run again.
                   </p>
                   {onOpenRetailer && (
-                    <Button variant="secondary" sm onClick={() => onOpenRetailer(r.retailer)}>
+                    <Button variant="secondary" sm onClick={() => onOpenRetailer(r.retailer, r.blockedUrl)}>
                       <Icon.ext aria-hidden width={13} height={13} /> Open {retailerLabel(r.retailer)}
                     </Button>
                   )}
@@ -148,7 +154,18 @@ export function BackfillCardView({ state, onStart, onCancel, onOpenRetailer }: B
                 Some charges won’t match — in-store purchases, or orders paid on a card not in YNAB.
                 If you shop on another account, sign in to it and run again.
               </p>
-              <Button variant="secondary" onClick={onStart}>
+              {/* If a retailer hit a sign-in wall this run, scope the re-run to
+                  just those retailers — signing into one shouldn't re-walk the
+                  rest. Otherwise re-run everything (the multi-account case). */}
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  const blockedIds = state.result.byRetailer
+                    .filter((r) => r.blocked)
+                    .map((r) => r.retailer);
+                  onStart(blockedIds.length > 0 ? blockedIds : undefined);
+                }}
+              >
                 Run again
               </Button>
             </>
@@ -161,7 +178,7 @@ export function BackfillCardView({ state, onStart, onCancel, onOpenRetailer }: B
           <StatusMessage kind="err" role="alert">
             <Icon.alertCircle aria-hidden /> Backfill failed: {state.message}
           </StatusMessage>
-          <Button variant="secondary" onClick={onStart}>
+          <Button variant="secondary" onClick={() => onStart()}>
             Try again
           </Button>
         </>

@@ -18,8 +18,9 @@ interface QueueViewProps {
   onSettings: () => void;
   /** Per-retailer sign-in walls the last sync hit, surfaced above the queue. */
   blocked?: BlockedRetailer[];
-  /** Open/focus a retailer's tab so the user can sign in. */
-  onOpenRetailer: (retailer: string) => void;
+  /** Open/focus a retailer's tab so the user can sign in. `url` targets a
+   *  specific page (a step-up block's gated page) instead of the start URL. */
+  onOpenRetailer: (retailer: string, url?: string) => void;
   /** Show the post-approval donation ask above the queue. */
   showCoffee?: boolean;
   /** Lifetime classified-item count, for the ask copy. */
