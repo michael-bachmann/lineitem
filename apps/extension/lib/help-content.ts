@@ -13,6 +13,10 @@ export const FAQ: FaqItem[] = [
     a: "When you sync, lineitem looks at recent YNAB transactions from Amazon and Target and finds the order with the closest amount and date. You confirm each match before anything is written back.",
   },
   {
+    q: "How are taxes and fees handled?",
+    a: "Sales tax, bag fees, delivery and service charges aren’t split into their own lines. lineitem spreads them across your items in proportion to each item’s price, so every split adds up to exactly what you were charged.",
+  },
+  {
     q: "Will it change my budget without asking?",
     a: "No. Nothing is written to YNAB until you press Approve. Splits are only created for transactions you’ve reviewed.",
   },
