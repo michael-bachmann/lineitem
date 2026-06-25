@@ -99,12 +99,18 @@ export function parseInvoiceDetailFromDocument(doc: Document): RawTargetInvoiceD
     const quantity = parseInt(qtyText.replace(/[^0-9]/g, ""), 10) || 1;
     const unitPriceCents = parseCents(fieldAfter(row, "Unit price"));
     const amountCents = parseCents(fieldAfter(row, "Amount"));
+    const lineAmountCents = amountCents || unitPriceCents * quantity;
+    // Skip $0 stub cards (e.g. "PAPER_BAG" with a $0 Amount whose only cost is a
+    // "Bag fee" sub-row). The fee itself rides into the invoice-total gap and is
+    // distributed across real items downstream like every other fee/tax, so the
+    // transaction still balances; the stub would only add a $0 line to categorize.
+    if (lineAmountCents === 0) continue;
     items.push({
       productId: labelMatch[1],
       title: labelMatch[2],
       unitPriceCents,
       quantity,
-      amountCents: amountCents || unitPriceCents * quantity,
+      amountCents: lineAmountCents,
     });
   }
 
