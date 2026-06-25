@@ -11,15 +11,41 @@ export type BackfillUiState =
 function progressLabel(p: BackfillProgress): string {
   if (p.status === "preparing") return "Preparing…";
   const who = retailerLabel(p.retailer);
-  if (p.status === "learning") return `Learning from ${who} item ${p.index} of ${p.total}…`;
-  return `Scraping ${who} order ${p.index} of ${p.total}…`;
+  switch (p.status) {
+    // The list/match phases have no denominator; the ticking count is a
+    // liveness hint, shown only once it leaves zero.
+    case "listing":
+      return p.count > 0 ? `Scraping ${who} orders… (${p.count})` : `Scraping ${who} orders…`;
+    case "matching":
+      return p.count > 0 ? `Matching ${who} invoices… (${p.count})` : `Matching ${who} invoices…`;
+    case "scraping":
+      return `Scraping ${who} order ${p.index} of ${p.total}…`;
+    case "learning":
+      return `Learning from ${who} item ${p.index} of ${p.total}…`;
+  }
 }
 
-/** Rough 0–100 fill: scraping fills the first ~60%, learning the rest. */
+/**
+ * Rough 0–100 fill. Each phase owns a band so the bar steps forward at every
+ * phase boundary; the detail-scrape and learning phases fill within their band
+ * by index/total. The list/match phases have no denominator, so they sit at
+ * their band's start (the ticking count in the label carries liveness there).
+ * Bands are monotonic within a retailer; the bar resets to the listing band
+ * when the next retailer begins.
+ */
 function progressPct(p: BackfillProgress): number {
-  if (p.status === "preparing") return 6;
-  const frac = p.total > 0 ? p.index / p.total : 0;
-  return p.status === "scraping" ? Math.round(6 + frac * 54) : Math.round(60 + frac * 40);
+  switch (p.status) {
+    case "preparing":
+      return 4;
+    case "listing":
+      return 10;
+    case "matching":
+      return 25;
+    case "scraping":
+      return Math.round(35 + (p.total > 0 ? p.index / p.total : 0) * 35); // 35 → 70
+    case "learning":
+      return Math.round(70 + (p.total > 0 ? p.index / p.total : 0) * 30); // 70 → 100
+  }
 }
 
 /** "Amazon 195 · Target 18 orders" — per-retailer matched counts, no

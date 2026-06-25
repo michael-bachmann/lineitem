@@ -552,15 +552,16 @@ describe("runBackfill — progress events", () => {
     expect(events).toEqual([{ status: "preparing" }]);
   });
 
-  it("forwards the adapter's onScrapeProgress as 'scraping' events", async () => {
+  it("resets to a 'listing' event for the retailer before the adapter runs, then forwards its phase events with the retailer attached", async () => {
     getTransactionsSinceMock.mockResolvedValue([tx({ id: "tx-1" }), tx({ id: "tx-2" })]);
     scrapeMatchedOrdersMock.mockImplementation(
       async (
         charges: YnabCharge[],
-        opts?: { onScrapeProgress?: (e: { index: number; total: number }) => void },
+        opts?: { onScrapeProgress?: (e: import("@/lib/types").ScrapeProgress) => void },
       ) => {
-        opts?.onScrapeProgress?.({ index: 1, total: 2 });
-        opts?.onScrapeProgress?.({ index: 2, total: 2 });
+        opts?.onScrapeProgress?.({ phase: "listing", count: 1 });
+        opts?.onScrapeProgress?.({ phase: "scraping", index: 1, total: 2 });
+        opts?.onScrapeProgress?.({ phase: "scraping", index: 2, total: 2 });
         return {
           matched: charges.map((c) => ({ order: order(), charges: [c] })),
           unmatched: [],
@@ -576,9 +577,40 @@ describe("runBackfill — progress events", () => {
 
     expect(events).toEqual([
       { status: "preparing" },
+      // The per-retailer reset, emitted up front before the adapter walks its
+      // list — so the prior retailer's "Learning N of N" can't linger.
+      { status: "listing", retailer: "amazon", count: 0 },
+      { status: "listing", retailer: "amazon", count: 1 },
       { status: "scraping", retailer: "amazon", index: 1, total: 2 },
       { status: "scraping", retailer: "amazon", index: 2, total: 2 },
     ]);
+  });
+
+  it("forwards the adapter's 'matching' phase events with the retailer attached", async () => {
+    getRetailerForPayeeMock.mockImplementation((payee: string) =>
+      /target/i.test(payee) ? { retailer: "target", strategy: "scrape" } : null,
+    );
+    getTransactionsSinceMock.mockResolvedValue([tx({ id: "tx-1", payee_name: "TARGET" })]);
+    scrapeMatchedOrdersMock.mockImplementation(
+      async (
+        charges: YnabCharge[],
+        opts?: { onScrapeProgress?: (e: import("@/lib/types").ScrapeProgress) => void },
+      ) => {
+        opts?.onScrapeProgress?.({ phase: "matching", count: 1 });
+        return {
+          matched: charges.map((c) => ({ order: order({ retailer: "target" }), charges: [c] })),
+          unmatched: [],
+        };
+      },
+    );
+
+    const events: import("@/lib/types").BackfillProgress[] = [];
+    await runBackfill({
+      fromDate: "2025-01-01",
+      onProgress: (e) => events.push(e),
+    });
+
+    expect(events).toContainEqual({ status: "matching", retailer: "target", count: 1 });
   });
 
   it("forwards learnFromApproval's progress as 'learning' events", async () => {

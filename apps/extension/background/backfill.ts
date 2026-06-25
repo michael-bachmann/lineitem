@@ -267,12 +267,23 @@ async function runForRetailer(
   const txById = new Map(group.map((g) => [g.tx.id, g.tx]));
   const charges = group.map((g) => toYnabCharge(g.tx));
 
+  // Reset the indicator to THIS retailer's first phase up front, before the
+  // adapter opens its tab and starts walking. Without this, the previous
+  // retailer's last "Learning N of N" line stays on screen for the whole
+  // (silent) tab-open + list-walk window.
+  ctx.onProgress?.({ status: "listing", retailer: retailerId, count: 0 });
+
   try {
     const { matched, unmatched, blocked } = await adapter.scrapeMatchedOrders(charges, {
       maxPages: BACKFILL_MAX_PAGES,
       signal: ctx.signal,
-      onScrapeProgress: ({ index, total }) =>
-        ctx.onProgress?.({ status: "scraping", retailer: retailerId, index, total }),
+      // Re-emit the adapter's phase events with the retailer attached.
+      onScrapeProgress: (e) =>
+        ctx.onProgress?.(
+          e.phase === "scraping"
+            ? { status: "scraping", retailer: retailerId, index: e.index, total: e.total }
+            : { status: e.phase, retailer: retailerId, count: e.count },
+        ),
     });
 
     // The adapter checks the signal between detail-page scrapes but not

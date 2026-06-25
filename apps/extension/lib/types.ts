@@ -140,14 +140,31 @@ export type MessageBroadcast =
   // AmazonPageResult) the adapter and its content script agree on.
   | { type: "PAGE_RESULT"; result: unknown };
 
-/** What backfill is doing right now. "preparing" covers fetching YNAB
- *  transactions plus the retailer's transaction-list pagination — phases
- *  where we don't yet know how many orders we'll scrape. Once detail-page
- *  scrapes start, each event reports the order index + total. "learning"
- *  follows the last scrape: embeddings run on CPU and can take minutes for
- *  large batches, so the UI surfaces item-level progress through that phase. */
+/** Coarse phase progress an adapter emits during one retailer's scrape. The
+ *  list-walk and invoice-match phases have no known denominator (we don't yet
+ *  know how many orders we'll read), so they report a running `count` purely
+ *  for liveness; the detail-page phase reports a 1-indexed `index` of `total`.
+ *  `runForRetailer` attaches the retailer and re-emits these as
+ *  `BackfillProgress`. */
+export type ScrapeProgress =
+  | { phase: "listing"; count: number }
+  | { phase: "matching"; count: number }
+  | { phase: "scraping"; index: number; total: number };
+
+/** What backfill is doing right now, labeled by retailer and phase so the card
+ *  never names the wrong activity (the old single global counter sat frozen on
+ *  one retailer's "Learning N of N" while the next retailer silently scraped).
+ *  "preparing" covers fetching YNAB transactions (no retailer yet). Then, per
+ *  retailer in sequence: "listing" (walking the orders list), "matching"
+ *  (Target only — reading invoices to match charges), "scraping" (per-order
+ *  detail reads, index of total), then "learning" — embeddings run on CPU and
+ *  can take minutes for large batches, so the UI surfaces item-level progress
+ *  through that phase. "listing"/"matching" carry a `count` for liveness only;
+ *  there's no denominator yet. */
 export type BackfillProgress =
   | { status: "preparing" }
+  | { status: "listing"; retailer: string; count: number }
+  | { status: "matching"; retailer: string; count: number }
   | { status: "scraping"; retailer: string; index: number; total: number }
   | { status: "learning"; retailer: string; index: number; total: number };
 
@@ -339,10 +356,12 @@ export interface RetailerAdapter {
    * unapproved charges) means a small default is fine; backfill passes a
    * higher value so it can reach old orders.
    *
-   * `options.onScrapeProgress` is called once per detail-page scrape just
-   * before it runs, with the 1-indexed position and the total number of
-   * detail-page scrapes planned for this batch. The transaction-list
-   * pagination phase emits no events (we don't know the total yet).
+   * `options.onScrapeProgress` reports the scrape's coarse phase (see
+   * `ScrapeProgress`): a running `count` while walking the orders list
+   * ("listing") and, for retailers with an invoice step, while matching
+   * invoices ("matching"); then a 1-indexed `index` of `total` once per
+   * detail-page scrape ("scraping"), emitted just before each one runs. The
+   * early phases have no `total` yet, so their `count` is for liveness only.
    *
    * `options.signal` lets the caller cancel mid-batch. Adapters must check
    * it at natural pause points (between detail-page scrapes, between list-
@@ -354,7 +373,7 @@ export interface RetailerAdapter {
     options?: {
       maxPages?: number;
       signal?: AbortSignal;
-      onScrapeProgress?: (event: { index: number; total: number }) => void;
+      onScrapeProgress?: (event: ScrapeProgress) => void;
     },
   ): Promise<{
     matched: { order: ScrapedOrder; charges: YnabCharge[] }[];

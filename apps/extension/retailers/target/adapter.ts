@@ -1,6 +1,6 @@
 // apps/extension/retailers/target/adapter.ts
 import type {
-  RetailerAdapter, PayeeMapping, ScrapedOrder, YnabCharge,
+  RetailerAdapter, PayeeMapping, ScrapedOrder, ScrapeProgress, YnabCharge,
 } from "@/lib/types";
 import {
   matchByAmountAndDate, cutoffDateFor, NO_MATCH_REASON, READ_FAILED_REASON, THREE_DAYS_MS,
@@ -114,7 +114,7 @@ export const targetAdapter: RetailerAdapter = {
       }
 
       // Phase 1: walk the orders list (paginate Load more) until past cutoff.
-      const orders = await collectOrders(tabId, first, charges, maxPages, signal);
+      const orders = await collectOrders(tabId, first, charges, maxPages, signal, onScrapeProgress);
       console.info(`[target] phase 1: ${orders.length} orders in the window`);
 
       // Phase 2: for orders that could contain a still-unmatched charge, read the
@@ -158,6 +158,9 @@ export const targetAdapter: RetailerAdapter = {
           }
         }
         remaining = stillRemaining;
+        // Liveness during the (long, per-order) invoice walk: charges matched
+        // to an invoice so far. These become the detail-scrape total.
+        onScrapeProgress?.({ phase: "matching", count: matchedInvoices.length });
       }
 
       // Phase 3: a still-unmatched charge may be a payment split (invoice total
@@ -200,6 +203,7 @@ export const targetAdapter: RetailerAdapter = {
               }
             }
             remaining = stillRemaining;
+            onScrapeProgress?.({ phase: "matching", count: matchedInvoices.length });
           }
         }
       }
@@ -210,7 +214,7 @@ export const targetAdapter: RetailerAdapter = {
 
       for (let i = 0; i < matchedInvoices.length; i++) {
         signal?.throwIfAborted();
-        onScrapeProgress?.({ index: i + 1, total: matchedInvoices.length });
+        onScrapeProgress?.({ phase: "scraping", index: i + 1, total: matchedInvoices.length });
         const mi = matchedInvoices[i];
 
         let detail: RawTargetInvoiceDetail;
@@ -360,6 +364,7 @@ async function collectOrders(
   charges: YnabCharge[],
   maxPages: number,
   signal?: AbortSignal,
+  onProgress?: (event: ScrapeProgress) => void,
 ): Promise<RawTargetOrder[]> {
   const cutoff = cutoffDateFor(charges);
   let result: TargetPageResult | null = first;
@@ -375,6 +380,10 @@ async function collectOrders(
     }
     if (result.pageKind !== "orders") break;
     orders = result.orders; // Load more appends, so each result is the cumulative list
+
+    // Liveness during the list walk: orders collected so far (no denominator —
+    // we stop on date cutoff, not a known count).
+    onProgress?.({ phase: "listing", count: orders.length });
 
     // Seed with the max sentinel (not orders[0].date): Target returns "" for an
     // unparseable date, which sorts before every real date — seeding with it
