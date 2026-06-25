@@ -59,8 +59,21 @@ export function detectAmazonPageKind(url: string): AmazonPageKind {
     return "other";
   }
   if (u.pathname.startsWith("/cpe/yourpayments/transactions")) return "transactions";
-  if (u.searchParams.get("page") === "itemmod") return "itemmod";
-  if (u.pathname.includes("/css/summary/edit")) return "order-summary";
+  // Amazon Fresh / Whole Foods orders live under `/uff/your-account/order-details`.
+  // The base page is the order summary — it carries the subtotal AND the grocery
+  // line items inline. Its `/item-details` subpath and the legacy `?page=itemmod`
+  // URL are the standalone item list. Check the item views first since they share
+  // the base path. (`/gp/css/summary/edit` redirects here for grocery orders.)
+  if (
+    u.searchParams.get("page") === "itemmod" ||
+    u.pathname.includes("/uff/your-account/order-details/item-details")
+  )
+    return "itemmod";
+  if (
+    u.pathname.includes("/uff/your-account/order-details") ||
+    u.pathname.includes("/css/summary/edit")
+  )
+    return "order-summary";
   return "other";
 }
 
