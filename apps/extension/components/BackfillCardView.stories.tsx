@@ -29,8 +29,17 @@ export default meta;
 type Story = StoryObj<typeof BackfillCardView>;
 
 export const Idle: Story = { args: { state: { kind: "idle" } } };
+export const RunningListing: Story = {
+  args: { state: { kind: "running", progress: { status: "listing", retailer: "amazon", count: 12 } } },
+};
+export const RunningMatching: Story = {
+  args: { state: { kind: "running", progress: { status: "matching", retailer: "target", count: 4 } } },
+};
 export const Running: Story = {
   args: { state: { kind: "running", progress: { status: "scraping", retailer: "amazon", index: 3, total: 50 } } },
+};
+export const RunningLearning: Story = {
+  args: { state: { kind: "running", progress: { status: "learning", retailer: "target", index: 80, total: 137 } } },
 };
 export const Done: Story = { args: { state: { kind: "done", result } } };
 export const DoneSomeFailed: Story = {

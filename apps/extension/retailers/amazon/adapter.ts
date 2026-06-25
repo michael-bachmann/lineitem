@@ -2,6 +2,7 @@ import type {
   RetailerAdapter,
   ScrapedOrder,
   ScrapedItem,
+  ScrapeProgress,
   YnabCharge,
   PayeeMapping,
 } from "@/lib/types";
@@ -44,6 +45,7 @@ export const amazonAdapter: RetailerAdapter = {
         tabId,
         charges,
         maxPages,
+        onScrapeProgress,
       );
       if (signedOut) {
         return { matched: [], unmatched: [], blocked: { reason: "signed_out", charges } };
@@ -62,7 +64,7 @@ export const amazonAdapter: RetailerAdapter = {
         const [orderId, pairs] = orderEntries[i];
         // Emit progress BEFORE the scrape so the UI shows "Scraping order N of T"
         // while N is in flight, not after it lands.
-        onScrapeProgress?.({ index: i + 1, total: totalOrders });
+        onScrapeProgress?.({ phase: "scraping", index: i + 1, total: totalOrders });
 
         let result: ScrapeOrderResult;
         try {
@@ -134,6 +136,7 @@ async function paginateAndMatch(
   tabId: number,
   charges: YnabCharge[],
   maxPages: number,
+  onProgress?: (event: ScrapeProgress) => void,
 ): Promise<PaginateResult> {
   const cutoffIso = cutoffDateFor(charges);
   let candidates: RawTransaction[] = [];
@@ -187,6 +190,11 @@ async function paginateAndMatch(
     allMatched = [...allMatched, ...matchedThisPage];
     remaining = stillUnmatched;
     candidates = allCandidates.filter((c) => !matchedRaws.has(c));
+
+    // Liveness during the list walk: order rows matched so far. No denominator
+    // yet — the bar just shows we're working and on which retailer, not a
+    // fraction.
+    onProgress?.({ phase: "listing", count: allMatched.length });
 
     if (remaining.length === 0) break;
     if (page.transactions.length === 0) break;
