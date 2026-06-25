@@ -77,15 +77,24 @@ async function describe(): Promise<void> {
       const ready = await waitUntil(() => extractItemsSubtotal(document) !== null);
       const subtotalCents = ready ? extractItemsSubtotal(document) : null;
       const refund = parseRefundSummary(document);
-      const requiresItemmod = isGroceryOrder(document);
+      // The Fresh order-details page (/uff) lists grocery items inline using the
+      // itemmod row structure; older grocery summaries defer them to a separate
+      // itemmod page. Read them inline when present so grocery needs no second
+      // navigation; only fall back to requiresItemmod when a grocery order shows
+      // no inline rows.
+      const hasInlineItems = document.querySelector(SELECTORS.itemmodItemRow) !== null;
+      const requiresItemmod = isGroceryOrder(document) && !hasInlineItems;
+      const items = hasInlineItems
+        ? parseItemmodFromDocument(document)
+        : requiresItemmod
+          ? [] // listed on the itemmod page; the adapter navigates there next.
+          : parseItemsFromDocument(document);
       return post({
         pageKind: "order-summary",
         orderId: orderIdFromUrl(window.location.href),
         subtotalCents,
         requiresItemmod,
-        // Grocery orders list their items on the itemmod page; the adapter
-        // navigates there next, so leave items empty here.
-        items: requiresItemmod ? [] : parseItemsFromDocument(document),
+        items,
         refund,
       });
     }
@@ -104,6 +113,10 @@ async function describe(): Promise<void> {
       // Unrecognized page — nothing awaits an "other" result, so don't post one
       // (it would only sit in the buffer as noise). The adapter's await times out
       // on its own if it ever lands somewhere unexpected.
+      // Surface the landing URL: an unclassified page means the adapter's await
+      // will time out (we post nothing), so a future Amazon redirect that breaks
+      // classification shows up as an actionable log instead of a silent 30s hang.
+      console.warn(`[amazon] landed on unclassified page: ${window.location.href}`);
       return;
   }
 }

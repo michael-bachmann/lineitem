@@ -27,6 +27,24 @@ describe("detectAmazonPageKind", () => {
     ).toBe("itemmod");
   });
 
+  it("classifies the Fresh (/uff) order-details page as the order summary", () => {
+    // Grocery orders redirect here from /gp/css/summary/edit; the page carries
+    // the subtotal and the line items inline.
+    expect(
+      detectAmazonPageKind(
+        "https://www.amazon.com/uff/your-account/order-details/ref=ppx_hzod_rd_dt_b_fresh_uff_rd?_encoding=UTF8&orderID=111-222",
+      ),
+    ).toBe("order-summary");
+  });
+
+  it("classifies the Fresh /item-details subpath as the itemmod item list", () => {
+    expect(
+      detectAmazonPageKind(
+        "https://www.amazon.com/uff/your-account/order-details/item-details?orderID=111-222",
+      ),
+    ).toBe("itemmod");
+  });
+
   it("classifies any auth/step-up page as login, regardless of other path matches", () => {
     expect(detectAmazonPageKind("https://www.amazon.com/ap/signin?openid=...")).toBe("login");
     expect(detectAmazonPageKind("https://www.amazon.com/ap/challenge")).toBe("login");
