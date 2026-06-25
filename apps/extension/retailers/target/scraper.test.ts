@@ -197,6 +197,45 @@ describe("parseInvoiceDetailFromDocument", () => {
     });
   });
 
+  it("drops a $0 stub item card but keeps its fee in the invoice-total gap", () => {
+    // Target attaches a "Bag fee" to a $0 "PAPER_BAG" item card. The card parses
+    // as a $0 line; we drop it (it would only add a $0 line to categorize). The
+    // $0.30 fee lives outside the parsed item amount, so it stays in the gap
+    // between itemSubtotalCents and invoiceTotalCents and rides onto real items.
+    document.body.innerHTML = `
+      <div>
+        <h2>Invoice 1 of 1</h2>
+        <div class="styles_infoRow__k6eLr">
+          <div><b><p>12952961 - Sprite Zero Soda - 12pk/12 fl oz Cans</p></b></div>
+          <div class="styles_spaceBetweenDiv__bpE2M">
+            <div data-test="item-quantity"><div>Qty.</div><div><b>1</b></div></div>
+            <div>Unit price<b>$8.89</b></div>
+            <div>Amount<b>$8.89</b></div>
+          </div>
+        </div>
+        <div class="styles_infoRow__k6eLr">
+          <div><b><p>47750281 - PAPER_BAG</p></b></div>
+          <div class="styles_spaceBetweenDiv__bpE2M">
+            <div data-test="item-quantity"><div>Qty.</div><div><b>3</b></div></div>
+            <div>Unit price<b>$0.00</b></div>
+            <div>Amount<b>$0.00</b></div>
+          </div>
+        </div>
+        <div class="styles_detailsWrapper__FxR5V">
+          <div class="styles_detailsRowWrapper__QJjoS"><div>Bag fee</div><p>$0.30</p></div>
+        </div>
+        <div class="styles_detailsRowWrapper__QJjoS"><div><b>Invoice total</b></div><p><b>$9.19</b></p></div>
+      </div>
+    `;
+    const result = parseInvoiceDetailFromDocument(document);
+    expect(result.items).toEqual([
+      { productId: "12952961", title: "Sprite Zero Soda - 12pk/12 fl oz Cans",
+        unitPriceCents: 889, quantity: 1, amountCents: 889 },
+    ]);
+    expect(result.itemSubtotalCents).toBe(889);
+    expect(result.invoiceTotalCents).toBe(919);
+  });
+
   it("parses a promotional-gift-card invoice line item", () => {
     document.body.innerHTML = `
       <div>
