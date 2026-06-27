@@ -57,13 +57,22 @@ function getExtractor(): Promise<FeatureExtractionPipeline> {
       pipeline("feature-extraction", MODEL_ID, {
         dtype: "q8",
       }) as unknown as Promise<FeatureExtractionPipeline>
-    ).then((extractor) => {
-      // Positive proof the model finished downloading + initializing — the
-      // counterpart to the failure logs (Firefox previously couldn't fetch the
-      // Xet-hosted model file at all).
-      console.info(`[embedder] model ready (${MODEL_ID})`);
-      return extractor;
-    });
+    )
+      .then((extractor) => {
+        // Positive proof the model finished downloading + initializing — the
+        // counterpart to the failure logs (Firefox previously couldn't fetch the
+        // Xet-hosted model file at all).
+        console.info(`[embedder] model ready (${MODEL_ID})`);
+        return extractor;
+      })
+      .catch((err) => {
+        // Un-cache the failed load so the next call re-attempts it. Without this
+        // a single failure (network blip, CORS, aborted download) poisons the
+        // cache for the rest of this background lifetime and every later embed
+        // silently degrades.
+        extractorPromise = null;
+        throw err;
+      });
   }
   return extractorPromise;
 }

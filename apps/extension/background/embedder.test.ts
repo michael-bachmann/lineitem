@@ -61,6 +61,17 @@ describe("embedder", () => {
     expect(pipelineMock).toHaveBeenCalledTimes(1);
   });
 
+  it("re-attempts the load after a failed one instead of caching the rejection", async () => {
+    pipelineMock.mockRejectedValueOnce(new Error("download aborted"));
+    await expect(embed("a")).rejects.toThrow("download aborted");
+
+    // Next call must retry the load, not replay the cached rejection.
+    pipelineMock.mockResolvedValueOnce(makePipelineFn());
+    const v = await embed("b");
+    expect(v.length).toBe(384);
+    expect(pipelineMock).toHaveBeenCalledTimes(2);
+  });
+
   it("embedBatch([]) returns [] without calling the model", async () => {
     const vs = await embedBatch([]);
     expect(vs).toEqual([]);
