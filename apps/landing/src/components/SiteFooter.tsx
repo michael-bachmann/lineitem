@@ -91,9 +91,20 @@ export default function SiteFooter({ onFeedback }: { onFeedback: (kind: Feedback
           ))}
         </div>
       </Wrap>
-      <Wrap className="mt-10 flex flex-wrap items-center justify-between gap-x-4 gap-y-1 border-t border-line pt-[22px] text-[13px] text-faint">
-        <span className="min-w-0">© 2026 lineitem · Not affiliated with YNAB, Amazon, or Target</span>
-        <span className="tabular">{VERSION}</span>
+      <Wrap className="mt-10 border-t border-line pt-[22px] text-[13px] text-faint">
+        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
+          <span className="min-w-0">© 2026 lineitem · Not affiliated with YNAB, Amazon, or Target</span>
+          <span className="tabular">{VERSION}</span>
+        </div>
+        <p className="mt-3 max-w-[70ch] text-[11.5px] leading-[1.6]">
+          We are not affiliated, associated, or in any way officially connected with YNAB or any of
+          its subsidiaries or affiliates. The official YNAB website can be found at{" "}
+          <a href={LINKS.ynab} target="_blank" rel="noreferrer" className="underline hover:text-text">
+            www.ynab.com
+          </a>
+          . The names YNAB and You Need A Budget, as well as related names, tradenames, marks,
+          trademarks, emblems, and images are registered trademarks of YNAB.
+        </p>
       </Wrap>
     </footer>
   );
