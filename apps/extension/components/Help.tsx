@@ -137,7 +137,24 @@ export default function Help({ onBack, version = "0.0.0" }: HelpProps) {
         </a>
         <br />
         Made for YNAB + Amazon &amp; Target
+        <br />
+        Not affiliated with, or endorsed by, Amazon or Target.
       </div>
+
+      <p className="px-2 pb-2 text-center text-[10.5px] leading-[1.6] text-faint">
+        We are not affiliated, associated, or in any way officially connected with YNAB or any of its
+        subsidiaries or affiliates. The official YNAB website can be found at{" "}
+        <a
+          href={LINKS.ynab}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-muted underline hover:text-link"
+        >
+          www.ynab.com
+        </a>
+        . The names YNAB and You Need A Budget, as well as related names, tradenames, marks,
+        trademarks, emblems, and images are registered trademarks of YNAB.
+      </p>
     </div>
   );
 }
