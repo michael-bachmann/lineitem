@@ -96,7 +96,7 @@ export default function SiteFooter({ onFeedback }: { onFeedback: (kind: Feedback
           <span className="min-w-0">© 2026 lineitem · Not affiliated with YNAB, Amazon, or Target</span>
           <span className="tabular">{VERSION}</span>
         </div>
-        <p className="mt-3 max-w-[70ch] text-[11.5px] leading-[1.6]">
+        <p className="mt-3 text-[11.5px] leading-[1.6]">
           We are not affiliated, associated, or in any way officially connected with YNAB or any of
           its subsidiaries or affiliates. The official YNAB website can be found at{" "}
           <a href={LINKS.ynab} target="_blank" rel="noreferrer" className="underline hover:text-text">

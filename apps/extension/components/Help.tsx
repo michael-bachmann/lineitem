@@ -137,6 +137,8 @@ export default function Help({ onBack, version = "0.0.0" }: HelpProps) {
         </a>
         <br />
         Made for YNAB + Amazon &amp; Target
+        <br />
+        Not affiliated with, or endorsed by, Amazon or Target.
       </div>
 
       <p className="px-2 pb-2 text-center text-[10.5px] leading-[1.6] text-faint">
