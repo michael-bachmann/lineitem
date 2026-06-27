@@ -97,12 +97,15 @@ export async function exchangeCodeForTokens(
   });
 }
 
-/** Build the YNAB authorize URL for Authorization Code Grant. */
-export function buildAuthorizeUrl(redirectUri: string): string {
+/** Build the YNAB authorize URL for Authorization Code Grant. `state` is a
+ *  single-use random value echoed back on the redirect; verifying it on return
+ *  defends against CSRF (a forged redirect can't know the value we sent). */
+export function buildAuthorizeUrl(redirectUri: string, state: string): string {
   const params = new URLSearchParams({
     client_id: YNAB_CLIENT_ID,
     redirect_uri: redirectUri,
     response_type: "code",
+    state,
   });
   return `${YNAB_AUTHORIZE_URL}?${params}`;
 }
@@ -115,12 +118,20 @@ export function parseCodeFromRedirect(redirectUrl: string): string {
   return code;
 }
 
+/** Read the `state` param off a redirect URL (null if absent). Returns null
+ *  rather than throwing so the caller's single equality check rejects both a
+ *  mismatched and a missing value with one CSRF abort. */
+function getStateFromRedirect(redirectUrl: string): string | null {
+  return new URL(redirectUrl).searchParams.get("state");
+}
+
 /** Run the full OAuth consent flow: launch the consent popup, wait for the
  *  redirect, exchange the code for tokens, persist them. Throws if the user
  *  cancels the popup or the exchange fails. */
 export async function runOAuthFlow(): Promise<void> {
   const redirectUri = browser.identity.getRedirectURL();
-  const authorizeUrl = buildAuthorizeUrl(redirectUri);
+  const state = crypto.randomUUID();
+  const authorizeUrl = buildAuthorizeUrl(redirectUri, state);
 
   // `interactive: true` shows the consent popup; required for the first
   // grant. Resolves with the final redirect URL or undefined on user cancel.
@@ -129,6 +140,12 @@ export async function runOAuthFlow(): Promise<void> {
     interactive: true,
   });
   if (!resultUrl) throw new Error("Sign-in cancelled");
+
+  // A mismatched (or absent) state means the redirect didn't originate from the
+  // request we just made — abort before exchanging the code.
+  if (getStateFromRedirect(resultUrl) !== state) {
+    throw new Error("OAuth state mismatch; sign-in aborted");
+  }
 
   const code = parseCodeFromRedirect(resultUrl);
   await exchangeCodeForTokens(code, redirectUri);
