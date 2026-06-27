@@ -118,6 +118,13 @@ export function parseCodeFromRedirect(redirectUrl: string): string {
   return code;
 }
 
+/** Read the `state` param off a redirect URL (null if absent). Returns null
+ *  rather than throwing so the caller's single equality check rejects both a
+ *  mismatched and a missing value with one CSRF abort. */
+function getStateFromRedirect(redirectUrl: string): string | null {
+  return new URL(redirectUrl).searchParams.get("state");
+}
+
 /** Run the full OAuth consent flow: launch the consent popup, wait for the
  *  redirect, exchange the code for tokens, persist them. Throws if the user
  *  cancels the popup or the exchange fails. */
@@ -136,7 +143,7 @@ export async function runOAuthFlow(): Promise<void> {
 
   // A mismatched (or absent) state means the redirect didn't originate from the
   // request we just made — abort before exchanging the code.
-  if (new URL(resultUrl).searchParams.get("state") !== state) {
+  if (getStateFromRedirect(resultUrl) !== state) {
     throw new Error("OAuth state mismatch; sign-in aborted");
   }
 

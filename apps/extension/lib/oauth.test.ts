@@ -206,6 +206,14 @@ describe("runOAuthFlow", () => {
     await expect(runOAuthFlow()).rejects.toThrow(/state mismatch/);
     expect(fetchSpy).not.toHaveBeenCalled();
   });
+
+  it("aborts without exchanging when the redirect carries no state param", async () => {
+    launchWebAuthFlowMock.mockResolvedValue("https://ext.example/?code=CODE");
+
+    const { runOAuthFlow } = await import("./oauth");
+    await expect(runOAuthFlow()).rejects.toThrow(/state mismatch/);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
 });
 
 describe("parseCodeFromRedirect", () => {
