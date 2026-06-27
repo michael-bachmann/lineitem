@@ -97,12 +97,15 @@ export async function exchangeCodeForTokens(
   });
 }
 
-/** Build the YNAB authorize URL for Authorization Code Grant. */
-export function buildAuthorizeUrl(redirectUri: string): string {
+/** Build the YNAB authorize URL for Authorization Code Grant. `state` is a
+ *  single-use random value echoed back on the redirect; verifying it on return
+ *  defends against CSRF (a forged redirect can't know the value we sent). */
+export function buildAuthorizeUrl(redirectUri: string, state: string): string {
   const params = new URLSearchParams({
     client_id: YNAB_CLIENT_ID,
     redirect_uri: redirectUri,
     response_type: "code",
+    state,
   });
   return `${YNAB_AUTHORIZE_URL}?${params}`;
 }
@@ -120,7 +123,8 @@ export function parseCodeFromRedirect(redirectUrl: string): string {
  *  cancels the popup or the exchange fails. */
 export async function runOAuthFlow(): Promise<void> {
   const redirectUri = browser.identity.getRedirectURL();
-  const authorizeUrl = buildAuthorizeUrl(redirectUri);
+  const state = crypto.randomUUID();
+  const authorizeUrl = buildAuthorizeUrl(redirectUri, state);
 
   // `interactive: true` shows the consent popup; required for the first
   // grant. Resolves with the final redirect URL or undefined on user cancel.
@@ -129,6 +133,12 @@ export async function runOAuthFlow(): Promise<void> {
     interactive: true,
   });
   if (!resultUrl) throw new Error("Sign-in cancelled");
+
+  // A mismatched (or absent) state means the redirect didn't originate from the
+  // request we just made — abort before exchanging the code.
+  if (new URL(resultUrl).searchParams.get("state") !== state) {
+    throw new Error("OAuth state mismatch; sign-in aborted");
+  }
 
   const code = parseCodeFromRedirect(resultUrl);
   await exchangeCodeForTokens(code, redirectUri);
