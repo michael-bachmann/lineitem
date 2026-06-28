@@ -89,6 +89,28 @@ describe("amazonAdapter.scrapeMatchedOrders", () => {
     expect(res.unmatched).toEqual([]);
   });
 
+  it("navigates to the itemmod page for a grocery order whose summary defers its items", async () => {
+    // A grocery order's order-details page carries the subtotal but no inline
+    // items (requiresItemmod: true); the items live on the itemmod page. This is
+    // a real, current Amazon Fresh layout — the itemmod hop is NOT dead code.
+    const c = charge({ amountCents: 549 });
+    queueResults(
+      { pageKind: "transactions", fingerprint: "p1", hasNext: false, transactions: [txRow("111-G", { amountCents: 549 })] },
+      { pageKind: "order-summary", orderId: "111-G", subtotalCents: 549, requiresItemmod: true, items: [], refund: null },
+      { pageKind: "itemmod", orderId: "111-G", items: [item()], refund: null },
+    );
+
+    const res = await amazonAdapter.scrapeMatchedOrders([c]);
+
+    // Items came from the itemmod page (the summary deferred them), proving the
+    // adapter made the second navigation.
+    expect(res.matched).toHaveLength(1);
+    expect(res.matched[0].order.items).toHaveLength(1);
+    expect(awaitPageResult).toHaveBeenCalledTimes(3); // transactions → summary → itemmod
+    const navUrls = (browser.tabs.update as ReturnType<typeof vi.fn>).mock.calls.map((a) => a[1]?.url);
+    expect(navUrls.some((u: string) => u?.includes("page=itemmod"))).toBe(true);
+  });
+
   it("keeps partial matches and blocks the rest when a detail page hits login mid-walk", async () => {
     const c = charge();
     queueResults(

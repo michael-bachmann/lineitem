@@ -181,6 +181,39 @@ describe("parseItemmodFromDocument", () => {
     expect(items).toHaveLength(1);
     expect(items[0].refundedAmountCents).toBe(0);
   });
+
+  it("parses a substituted item as the delivered replacement, not the out-of-stock original", () => {
+    // Real Amazon Fresh substitution (captured from a live grocery order): the
+    // delivered substitute carries the only product link + line total; the
+    // original it replaced is shown as plain text (no link, no price) inside a
+    // "Replacement for:" status box, so the parser must pick the substitute and
+    // ignore the original — and must NOT skip the row (it isn't "out of stock").
+    document.body.innerHTML = `
+      <div id="B00E3JM7UU-item-grid-row" role="row">
+        <img alt="Organic Blackberries, 6 oz" src="https://example.com/blackberries.jpg" />
+        <a class="a-link-normal" href="/gp/product/B00E3JM7UU?ref_=uff_od_product">
+          <span> Organic Blackberries, 6 oz </span>
+        </a>
+        <span id="B00E3JM7UU-item-priced-by-quantity"> </span>
+        <span id="B00E3JM7UU-item-total-price"> $5.49 </span>
+        <div class="a-box ufpo-item-status">
+          <div class="a-row"><span class="a-size-small a-text-bold">Replacement for:</span></div>
+          <div class="a-row"><span class="a-size-small">Berry Blueberry Organic, 1 Pint</span></div>
+          <div class="a-row"><span class="a-size-small">Qty: 1</span></div>
+        </div>
+      </div>
+    `;
+    expect(parseItemmodFromDocument(document)).toEqual([
+      {
+        productId: "B00E3JM7UU",
+        title: "Organic Blackberries, 6 oz",
+        priceCents: 549,
+        quantity: 1,
+        imageUrl: "https://example.com/blackberries.jpg",
+        refundedAmountCents: 0,
+      },
+    ]);
+  });
 });
 
 describe("parseItemsFromDocument refund detection", () => {
