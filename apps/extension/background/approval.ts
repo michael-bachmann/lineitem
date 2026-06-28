@@ -17,7 +17,8 @@ import type {
   LearnedProduct,
   ProductEmbedding,
 } from "@/lib/types";
-import { groupBy } from "remeda";
+import { chunk, groupBy } from "remeda";
+import { mapSeries } from "@/lib/async";
 
 /** Check whether all items share the same category. */
 function isSingleCategory(items: ApprovalItem[]): boolean {
@@ -145,13 +146,16 @@ export async function learnFromApproval(
   if (entries.length === 0) return;
 
   const total = entries.length;
-  const embeddings: (Float32Array | null)[] = [];
-  for (let i = 0; i < total; i += LEARN_CHUNK_SIZE) {
-    const chunk = entries.slice(i, i + LEARN_CHUNK_SIZE);
-    const chunkVectors = await safeEmbedBatch(chunk.map((e) => e.title));
-    for (const v of chunkVectors) embeddings.push(v);
-    onProgress?.({ index: Math.min(i + LEARN_CHUNK_SIZE, total), total });
-  }
+  // Embed chunk by chunk so a long approval can stream progress. Each chunk
+  // completes before the next starts (the embedder is one shared model), and
+  // the cumulative item count after chunk `i` is (i + 1) * size, capped at total.
+  const embeddings = (
+    await mapSeries(chunk(entries, LEARN_CHUNK_SIZE), async (group, i) => {
+      const vectors = await safeEmbedBatch(group.map((e) => e.title));
+      onProgress?.({ index: Math.min((i + 1) * LEARN_CHUNK_SIZE, total), total });
+      return vectors;
+    })
+  ).flat();
   const now = new Date().toISOString();
 
   // Cache writes go through unconditionally for every entry.

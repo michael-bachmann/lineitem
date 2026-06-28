@@ -10,6 +10,7 @@ import { classifyItems } from "@/lib/classifier";
 import { distributeOrder } from "@/lib/distribution";
 import { verifyScrape } from "@/lib/verify-scrape";
 import { groupBy, partition } from "remeda";
+import { mapSeries } from "@/lib/async";
 import type {
   YnabTransaction,
   YnabCharge,
@@ -246,14 +247,5 @@ async function scrapeRetailer(
     ],
     blocked: blockedSummary,
   };
-}
-
-/** Like `Promise.all(items.map(fn))` but awaits each call before starting the
- *  next. Used where the calls must not overlap — one retailer browser tab at a
- *  time, and one embedder classification at a time. */
-async function mapSeries<T, R>(items: T[], fn: (item: T) => Promise<R>): Promise<R[]> {
-  const results: R[] = [];
-  for (const item of items) results.push(await fn(item));
-  return results;
 }
 
