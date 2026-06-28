@@ -217,29 +217,37 @@ export async function approveBatch(
   const errors: string[] = [];
 
   for (const ynabTxId of ynabTransactionIds) {
-    const tx = await getAllocatedTransaction(ynabTxId);
-    if (!tx) {
-      errors.push(`${ynabTxId}: transaction not found`);
-      continue;
-    }
+    // Isolate per-transaction: an unexpected throw (e.g. an IDB read in
+    // getAllocatedTransaction/classifyItems) becomes this tx's error instead of
+    // rejecting the whole batch — which, since the message dispatch doesn't
+    // catch APPROVE_BATCH, would leave the side panel with no response at all.
+    try {
+      const tx = await getAllocatedTransaction(ynabTxId);
+      if (!tx) {
+        errors.push(`${ynabTxId}: transaction not found`);
+        continue;
+      }
 
-    const classifiedItems = await classifyItems(tx.items, tx.retailer);
+      const classifiedItems = await classifyItems(tx.items, tx.retailer);
 
-    // Skip if any item is uncategorized — partial approval would inflate categorized amounts
-    const allCategorized = classifiedItems.every((ci) => ci.suggestedCategoryId !== null);
-    if (!allCategorized) {
-      errors.push(`${ynabTxId}: not all items have categories assigned`);
-      continue;
-    }
+      // Skip if any item is uncategorized — partial approval would inflate categorized amounts
+      const allCategorized = classifiedItems.every((ci) => ci.suggestedCategoryId !== null);
+      if (!allCategorized) {
+        errors.push(`${ynabTxId}: not all items have categories assigned`);
+        continue;
+      }
 
-    const items: ApprovalItem[] = classifiedItems.map((ci) => ({
-      productId: ci.productId,
-      categoryId: ci.suggestedCategoryId!,
-    }));
+      const items: ApprovalItem[] = classifiedItems.map((ci) => ({
+        productId: ci.productId,
+        categoryId: ci.suggestedCategoryId!,
+      }));
 
-    const result = await approveTransaction(ynabTxId, items);
-    if ("error" in result) {
-      errors.push(`${ynabTxId}: ${result.error}`);
+      const result = await approveTransaction(ynabTxId, items);
+      if ("error" in result) {
+        errors.push(`${ynabTxId}: ${result.error}`);
+      }
+    } catch (e) {
+      errors.push(`${ynabTxId}: ${e instanceof Error ? e.message : "approval failed"}`);
     }
   }
 
