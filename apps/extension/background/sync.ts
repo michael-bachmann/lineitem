@@ -75,13 +75,12 @@ async function performSyncInner(): Promise<SyncResult> {
 
     const chargesByRetailer = groupBy(needsScraping, (e) => e.retailer);
 
-    // 2. SCRAPE each retailer. Sequentially — each adapter owns a browser tab, so
-    // we don't open several at once — and each returns a self-contained outcome
-    // rather than mutating shared state, so we fold them into the run aggregates.
-    const outcomes: RetailerOutcome[] = [];
-    for (const [retailerId, retailerEntries] of Object.entries(chargesByRetailer)) {
-      outcomes.push(await scrapeRetailer(retailerId, retailerEntries, entryById));
-    }
+    // 2. SCRAPE each retailer into a self-contained outcome, then fold those into
+    // the run aggregates. mapSeries (not Promise.all) because each adapter owns a
+    // browser tab — we walk one retailer at a time rather than opening several.
+    const outcomes = await mapSeries(Object.entries(chargesByRetailer), ([retailerId, entries]) =>
+      scrapeRetailer(retailerId, entries, entryById),
+    );
 
     const allAllocated = outcomes.flatMap((o) => o.allocated);
     const errorEntries = outcomes.flatMap((o) => o.errorEntries);
@@ -90,18 +89,20 @@ async function performSyncInner(): Promise<SyncResult> {
     // 4. PERSIST (atomic batch write)
     await putAllocatedTransactions(allAllocated);
 
-    // 5. CLASSIFY (post-persist; failures degrade to "no suggestion", not data loss)
-    const matchedEntries: QueueEntry[] = [];
-    for (const at of allAllocated) {
-      const entry = entryById.get(at.ynabTransactionId);
-      if (!entry) continue;
-      const classifiedItems = await classifyItems(at.items, entry.retailer);
-      matchedEntries.push({
-        ynabTransaction: entry.tx,
-        retailer: entry.retailer,
-        matchStatus: { status: "matched", order: at, classifiedItems },
-      });
-    }
+    // 5. CLASSIFY (post-persist; failures degrade to "no suggestion", not data
+    // loss). Sequential — classification shares the single embedder model.
+    const matchedEntries = (
+      await mapSeries(allAllocated, async (at): Promise<QueueEntry[]> => {
+        const entry = entryById.get(at.ynabTransactionId);
+        if (!entry) return [];
+        const classifiedItems = await classifyItems(at.items, entry.retailer);
+        return [{
+          ynabTransaction: entry.tx,
+          retailer: entry.retailer,
+          matchStatus: { status: "matched", order: at, classifiedItems },
+        }];
+      })
+    ).flat();
 
     // 6. QUEUE
     return {
@@ -234,5 +235,14 @@ async function scrapeRetailer(
     ],
     blocked: blockedSummary,
   };
+}
+
+/** Like `Promise.all(items.map(fn))` but awaits each call before starting the
+ *  next. Used where the calls must not overlap — one retailer browser tab at a
+ *  time, and one embedder classification at a time. */
+async function mapSeries<T, R>(items: T[], fn: (item: T) => Promise<R>): Promise<R[]> {
+  const results: R[] = [];
+  for (const item of items) results.push(await fn(item));
+  return results;
 }
 
