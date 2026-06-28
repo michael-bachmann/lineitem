@@ -390,6 +390,27 @@ describe("runBackfill — per-retailer breakdown", () => {
     expect(byR.target).toMatchObject({ matched: 1 });
   });
 
+  it("folds a retailer's pre-existing allocations into its byRetailer matched count", async () => {
+    // amz-1 was allocated on a prior run; amz-2 matches this run → amazon's
+    // per-retailer count is cumulative (1 already + 1 new = 2).
+    getTransactionsSinceMock.mockResolvedValue([
+      tx({ id: "amz-1", payee_name: "AMAZON.COM" }),
+      tx({ id: "amz-2", payee_name: "AMAZON.COM" }),
+    ]);
+    getAllocatedTransactionMock.mockImplementation(async (id: string) =>
+      id === "amz-1" ? { ynabTransactionId: "amz-1", items: [{ productId: "p1" }] } : undefined,
+    );
+    scrapeMatchedOrdersMock.mockImplementation(async (charges: YnabCharge[]) => ({
+      matched: charges.map((c) => ({ order: order(), charges: [c] })),
+      unmatched: [],
+    }));
+
+    const result = await runBackfill({ fromDate: "2025-01-01" });
+
+    const byR = Object.fromEntries(result.byRetailer.map((r) => [r.retailer, r]));
+    expect(byR.amazon).toMatchObject({ matched: 2 });
+  });
+
   it("propagates a retailer sign-in wall to byRetailer (so the card prompts to sign in, not 'won't match')", async () => {
     getTransactionsSinceMock.mockResolvedValue([
       tx({ id: "tgt-1", payee_name: "TARGET" }),

@@ -138,6 +138,11 @@ async function paginateAndMatch(
   maxPages: number,
   onProgress?: (event: ScrapeProgress) => void,
 ): Promise<PaginateResult> {
+  // This walk state is foundational, not a cleanup target: paginating the
+  // transactions list is a stateful loop over a tab. `candidates` carries
+  // order-linked rows forward across pages, `remaining` shrinks as charges match
+  // (and stops the walk once empty), and `allMatched` accumulates the pairs — all
+  // updated across sequential, side-effecting page turns.
   const cutoffIso = cutoffDateFor(charges);
   let candidates: RawTransaction[] = [];
   let remaining = [...charges];

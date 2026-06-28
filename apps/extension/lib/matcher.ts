@@ -1,4 +1,14 @@
+import { groupBy } from "remeda";
+
 export const THREE_DAYS_MS = 3 * 24 * 60 * 60 * 1000;
+
+/** Whether two ISO dates fall within the ±3-day match window. */
+const withinWindow = (a: string, b: string): boolean =>
+  Math.abs(new Date(a).getTime() - new Date(b).getTime()) <= THREE_DAYS_MS;
+
+/** Charge/candidate indices sorted by their date (ascending). */
+const sortByDate = (idxs: number[], src: { date: string }[]): number[] =>
+  [...idxs].sort((a, b) => src[a].date.localeCompare(src[b].date));
 
 /**
  * Match a YNAB transaction to a scraped retailer transaction by exact amount
@@ -10,16 +20,10 @@ export function matchByAmountAndDate<T extends { date: string; amountCents: numb
   ynabDate: string,
   candidates: T[],
 ): T | null {
-  const txDate = new Date(ynabDate);
-
-  const matches = candidates.filter((c) => {
-    if (c.amountCents !== amountCents) return false;
-    const cDate = new Date(c.date);
-    return Math.abs(txDate.getTime() - cDate.getTime()) <= THREE_DAYS_MS;
-  });
-
-  if (matches.length === 1) return matches[0];
-  return null;
+  const matches = candidates.filter(
+    (c) => c.amountCents === amountCents && withinWindow(ynabDate, c.date),
+  );
+  return matches.length === 1 ? matches[0] : null;
 }
 
 /**
@@ -39,47 +43,44 @@ export function assignByAmountAndDate(
   charges: { date: string; amountCents: number }[],
   candidates: { date: string; amountCents: number }[],
 ): (number | null)[] {
-  const result: (number | null)[] = charges.map(() => null);
+  // Group charge and candidate indices by exact amount (same key on both sides),
+  // pair each amount's group 1:1, then scatter the accepted pairs back onto a
+  // charge-aligned result. Group iteration order doesn't matter — every charge
+  // belongs to exactly one amount, so the pairs are disjoint.
+  const candIdxByAmount = groupBy(indicesOf(candidates), (j) => candidates[j].amountCents);
+  const chargeIdxByAmount = groupBy(indicesOf(charges), (i) => charges[i].amountCents);
 
-  // Group charge indices by exact amount; candidates are looked up per amount.
-  const chargesByAmount = new Map<number, number[]>();
-  charges.forEach((c, i) => {
-    const group = chargesByAmount.get(c.amountCents);
-    if (group) group.push(i);
-    else chargesByAmount.set(c.amountCents, [i]);
-  });
+  const pairs = Object.entries(chargeIdxByAmount).flatMap(([amount, chargeIdxs]) =>
+    // Object.entries stringifies the numeric amount key; convert back to look up
+    // the candidate group keyed by the same amount.
+    cleanPairs(chargeIdxs, candIdxByAmount[Number(amount)] ?? [], charges, candidates),
+  );
 
-  const byDate = (idxs: number[], src: { date: string }[]) =>
-    [...idxs].sort((a, b) => src[a].date.localeCompare(src[b].date));
+  const candByCharge = new Map(pairs);
+  return charges.map((_, i) => candByCharge.get(i) ?? null);
+}
 
-  for (const [amount, chargeIdxs] of chargesByAmount) {
-    const candIdxs = candidates
-      .map((_, j) => j)
-      .filter((j) => candidates[j].amountCents === amount);
+const indicesOf = (xs: readonly unknown[]): number[] => xs.map((_, i) => i);
 
-    // Only auto-assign when each charge has its own candidate to pair with —
-    // unequal counts mean a genuine guess, so leave the whole group unmatched.
-    if (candIdxs.length !== chargeIdxs.length) continue;
-
-    // Pair in date order and accept only if every pair is within the window.
-    // A single out-of-window pair means this isn't a clean 1:1 set; stay
-    // conservative and leave them all for manual matching.
-    const sortedCands = byDate(candIdxs, candidates);
-    const pairs = byDate(chargeIdxs, charges).map(
-      (ci, k) => [ci, sortedCands[k]] as const,
-    );
-    const allWithinWindow = pairs.every(
-      ([ci, dj]) =>
-        Math.abs(
-          new Date(charges[ci].date).getTime() - new Date(candidates[dj].date).getTime(),
-        ) <= THREE_DAYS_MS,
-    );
-    if (!allWithinWindow) continue;
-
-    for (const [ci, dj] of pairs) result[ci] = dj;
-  }
-
-  return result;
+/**
+ * Pair an amount group's charge indices to its candidate indices 1:1 in date
+ * order, returning the `[chargeIdx, candIdx]` pairs only when the group is clean
+ * — equal counts and every date-ordered pair within the window. An unequal count
+ * is a genuine guess, and a single out-of-window pair means it isn't a clean 1:1
+ * set; either way the whole group is left unmatched (no pairs).
+ */
+function cleanPairs(
+  chargeIdxs: number[],
+  candIdxs: number[],
+  charges: { date: string }[],
+  candidates: { date: string }[],
+): (readonly [number, number])[] {
+  if (chargeIdxs.length !== candIdxs.length) return [];
+  const sortedCands = sortByDate(candIdxs, candidates);
+  const pairs = sortByDate(chargeIdxs, charges).map((ci, k) => [ci, sortedCands[k]] as const);
+  return pairs.every(([ci, dj]) => withinWindow(charges[ci].date, candidates[dj].date))
+    ? pairs
+    : [];
 }
 
 /** Earliest date in the set, minus 3 days. Used to stop paginating. */

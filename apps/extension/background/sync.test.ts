@@ -122,3 +122,106 @@ describe("performSync — sign-in walls", () => {
     expect(result.blocked).toBeUndefined();
   });
 });
+
+describe("performSync — per-retailer isolation", () => {
+  it("a retailer whose adapter throws becomes retryable error entries; other retailers and the fast-path cache survive", async () => {
+    getUnapprovedTransactionsMock.mockResolvedValue([
+      tx({ id: "tx-1", payee_name: "AMAZON.COM" }), // amazon → adapter throws
+      tx({ id: "tx-2", payee_name: "TARGET" }), // target → scrapes fine
+      tx({ id: "tx-3", payee_name: "AMAZON.COM" }), // amazon → already cached (fast path)
+    ]);
+    getRetailerForPayeeMock.mockImplementation((p: string) =>
+      /amazon/i.test(p) ? { retailer: "amazon", strategy: "scrape" }
+        : /target/i.test(p) ? { retailer: "target", strategy: "scrape" }
+        : null,
+    );
+
+    // tx-3 is cached, so it takes the fast path and never reaches the scrape loop.
+    const cached = {
+      ynabTransactionId: "tx-3", orderKey: "amazon:O", retailer: "amazon",
+      date: "2026-04-01", amountCents: 10000, isRefund: false, items: [],
+    };
+    getAllocatedTransactionMock.mockImplementation(async (id: string) =>
+      id === "tx-3" ? cached : undefined,
+    );
+
+    const amazonThrows = vi.fn(async () => {
+      throw new Error("Tab 7 content script not ready within 15s");
+    });
+    const targetScrape = vi.fn(async () => ({
+      matched: [],
+      unmatched: [{ charge: charge("tx-2"), reason: "No matching order found" }],
+    }));
+    getAdapterMock.mockImplementation((id: string) =>
+      id === "amazon"
+        ? { id: "amazon", payees: [], startUrl: "", scrapeMatchedOrders: amazonThrows }
+        : { id: "target", payees: [], startUrl: "", scrapeMatchedOrders: targetScrape },
+    );
+
+    const result = await performSync();
+
+    // The whole sync did NOT collapse to a bare { error } — the throw stayed local.
+    expect("error" in result).toBe(false);
+    if (!("queue" in result)) throw new Error(`expected a queue, got ${JSON.stringify(result)}`);
+    // Exactly one entry per transaction — no charge double-counted into both the
+    // error entries and elsewhere.
+    expect(result.queue).toHaveLength(3);
+    const byId = (id: string) => result.queue.find((e) => e.ynabTransaction.id === id);
+
+    // The Amazon throw is isolated to its own charge as a retryable error,
+    // carrying the thrown message — it does not fail the whole sync.
+    expect(byId("tx-1")?.matchStatus).toEqual({
+      status: "error",
+      message: "Tab 7 content script not ready within 15s",
+    });
+    // Target still ran and produced its no_match entry.
+    expect(byId("tx-2")?.matchStatus.status).toBe("no_match");
+    // The fast-path cached transaction survived the sibling retailer's failure.
+    expect(byId("tx-3")?.matchStatus.status).toBe("matched");
+  });
+});
+
+describe("performSync — scrape → verify → distribute", () => {
+  it("persists and classifies an order that verifies and distributes into a matched entry", async () => {
+    getUnapprovedTransactionsMock.mockResolvedValue([tx({ id: "tx-1" })]);
+    const order = { retailer: "amazon", orderId: "O1", items: [], displayedItemsSubtotalCents: 10000 };
+    scrapeMock.mockResolvedValue({
+      matched: [{ order, charges: [charge("tx-1")] }],
+      unmatched: [],
+    });
+    const allocation = {
+      ynabTransactionId: "tx-1", orderKey: "amazon:O1", retailer: "amazon",
+      date: "2026-04-01", amountCents: 10000, isRefund: false, items: [],
+    };
+    distributeOrderMock.mockReturnValue({ allocated: [allocation], failures: [] });
+
+    const result = await performSync();
+
+    if (!("queue" in result)) throw new Error(`expected a queue, got ${JSON.stringify(result)}`);
+    expect(putAllocatedTransactionsMock).toHaveBeenCalledWith([allocation]);
+    const entry = result.queue.find((e) => e.ynabTransaction.id === "tx-1");
+    expect(entry?.matchStatus).toEqual({ status: "matched", order: allocation, classifiedItems: [] });
+  });
+
+  it("surfaces a verification failure as an error entry and persists nothing", async () => {
+    getUnapprovedTransactionsMock.mockResolvedValue([tx({ id: "tx-1" })]);
+    const order = { retailer: "amazon", orderId: "O1", items: [], displayedItemsSubtotalCents: 10000 };
+    scrapeMock.mockResolvedValue({
+      matched: [{ order, charges: [charge("tx-1")] }],
+      unmatched: [],
+    });
+    verifyScrapeMock.mockReturnValue({ ok: false, message: "Items don't reconcile to the subtotal" });
+    distributeOrderMock.mockClear(); // shared mock — drop call history from prior tests
+
+    const result = await performSync();
+
+    if (!("queue" in result)) throw new Error("expected a queue");
+    expect(result.queue.find((e) => e.ynabTransaction.id === "tx-1")?.matchStatus).toEqual({
+      status: "error",
+      message: "Items don't reconcile to the subtotal",
+    });
+    // A failed verification never reaches distribution/persistence.
+    expect(distributeOrderMock).not.toHaveBeenCalled();
+    expect(putAllocatedTransactionsMock).toHaveBeenCalledWith([]);
+  });
+});
