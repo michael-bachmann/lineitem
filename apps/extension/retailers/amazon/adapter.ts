@@ -8,7 +8,7 @@ import type {
 } from "@/lib/types";
 import { assignByAmountAndDate, cutoffDateFor, NO_MATCH_REASON, READ_FAILED_REASON } from "@/lib/matcher";
 import { openRetailerTab, awaitPageResult, clearBufferedPageResult } from "@/background/tabs";
-import { orderDetailUrl, itemmodUrl, TRANSACTIONS_URL } from "@/retailers/amazon/selectors";
+import { orderDetailUrl, TRANSACTIONS_URL } from "@/retailers/amazon/selectors";
 import type { AmazonPageResult } from "@/retailers/amazon/page";
 import type { RawTransaction, RawItem } from "@/retailers/amazon/scraper";
 import { groupBy } from "remeda";
@@ -296,31 +296,15 @@ async function scrapeOrder(tabId: number, orderId: string): Promise<ScrapeOrderR
   if (summary.pageKind !== "order-summary") return { kind: "error", reason: READ_FAILED_REASON };
   if (summary.subtotalCents === null) return { kind: "error", reason: amazonErrorMessage("missing_subtotal") };
 
-  let items = summary.items;
-  let refund = summary.refund;
-
-  // Grocery orders list their items on a separate itemmod page; the summary page
-  // only carries the subtotal and (authoritative) refund.
-  if (summary.requiresItemmod) {
-    navigate(tabId, itemmodUrl(orderId));
-    const itemmod = await awaitPageResult<AmazonPageResult>(
-      tabId,
-      (r) => r.pageKind === "login" || (r.pageKind === "itemmod" && r.orderId === orderId),
-    );
-    if (itemmod.pageKind === "login") return { kind: "signed_out" };
-    if (itemmod.pageKind !== "itemmod") return { kind: "error", reason: READ_FAILED_REASON };
-    items = itemmod.items;
-    // Prefer itemmod's refund (has per-item markers) when present.
-    refund = itemmod.refund ?? summary.refund;
-  }
-
-  if (items.length === 0) return { kind: "error", reason: "Failed to scrape order items" };
+  // The order-details page carries the items inline — grocery (itemmod rows) and
+  // regular alike — so the content script's order-summary result is complete.
+  if (summary.items.length === 0) return { kind: "error", reason: "Failed to scrape order items" };
 
   return {
     kind: "ok",
-    items: items.map(toScrapedItem),
+    items: summary.items.map(toScrapedItem),
     subtotalCents: summary.subtotalCents,
-    refund,
+    refund: summary.refund,
   };
 }
 

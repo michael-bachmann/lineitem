@@ -19,12 +19,19 @@ describe("detectAmazonPageKind", () => {
     ).toBe("order-summary");
   });
 
-  it("classifies the itemmod page (grocery items) even though it also carries orderID", () => {
+  it("classifies legacy itemmod URLs (?page=itemmod, /item-details) as the order summary now", () => {
+    // The standalone itemmod page is no longer used; these order-details URL
+    // variants all resolve to order-summary (items are read inline there).
     expect(
       detectAmazonPageKind(
         "https://www.amazon.com/uff/your-account/order-details?orderID=111-222&page=itemmod",
       ),
-    ).toBe("itemmod");
+    ).toBe("order-summary");
+    expect(
+      detectAmazonPageKind(
+        "https://www.amazon.com/uff/your-account/order-details/item-details?orderID=111-222",
+      ),
+    ).toBe("order-summary");
   });
 
   it("classifies the Fresh (/uff) order-details page as the order summary", () => {
@@ -35,14 +42,6 @@ describe("detectAmazonPageKind", () => {
         "https://www.amazon.com/uff/your-account/order-details/ref=ppx_hzod_rd_dt_b_fresh_uff_rd?_encoding=UTF8&orderID=111-222",
       ),
     ).toBe("order-summary");
-  });
-
-  it("classifies the Fresh /item-details subpath as the itemmod item list", () => {
-    expect(
-      detectAmazonPageKind(
-        "https://www.amazon.com/uff/your-account/order-details/item-details?orderID=111-222",
-      ),
-    ).toBe("itemmod");
   });
 
   it("classifies any auth/step-up page as login, regardless of other path matches", () => {

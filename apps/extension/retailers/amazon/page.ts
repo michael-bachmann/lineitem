@@ -32,13 +32,11 @@ export type AmazonPageResult =
       /** Null when the subtotal couldn't be read — the adapter treats that as an
        *  unverifiable scrape, the same as the old `missing_subtotal` error. */
       subtotalCents: number | null;
-      /** Grocery orders list items on a separate itemmod page; when true the
-       *  adapter navigates there next and `items` here is empty. */
-      requiresItemmod: boolean;
+      /** Items read inline from the order-details page — grocery (itemmod rows)
+       *  and regular alike. */
       items: RawItem[];
       refund: RefundSummary;
     }
-  | { pageKind: "itemmod"; orderId: string; items: RawItem[]; refund: RefundSummary }
   | { pageKind: "other" };
 
 export type AmazonPageKind = AmazonPageResult["pageKind"];
@@ -59,16 +57,9 @@ export function detectAmazonPageKind(url: string): AmazonPageKind {
     return "other";
   }
   if (u.pathname.startsWith("/cpe/yourpayments/transactions")) return "transactions";
-  // Amazon Fresh / Whole Foods orders live under `/uff/your-account/order-details`.
-  // The base page is the order summary — it carries the subtotal AND the grocery
-  // line items inline. Its `/item-details` subpath and the legacy `?page=itemmod`
-  // URL are the standalone item list. Check the item views first since they share
-  // the base path. (`/gp/css/summary/edit` redirects here for grocery orders.)
-  if (
-    u.searchParams.get("page") === "itemmod" ||
-    u.pathname.includes("/uff/your-account/order-details/item-details")
-  )
-    return "itemmod";
+  // Amazon Fresh / Whole Foods orders live under `/uff/your-account/order-details`
+  // — the order-details page carries the subtotal AND the grocery line items
+  // inline. (`/gp/css/summary/edit` redirects here for grocery orders.)
   if (
     u.pathname.includes("/uff/your-account/order-details") ||
     u.pathname.includes("/css/summary/edit")
