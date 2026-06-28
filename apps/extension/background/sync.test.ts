@@ -160,7 +160,12 @@ describe("performSync — per-retailer isolation", () => {
 
     const result = await performSync();
 
+    // The whole sync did NOT collapse to a bare { error } — the throw stayed local.
+    expect("error" in result).toBe(false);
     if (!("queue" in result)) throw new Error(`expected a queue, got ${JSON.stringify(result)}`);
+    // Exactly one entry per transaction — no charge double-counted into both the
+    // error entries and elsewhere.
+    expect(result.queue).toHaveLength(3);
     const byId = (id: string) => result.queue.find((e) => e.ynabTransaction.id === id);
 
     // The Amazon throw is isolated to its own charge as a retryable error,

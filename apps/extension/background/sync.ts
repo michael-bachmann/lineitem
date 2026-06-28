@@ -84,12 +84,14 @@ async function performSyncInner(): Promise<SyncResult> {
       const retailerCharges = retailerEntries.map((e) => e.charge);
 
       // 2. SCRAPE + MATCH (adapter owns tab lifecycle and cleanup)
-      // Isolate the scrape the way runBackfill's per-retailer loop does: a throw
-      // here — most plausibly openRetailerTab timing out when the tab never
-      // finishes loading or its content script never becomes ready — must not
-      // discard the other retailers' results or the fast-path cache built above.
-      // Surface this retailer's charges as retryable error entries and move on,
-      // rather than failing the whole sync.
+      // Isolate the scrape — the per-retailer step that does tab I/O and is thus
+      // the throw source (most plausibly openRetailerTab timing out when the tab
+      // never finishes loading or its content script never becomes ready). Like
+      // runBackfill's per-retailer loop, a failure here must not discard the
+      // other retailers' results or the fast-path cache built above; surface this
+      // retailer's charges as retryable error entries and move on, rather than
+      // failing the whole sync. The transforms below operate on the returned
+      // in-memory data (all keyed back through entryById) and aren't I/O.
       let scraped;
       try {
         scraped = await adapter.scrapeMatchedOrders(retailerCharges);
