@@ -70,4 +70,20 @@ describe("assignByAmountAndDate", () => {
   it("returns all-null for empty candidates", () => {
     expect(assignByAmountAndDate([c("2026-06-08", 1645)], [])).toEqual([null]);
   });
+
+  it("resolves each amount group independently (one balanced, one unbalanced)", () => {
+    // Two $5.00 charges pair with two $5.00 orders; the lone $9.99 charge has no
+    // candidate and must stay null without disturbing the matched group.
+    const charges = [c("2026-06-08", 500), c("2026-06-08", 500), c("2026-06-08", 999)];
+    const cands = [c("2026-06-07", 500), c("2026-06-07", 500)];
+    const result = assignByAmountAndDate(charges, cands);
+    expect(result[2]).toBeNull();
+    expect(new Set([result[0], result[1]])).toEqual(new Set([0, 1]));
+  });
+
+  it("an out-of-window group stays null while another in-window group matches", () => {
+    const charges = [c("2026-06-08", 500), c("2026-06-08", 700)];
+    const cands = [c("2026-06-07", 500), c("2026-06-01", 700)]; // 700 is 7 days off
+    expect(assignByAmountAndDate(charges, cands)).toEqual([0, null]);
+  });
 });

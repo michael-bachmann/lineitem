@@ -178,13 +178,16 @@ async function assessCandidates(txs: YnabTransaction[]): Promise<CandidateAssess
   const pending = eligible.flatMap((o) => (o.kind === "pending" ? [o.tagged] : []));
   const alreadyBackfilledItems = sumBy(eligible, (o) => (o.kind === "already" ? o.items : 0));
 
-  const perRetailer = new Map<string, { alreadyMatched: number }>();
-  for (const o of eligible) {
-    const retailer = o.kind === "pending" ? o.tagged.retailer : o.retailer;
-    const cur = perRetailer.get(retailer) ?? { alreadyMatched: 0 };
-    if (o.kind === "already") cur.alreadyMatched += 1;
-    perRetailer.set(retailer, cur);
-  }
+  // Every retailer with any eligible tx gets an entry (pending-only retailers
+  // count 0); `alreadyMatched` is how many of its eligible tx were already
+  // allocated before this run.
+  const byRetailer = groupBy(eligible, (o) => (o.kind === "pending" ? o.tagged.retailer : o.retailer));
+  const perRetailer = new Map(
+    Object.entries(byRetailer).map(([retailer, outcomes]) => [
+      retailer,
+      { alreadyMatched: outcomes.filter((o) => o.kind === "already").length },
+    ]),
+  );
 
   return { pending, totalEligible: eligible.length, alreadyBackfilledItems, perRetailer };
 }

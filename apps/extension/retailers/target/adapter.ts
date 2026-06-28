@@ -120,6 +120,12 @@ export const targetAdapter: RetailerAdapter = {
       // Phase 2: for orders that could contain a still-unmatched charge, read the
       // invoices list and match charges to invoice TOTALS (single-card invoices).
       // The invoice-list cache lets Phase 3 reuse it without re-fetching.
+      //
+      // This walk state is foundational, not a cleanup target: the phases form a
+      // stateful page walk over a tab. `remaining` shrinks as charges match (and
+      // gates whether later phases even open a page), `consumedInvoices` prevents
+      // re-matching an invoice across phases, and the cache avoids re-fetching —
+      // all carried across sequential, side-effecting navigations.
       let remaining = [...charges];
       const matchedInvoices: MatchedInvoice[] = [];
       const consumedInvoices = new Set<string>(); // `${orderId}/${invoiceId}`

@@ -80,6 +80,12 @@ export function assignItemsToCharges(
 
   // Track best total distance found so far. Best partition is recorded as
   // a parallel array of index-lists, one per charge, in input order.
+  //
+  // This mutable state is foundational, not a cleanup target: it's the
+  // branch-and-bound accumulator. `recurse` reads `bestTotalDistance` to prune
+  // branches that can't beat the best found so far, so the running best must be
+  // shared and updated in place across the whole DFS — a functional rewrite
+  // would either lose the pruning or thread this through every call.
   let bestTotalDistance = Infinity;
   let bestPartition: number[][] | null = null;
   let bestDistances: number[] | null = null;
