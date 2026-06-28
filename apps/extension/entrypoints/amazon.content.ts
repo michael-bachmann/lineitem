@@ -48,6 +48,7 @@ export default defineContentScript({
 /** Detect the page, wait for its meaningful DOM, parse, and report one result. */
 async function describe(): Promise<void> {
   const kind = detectAmazonPageKind(window.location.href);
+  console.info("[scrape-dbg/cs] describe:", kind, window.location.href);
   switch (kind) {
     case "login":
       return post({ pageKind: "login" });
@@ -89,6 +90,14 @@ async function describe(): Promise<void> {
         : requiresItemmod
           ? [] // listed on the itemmod page; the adapter navigates there next.
           : parseItemsFromDocument(document);
+      console.info("[scrape-dbg/cs] order-summary:", {
+        orderId: orderIdFromUrl(window.location.href),
+        isGrocery: isGroceryOrder(document),
+        hasInlineItems,
+        requiresItemmod,
+        items: items.length,
+        subtotalCents,
+      });
       return post({
         pageKind: "order-summary",
         orderId: orderIdFromUrl(window.location.href),
@@ -101,10 +110,12 @@ async function describe(): Promise<void> {
 
     case "itemmod": {
       await waitForElement(SELECTORS.itemmodItemRow);
+      const itemmodItems = parseItemmodFromDocument(document);
+      console.info("[scrape-dbg/cs] itemmod items:", itemmodItems.length, window.location.href);
       return post({
         pageKind: "itemmod",
         orderId: orderIdFromUrl(window.location.href),
-        items: parseItemmodFromDocument(document),
+        items: itemmodItems,
         refund: parseRefundSummary(document),
       });
     }

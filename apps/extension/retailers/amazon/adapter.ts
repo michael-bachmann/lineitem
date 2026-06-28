@@ -294,6 +294,11 @@ async function scrapeOrder(tabId: number, orderId: string): Promise<ScrapeOrderR
   );
   if (summary.pageKind === "login") return { kind: "signed_out" };
   if (summary.pageKind !== "order-summary") return { kind: "error", reason: READ_FAILED_REASON };
+  console.info("[scrape-dbg]", orderId, "summary:", {
+    requiresItemmod: summary.requiresItemmod,
+    subtotalCents: summary.subtotalCents,
+    inlineItems: summary.items.length,
+  });
   if (summary.subtotalCents === null) return { kind: "error", reason: amazonErrorMessage("missing_subtotal") };
 
   let items = summary.items;
@@ -302,6 +307,7 @@ async function scrapeOrder(tabId: number, orderId: string): Promise<ScrapeOrderR
   // Grocery orders list their items on a separate itemmod page; the summary page
   // only carries the subtotal and (authoritative) refund.
   if (summary.requiresItemmod) {
+    console.info("[scrape-dbg]", orderId, "→ navigating to itemmod page", itemmodUrl(orderId));
     navigate(tabId, itemmodUrl(orderId));
     const itemmod = await awaitPageResult<AmazonPageResult>(
       tabId,
@@ -309,6 +315,7 @@ async function scrapeOrder(tabId: number, orderId: string): Promise<ScrapeOrderR
     );
     if (itemmod.pageKind === "login") return { kind: "signed_out" };
     if (itemmod.pageKind !== "itemmod") return { kind: "error", reason: READ_FAILED_REASON };
+    console.info("[scrape-dbg]", orderId, "itemmod items:", itemmod.items.length);
     items = itemmod.items;
     // Prefer itemmod's refund (has per-item markers) when present.
     refund = itemmod.refund ?? summary.refund;
@@ -324,6 +331,24 @@ async function scrapeOrder(tabId: number, orderId: string): Promise<ScrapeOrderR
   };
 }
 
+/**
+ * DEBUG: scrape one Amazon order end-to-end by id (order-summary → itemmod for
+ * grocery), bypassing YNAB matching. Opens/reuses the Amazon tab and leaves it
+ * open for inspection. Exposed via background's `__scrapeOrder()` console hook —
+ * see entrypoints/background.ts. Not part of the normal sync/backfill flow.
+ */
+export async function debugScrapeOrder(orderId: string): Promise<ScrapeOrderResult> {
+  console.info("[scrape-dbg] debugScrapeOrder start:", orderId);
+  const tabResult = await openRetailerTab(TRANSACTIONS_URL);
+  if (!tabResult) {
+    console.warn("[scrape-dbg] could not open Amazon tab");
+    return { kind: "error", reason: "Failed to open Amazon tab" };
+  }
+  const result = await scrapeOrderWithRetry(tabResult.tabId, orderId);
+  console.info("[scrape-dbg] debugScrapeOrder result:", orderId, result);
+  return result; // tab left open on purpose so you can inspect the page
+}
+
 function toScrapedItem(raw: RawItem): ScrapedItem {
   return {
     productId: raw.productId,
@@ -337,6 +362,7 @@ function toScrapedItem(raw: RawItem): ScrapedItem {
 
 /** Fire-and-forget triggers — the page answers with a PAGE_RESULT, not a reply. */
 function navigate(tabId: number, url: string): void {
+  console.info("[scrape-dbg] navigate →", url);
   browser.tabs.update(tabId, { url }).catch(() => {});
 }
 function describe(tabId: number): void {

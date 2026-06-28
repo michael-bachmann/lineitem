@@ -8,6 +8,7 @@ import { approveTransaction, approveBatch } from "@/background/approval";
 import { ensureModelLoaded } from "@/background/embedder";
 import { runBackfill } from "@/background/backfill";
 import { getAdapter } from "@/retailers/registry";
+import { debugScrapeOrder } from "@/retailers/amazon/adapter";
 import { openRetailerTab, initPageResultListener } from "@/background/tabs";
 import type { MessageBroadcast, MessageRequest } from "@/lib/types";
 
@@ -34,6 +35,13 @@ export default defineBackground(() => {
   // Wire content-script page-result messages to the coordinator before any
   // scrape, so a result from the very first page load can't be missed.
   initPageResultListener();
+
+  // DEBUG console hook — scrape one Amazon order by id, no YNAB matching needed.
+  // In the extension's background/SW console:  await __scrapeOrder("111-...")
+  // Watch the same console for [scrape-dbg] logs (navigations + itemmod decision)
+  // and the Amazon tab's console for [scrape-dbg/cs] logs. Remove before release.
+  (globalThis as Record<string, unknown>).__scrapeOrder = (orderId: string) =>
+    debugScrapeOrder(orderId);
 
   browser.runtime.onMessage.addListener(
     (message: MessageRequest | MessageBroadcast, _sender, sendResponse) => {
