@@ -54,6 +54,7 @@ vi.mock("@/lib/db", () => ({
 
 import { approveBatch, approveTransaction, buildSubtransactions, learnFromApproval } from "./approval";
 import { getAllocatedTransaction } from "@/lib/db";
+import { updateTransaction } from "@/lib/ynab";
 import type { AllocatedTransaction, ApprovalItem } from "@/lib/types";
 
 beforeEach(() => {
@@ -300,6 +301,69 @@ describe("learnFromApproval writes both stores", () => {
 
     // But the cache row for seed0 survives the embedding eviction.
     expect(learnedStore.get("amazon:seed0")).toEqual({ id: "amazon:seed0", categoryId: "cat-household" });
+  });
+});
+
+describe("approveBatch approves a fully-categorized transaction", () => {
+  it("classifies via the learned-product cache, approves, and reports no errors", async () => {
+    // Seed the cache so classifyItems resolves every item to a category
+    // (product_cache tier) — the happy path through the loop body.
+    learnedStore.set("amazon:A", { id: "amazon:A", categoryId: "cat-household" });
+    learnedStore.set("amazon:B", { id: "amazon:B", categoryId: "cat-household" });
+
+    const tx: AllocatedTransaction = {
+      ynabTransactionId: "txn-batch-ok", orderKey: "amazon:OB", retailer: "amazon",
+      date: "2026-05-20", amountCents: 5000, isRefund: false,
+      items: [
+        { productId: "A", title: "Paper towels", imageUrl: "", unitPriceCents: 2500, quantity: 1, refundedAmountCents: 0, allocatedCents: 2500 },
+        { productId: "B", title: "Trash bags", imageUrl: "", unitPriceCents: 2500, quantity: 1, refundedAmountCents: 0, allocatedCents: 2500 },
+      ],
+    };
+    allocatedStore.set("txn-batch-ok", tx);
+
+    const result = await approveBatch(["txn-batch-ok"]);
+
+    expect(result).toEqual({ ok: true, errors: [] });
+    // The approval ran end-to-end: items were learned back into the cache.
+    expect(learnedStore.get("amazon:A")).toEqual({ id: "amazon:A", categoryId: "cat-household" });
+  });
+
+  it("surfaces an approveTransaction error (e.g. YNAB write failure) as that tx's entry", async () => {
+    learnedStore.set("amazon:A", { id: "amazon:A", categoryId: "cat-household" });
+    vi.mocked(updateTransaction).mockRejectedValueOnce(new Error("YNAB API 500"));
+
+    const tx: AllocatedTransaction = {
+      ynabTransactionId: "txn-write-fail", orderKey: "amazon:OW", retailer: "amazon",
+      date: "2026-05-20", amountCents: 2500, isRefund: false,
+      items: [
+        { productId: "A", title: "Paper towels", imageUrl: "", unitPriceCents: 2500, quantity: 1, refundedAmountCents: 0, allocatedCents: 2500 },
+      ],
+    };
+    allocatedStore.set("txn-write-fail", tx);
+
+    const result = await approveBatch(["txn-write-fail"]);
+
+    expect(result).toEqual({ ok: true, errors: ["txn-write-fail: YNAB API 500"] });
+  });
+
+  it("skips and reports a transaction with an uncategorizable item", async () => {
+    // No cache row for productId "Z" and embeddings return nothing, so it stays
+    // uncategorized — the whole tx is skipped rather than partially approved.
+    const tx: AllocatedTransaction = {
+      ynabTransactionId: "txn-uncat", orderKey: "amazon:OU", retailer: "amazon",
+      date: "2026-05-20", amountCents: 1000, isRefund: false,
+      items: [
+        { productId: "Z", title: "Mystery item", imageUrl: "", unitPriceCents: 1000, quantity: 1, refundedAmountCents: 0, allocatedCents: 1000 },
+      ],
+    };
+    allocatedStore.set("txn-uncat", tx);
+
+    const result = await approveBatch(["txn-uncat"]);
+
+    expect(result).toEqual({
+      ok: true,
+      errors: ["txn-uncat: not all items have categories assigned"],
+    });
   });
 });
 
