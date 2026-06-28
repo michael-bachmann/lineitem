@@ -67,26 +67,22 @@ export async function runBackfill(options: BackfillOptions): Promise<BackfillRes
   const assessment = await assessCandidates(allTxs);
   const byRetailer = groupBy(assessment.pending, (e) => e.retailer);
 
-  // Sequential per retailer — each adapter call owns a browser tab; running
-  // them in parallel would open multiple tabs at once. Sync's natural
-  // bound of "one retailer per sync cycle" doesn't apply here.
-  let aggregate: RetailerTotals = { matched: 0, unmatched: 0, failed: 0, itemsWritten: 0 };
+  // Scoped re-run: only the retailers the caller asked for this pass. The rest
+  // keep their pending orders (no allocation marker written), so a later
+  // unscoped run still picks them up.
+  const targeted = Object.entries(byRetailer).filter(
+    ([retailerId]) => !retailers || retailers.includes(retailerId),
+  );
+
+  // Sequential per retailer — each adapter call owns a browser tab; running them
+  // in parallel would open multiple tabs at once. Sync's natural bound of "one
+  // retailer per sync cycle" doesn't apply here.
   const runByRetailer = new Map<string, RetailerTotals>();
-  for (const [retailerId, group] of Object.entries(byRetailer)) {
-    // Scoped re-run: skip retailers the caller didn't ask for this pass. Their
-    // pending orders stay pending (no allocation marker written), so a later
-    // unscoped run still picks them up.
-    if (retailers && !retailers.includes(retailerId)) continue;
+  for (const [retailerId, group] of targeted) {
     signal?.throwIfAborted();
-    const r = await runForRetailer(retailerId, group, { signal, onProgress });
-    runByRetailer.set(retailerId, r);
-    aggregate = {
-      matched: aggregate.matched + r.matched,
-      unmatched: aggregate.unmatched + r.unmatched,
-      failed: aggregate.failed + r.failed,
-      itemsWritten: aggregate.itemsWritten + r.itemsWritten,
-    };
+    runByRetailer.set(retailerId, await runForRetailer(retailerId, group, { signal, onProgress }));
   }
+  const aggregate = sumTotals([...runByRetailer.values()]);
 
   const alreadyBackfilledCount = assessment.totalEligible - assessment.pending.length;
   const transactionsBackfilled = alreadyBackfilledCount + aggregate.matched;
@@ -202,6 +198,20 @@ interface RetailerTotals {
   blocked?: RetailerBlockReason;
   /** For a `step_up` block: the gated page to open (see RetailerBlock.url). */
   blockedUrl?: string;
+}
+
+/** Sum the per-run counters across retailers (the `blocked`/`blockedUrl` fields
+ *  are per-retailer and intentionally dropped). */
+function sumTotals(totals: RetailerTotals[]): RetailerTotals {
+  return totals.reduce(
+    (a, r) => ({
+      matched: a.matched + r.matched,
+      unmatched: a.unmatched + r.unmatched,
+      failed: a.failed + r.failed,
+      itemsWritten: a.itemsWritten + r.itemsWritten,
+    }),
+    { matched: 0, unmatched: 0, failed: 0, itemsWritten: 0 },
+  );
 }
 
 /**
