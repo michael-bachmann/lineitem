@@ -75,116 +75,17 @@ async function performSyncInner(): Promise<SyncResult> {
 
     const chargesByRetailer = groupBy(needsScraping, (e) => e.retailer);
 
-    const allAllocated: AllocatedTransaction[] = [];
-    const errorEntries: QueueEntry[] = [];
-    const blockedRetailers: BlockedRetailer[] = [];
-
+    // 2. SCRAPE each retailer. Sequentially — each adapter owns a browser tab, so
+    // we don't open several at once — and each returns a self-contained outcome
+    // rather than mutating shared state, so we fold them into the run aggregates.
+    const outcomes: RetailerOutcome[] = [];
     for (const [retailerId, retailerEntries] of Object.entries(chargesByRetailer)) {
-      const adapter = getAdapter(retailerId);
-      const retailerCharges = retailerEntries.map((e) => e.charge);
-
-      // 2. SCRAPE + MATCH (adapter owns tab lifecycle and cleanup)
-      // Isolate the scrape — the per-retailer step that does tab I/O and is thus
-      // the throw source (most plausibly openRetailerTab timing out when the tab
-      // never finishes loading or its content script never becomes ready). Like
-      // runBackfill's per-retailer loop, a failure here must not discard the
-      // other retailers' results or the fast-path cache built above; surface this
-      // retailer's charges as retryable error entries and move on, rather than
-      // failing the whole sync. The transforms below operate on the returned
-      // in-memory data (all keyed back through entryById) and aren't I/O.
-      let scraped;
-      try {
-        scraped = await adapter.scrapeMatchedOrders(retailerCharges);
-      } catch (err) {
-        console.error(`[sync] ${retailerId} scrape threw:`, err);
-        const message = err instanceof Error ? err.message : "Couldn't read this retailer's orders";
-        for (const entry of retailerEntries) {
-          errorEntries.push({
-            ynabTransaction: entry.tx,
-            retailer: retailerId,
-            matchStatus: { status: "error", message },
-          });
-        }
-        continue;
-      }
-      const { matched, unmatched, blocked } = scraped;
-
-      // A sign-in wall (signed out / mid-walk step-up). Surface the affected
-      // charges as `auth_required` queue entries (the "Sign in to {retailer}"
-      // state) and a per-retailer summary for the resolution card. These charges
-      // are disjoint from `unmatched`, so no double-counting below.
-      if (blocked) {
-        blockedRetailers.push({
-          retailer: retailerId,
-          reason: blocked.reason,
-          count: blocked.charges.length,
-          ...(blocked.url ? { url: blocked.url } : {}),
-        });
-        for (const charge of blocked.charges) {
-          const tx = entryById.get(charge.ynabTransactionId)?.tx;
-          if (!tx) continue;
-          errorEntries.push({
-            ynabTransaction: tx,
-            retailer: retailerId,
-            matchStatus: { status: "auth_required" },
-          });
-        }
-      }
-
-      // 2.5 GUARD: drop orders whose scraped items don't reconcile to the
-      // retailer's displayed Item(s) Subtotal. Surfaces as error queue
-      // entries so the user sees the failure rather than a confidently-
-      // wrong attribution.
-      const verified = matched.map((m) => ({ ...m, verification: verifyScrape(m.order) }));
-      const [verifiedOk, verifiedFailed] = partition(verified, (v) => v.verification.ok);
-      const validMatched = verifiedOk.map(({ order, charges }) => ({ order, charges }));
-
-      errorEntries.push(
-        ...verifiedFailed.flatMap(({ charges, verification }) =>
-          charges.map((charge) => ({
-            ynabTransaction: entryById.get(charge.ynabTransactionId)!.tx,
-            retailer: retailerId,
-            matchStatus: {
-              status: "error" as const,
-              message: verification.ok ? "" : verification.message,
-            },
-          })),
-        ),
-      );
-
-      // 3. DISTRIBUTE
-      const distributionResults = validMatched.map(({ order, charges }) =>
-        distributeOrder(order, charges),
-      );
-
-      const allocated = distributionResults.flatMap((r) => r.allocated);
-
-      // Per-charge failures with their specific reason
-      errorEntries.push(
-        ...distributionResults.flatMap((r) =>
-          r.failures.map((f) => ({
-            ynabTransaction: entryById.get(f.ynabTransactionId)!.tx,
-            retailer: retailerId,
-            matchStatus: { status: "error" as const, message: f.reason },
-          })),
-        ),
-      );
-
-      allAllocated.push(...allocated);
-
-      // Map unmatched charges to no_match QueueEntries
-      for (const { charge, reason } of unmatched) {
-        const tx = entryById.get(charge.ynabTransactionId)?.tx;
-        if (!tx) continue;
-        errorEntries.push({
-          ynabTransaction: tx,
-          retailer: retailerId,
-          matchStatus: reason === NO_MATCH_REASON
-            ? { status: "no_match" }
-            : { status: "error", message: reason },
-        });
-      }
+      outcomes.push(await scrapeRetailer(retailerId, retailerEntries, entryById));
     }
+
+    const allAllocated = outcomes.flatMap((o) => o.allocated);
+    const errorEntries = outcomes.flatMap((o) => o.errorEntries);
+    const blockedRetailers = outcomes.flatMap((o) => (o.blocked ? [o.blocked] : []));
 
     // 4. PERSIST (atomic batch write)
     await putAllocatedTransactions(allAllocated);
@@ -210,5 +111,128 @@ async function performSyncInner(): Promise<SyncResult> {
   } catch (e) {
     return { error: e instanceof Error ? e.message : "Sync failed" };
   }
+}
+
+interface TaggedCharge {
+  tx: YnabTransaction;
+  charge: YnabCharge;
+  retailer: string;
+}
+
+/** Everything one retailer's scrape contributes to the run, as plain data so the
+ *  caller can fold several together without any of them touching shared state. */
+interface RetailerOutcome {
+  /** Orders that verified and distributed — persisted, then classified. */
+  allocated: AllocatedTransaction[];
+  /** Queue entries for everything that didn't cleanly allocate: a sign-in wall,
+   *  a verification failure, a distribution failure, a no-match, or a scrape
+   *  throw. */
+  errorEntries: QueueEntry[];
+  /** Per-retailer sign-in summary for the resolution card, when a wall was hit. */
+  blocked?: BlockedRetailer;
+}
+
+/**
+ * Scrape one retailer and shape the result into a self-contained outcome — it
+ * reads nothing from and mutates nothing in the caller, so performSyncInner can
+ * fold several outcomes together functionally.
+ *
+ * The scrape is the only step that does I/O and thus the only throw source (most
+ * plausibly openRetailerTab timing out when the tab never finishes loading or
+ * its content script never becomes ready). Like runBackfill's per-retailer loop,
+ * a throw is isolated here — the retailer's charges become retryable `error`
+ * entries — so one hung tab can't discard the other retailers' results or the
+ * fast-path cache. The transforms after it act on the returned in-memory data,
+ * keyed back through entryById (an absent key is skipped, never thrown on).
+ */
+async function scrapeRetailer(
+  retailerId: string,
+  retailerEntries: TaggedCharge[],
+  entryById: Map<string, TaggedCharge>,
+): Promise<RetailerOutcome> {
+  const adapter = getAdapter(retailerId);
+  const retailerCharges = retailerEntries.map((e) => e.charge);
+
+  let scraped;
+  try {
+    scraped = await adapter.scrapeMatchedOrders(retailerCharges);
+  } catch (err) {
+    console.error(`[sync] ${retailerId} scrape threw:`, err);
+    const message = err instanceof Error ? err.message : "Couldn't read this retailer's orders";
+    return {
+      allocated: [],
+      errorEntries: retailerEntries.map((entry) => ({
+        ynabTransaction: entry.tx,
+        retailer: retailerId,
+        matchStatus: { status: "error", message },
+      })),
+    };
+  }
+  const { matched, unmatched, blocked } = scraped;
+
+  /** Build a queue entry for a charge, or skip it when its tx isn't in the run
+   *  (the charge wasn't one we sent — defensive, mirrors the old `?.tx` guards). */
+  const entryFor = (
+    ynabTransactionId: string,
+    matchStatus: QueueEntry["matchStatus"],
+  ): QueueEntry[] => {
+    const tx = entryById.get(ynabTransactionId)?.tx;
+    return tx ? [{ ynabTransaction: tx, retailer: retailerId, matchStatus }] : [];
+  };
+
+  // A sign-in wall (signed out / mid-walk step-up): a per-retailer summary for
+  // the resolution card plus an `auth_required` entry per affected charge. These
+  // charges are disjoint from `unmatched`, so no double-counting.
+  const blockedSummary: BlockedRetailer | undefined = blocked
+    ? {
+        retailer: retailerId,
+        reason: blocked.reason,
+        count: blocked.charges.length,
+        ...(blocked.url ? { url: blocked.url } : {}),
+      }
+    : undefined;
+  const blockedEntries = blocked
+    ? blocked.charges.flatMap((c) => entryFor(c.ynabTransactionId, { status: "auth_required" }))
+    : [];
+
+  // GUARD: drop orders whose scraped items don't reconcile to the retailer's
+  // displayed Item(s) Subtotal — surfaced as error entries so the user sees the
+  // failure rather than a confidently-wrong attribution.
+  const verified = matched.map((m) => ({ ...m, verification: verifyScrape(m.order) }));
+  const [verifiedOk, verifiedFailed] = partition(verified, (v) => v.verification.ok);
+  const verifyFailedEntries = verifiedFailed.flatMap(({ charges, verification }) =>
+    charges.flatMap((c) =>
+      entryFor(c.ynabTransactionId, {
+        status: "error",
+        message: verification.ok ? "" : verification.message,
+      }),
+    ),
+  );
+
+  // DISTRIBUTE the verified orders; collect allocations and per-charge failures.
+  const distributionResults = verifiedOk.map(({ order, charges }) => distributeOrder(order, charges));
+  const allocated = distributionResults.flatMap((r) => r.allocated);
+  const distributeFailedEntries = distributionResults.flatMap((r) =>
+    r.failures.flatMap((f) => entryFor(f.ynabTransactionId, { status: "error", message: f.reason })),
+  );
+
+  // Unmatched charges → no_match (or a specific read-failure reason).
+  const unmatchedEntries = unmatched.flatMap(({ charge, reason }) =>
+    entryFor(
+      charge.ynabTransactionId,
+      reason === NO_MATCH_REASON ? { status: "no_match" } : { status: "error", message: reason },
+    ),
+  );
+
+  return {
+    allocated,
+    errorEntries: [
+      ...blockedEntries,
+      ...verifyFailedEntries,
+      ...distributeFailedEntries,
+      ...unmatchedEntries,
+    ],
+    blocked: blockedSummary,
+  };
 }
 
