@@ -86,4 +86,14 @@ describe("assignByAmountAndDate", () => {
     const cands = [c("2026-06-07", 500), c("2026-06-01", 700)]; // 700 is 7 days off
     expect(assignByAmountAndDate(charges, cands)).toEqual([0, null]);
   });
+
+  // Amounts are grouped via a numeric key that round-trips through a string
+  // (groupBy → Object.entries → Number). Lock the edge values of that round-trip.
+  it("matches a zero-amount charge", () => {
+    expect(assignByAmountAndDate([c("2026-06-08", 0)], [c("2026-06-07", 0)])).toEqual([0]);
+  });
+
+  it("matches a negative (refund) amount", () => {
+    expect(assignByAmountAndDate([c("2026-06-08", -500)], [c("2026-06-07", -500)])).toEqual([0]);
+  });
 });

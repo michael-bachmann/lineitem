@@ -29,4 +29,17 @@ describe("mapSeries", () => {
   it("returns an empty array for empty input", async () => {
     expect(await mapSeries([], async (x) => x)).toEqual([]);
   });
+
+  it("rejects and stops the series when a call rejects", async () => {
+    const seen: number[] = [];
+    await expect(
+      mapSeries([1, 2, 3], async (n) => {
+        seen.push(n);
+        if (n === 2) throw new Error("boom");
+        return n;
+      }),
+    ).rejects.toThrow("boom");
+    // The throw propagates and later items never run (sequential short-circuit).
+    expect(seen).toEqual([1, 2]);
+  });
 });
