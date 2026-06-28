@@ -52,7 +52,8 @@ vi.mock("@/lib/db", () => ({
   getAllocatedTransaction: vi.fn(async (id: string) => allocatedStore.get(id)),
 }));
 
-import { approveTransaction, buildSubtransactions, learnFromApproval } from "./approval";
+import { approveBatch, approveTransaction, buildSubtransactions, learnFromApproval } from "./approval";
+import { getAllocatedTransaction } from "@/lib/db";
 import type { AllocatedTransaction, ApprovalItem } from "@/lib/types";
 
 beforeEach(() => {
@@ -299,5 +300,39 @@ describe("learnFromApproval writes both stores", () => {
 
     // But the cache row for seed0 survives the embedding eviction.
     expect(learnedStore.get("amazon:seed0")).toEqual({ id: "amazon:seed0", categoryId: "cat-household" });
+  });
+});
+
+describe("approveBatch isolates per-transaction failures", () => {
+  it("records a throwing transaction as its own error instead of rejecting the batch", async () => {
+    // An unexpected throw (e.g. an IDB read failure) on one tx must not take down
+    // the whole batch — the dispatch layer doesn't catch APPROVE_BATCH, so a
+    // rejection would leave the side panel with no response at all.
+    vi.mocked(getAllocatedTransaction).mockImplementationOnce(async () => {
+      throw new Error("idb unavailable");
+    });
+
+    const result = await approveBatch(["txn-boom"]);
+
+    expect(result).toEqual({ ok: true, errors: ["txn-boom: idb unavailable"] });
+  });
+
+  it("continues to later transactions after one throws", async () => {
+    vi.mocked(getAllocatedTransaction)
+      .mockImplementationOnce(async () => {
+        throw new Error("idb unavailable");
+      });
+
+    // The second id has no allocated tx, so it surfaces the ordinary not-found
+    // error — proving the loop kept going past the throw.
+    const result = (await approveBatch(["txn-boom", "txn-missing"])) as {
+      ok: true;
+      errors: string[];
+    };
+
+    expect(result.errors).toEqual([
+      "txn-boom: idb unavailable",
+      "txn-missing: transaction not found",
+    ]);
   });
 });
