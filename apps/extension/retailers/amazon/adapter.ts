@@ -307,7 +307,13 @@ async function scrapeOrder(tabId: number, orderId: string): Promise<ScrapeOrderR
   // Grocery orders list their items on a separate itemmod page; the summary page
   // only carries the subtotal and (authoritative) refund.
   if (summary.requiresItemmod) {
-    console.info("[scrape-dbg]", orderId, "→ navigating to itemmod page", itemmodUrl(orderId));
+    // FALLBACK-USED SIGNAL: fires only when a grocery order's summary page had no
+    // inline items, so we must navigate to the standalone itemmod page. If a full
+    // backfill never logs this, the itemmod hop is dead and can be removed (the
+    // inline path produces identical prices — verified). Loud on purpose.
+    console.warn(
+      `[amazon] ⚠️ ITEMMOD FALLBACK USED — order ${orderId} had no inline grocery items; navigating to ${itemmodUrl(orderId)}`,
+    );
     navigate(tabId, itemmodUrl(orderId));
     const itemmod = await awaitPageResult<AmazonPageResult>(
       tabId,
