@@ -78,34 +78,25 @@ async function describe(): Promise<void> {
       const subtotalCents = ready ? extractItemsSubtotal(document) : null;
       const refund = parseRefundSummary(document);
       // The Fresh order-details page (/uff) lists grocery items inline using the
-      // itemmod row structure; older grocery summaries defer them to a separate
-      // itemmod page. Read them inline when present so grocery needs no second
-      // navigation; only fall back to requiresItemmod when a grocery order shows
-      // no inline rows.
+      // itemmod row structure; read them with the grocery parser when present,
+      // else use the regular order parser.
       const hasInlineItems = document.querySelector(SELECTORS.itemmodItemRow) !== null;
-      const requiresItemmod = isGroceryOrder(document) && !hasInlineItems;
+      // Tripwire: the old layout served grocery items on a separate ?page=itemmod
+      // page, and we dropped that fallback after a full backfill confirmed it's no
+      // longer used. If a grocery order ever shows no inline rows again (e.g. an
+      // A/B layout), it reads empty here and surfaces as a read-failure — flag it.
+      if (!hasInlineItems && isGroceryOrder(document)) {
+        console.warn(`[amazon] grocery order has no inline items (itemmod fallback removed): ${window.location.href}`);
+      }
       const items = hasInlineItems
         ? parseItemmodFromDocument(document)
-        : requiresItemmod
-          ? [] // listed on the itemmod page; the adapter navigates there next.
-          : parseItemsFromDocument(document);
+        : parseItemsFromDocument(document);
       return post({
         pageKind: "order-summary",
         orderId: orderIdFromUrl(window.location.href),
         subtotalCents,
-        requiresItemmod,
         items,
         refund,
-      });
-    }
-
-    case "itemmod": {
-      await waitForElement(SELECTORS.itemmodItemRow);
-      return post({
-        pageKind: "itemmod",
-        orderId: orderIdFromUrl(window.location.href),
-        items: parseItemmodFromDocument(document),
-        refund: parseRefundSummary(document),
       });
     }
 

@@ -59,7 +59,3 @@ export const TRANSACTIONS_URL =
 export function orderDetailUrl(orderId: string): string {
   return `https://www.amazon.com/gp/css/summary/edit.html?orderID=${encodeURIComponent(orderId)}`;
 }
-
-export function itemmodUrl(orderId: string): string {
-  return `https://www.amazon.com/uff/your-account/order-details?orderID=${encodeURIComponent(orderId)}&page=itemmod`;
-}

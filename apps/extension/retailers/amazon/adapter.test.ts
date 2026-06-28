@@ -76,7 +76,6 @@ describe("amazonAdapter.scrapeMatchedOrders", () => {
         pageKind: "order-summary",
         orderId: "111-A",
         subtotalCents: 1000,
-        requiresItemmod: false,
         items: [item()],
         refund: null,
       },
@@ -121,7 +120,6 @@ describe("amazonAdapter.scrapeMatchedOrders", () => {
       pageKind: "order-summary",
       orderId: "111-A",
       subtotalCents,
-      requiresItemmod: false,
       items: subtotalCents === null ? [] : [item()],
       refund: null,
     });
