@@ -84,7 +84,28 @@ async function performSyncInner(): Promise<SyncResult> {
       const retailerCharges = retailerEntries.map((e) => e.charge);
 
       // 2. SCRAPE + MATCH (adapter owns tab lifecycle and cleanup)
-      const { matched, unmatched, blocked } = await adapter.scrapeMatchedOrders(retailerCharges);
+      // Isolate the scrape the way runBackfill's per-retailer loop does: a throw
+      // here — most plausibly openRetailerTab timing out when the tab never
+      // finishes loading or its content script never becomes ready — must not
+      // discard the other retailers' results or the fast-path cache built above.
+      // Surface this retailer's charges as retryable error entries and move on,
+      // rather than failing the whole sync.
+      let scraped;
+      try {
+        scraped = await adapter.scrapeMatchedOrders(retailerCharges);
+      } catch (err) {
+        console.error(`[sync] ${retailerId} scrape threw:`, err);
+        const message = err instanceof Error ? err.message : "Couldn't read this retailer's orders";
+        for (const entry of retailerEntries) {
+          errorEntries.push({
+            ynabTransaction: entry.tx,
+            retailer: retailerId,
+            matchStatus: { status: "error", message },
+          });
+        }
+        continue;
+      }
+      const { matched, unmatched, blocked } = scraped;
 
       // A sign-in wall (signed out / mid-walk step-up). Surface the affected
       // charges as `auth_required` queue entries (the "Sign in to {retailer}"
