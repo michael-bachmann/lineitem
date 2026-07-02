@@ -50,10 +50,11 @@ const MAX_ITEMS = 20;
  * the best total found so far.
  *
  * Returns indices per charge in input charge order, plus the per-charge
- * distance contributed by that bucket. Returns null when M > n
- * (structurally impossible), or when M > 1 and n > MAX_ITEMS — the cap
- * only applies to the multi-charge path because the single-charge case
- * short-circuits to the base case without subset enumeration.
+ * distance contributed by that bucket. Returns null only when M > n
+ * (structurally impossible — a charge would get no item). When M > 1 and
+ * n > MAX_ITEMS the exact subset enumeration would blow up (2^n), so we fall
+ * back to a best-effort greedy partition rather than failing the order — the
+ * single-charge case never enumerates and always uses the exact base case.
  */
 export function assignItemsToCharges(
   itemSubtotalsCents: number[],
@@ -67,7 +68,14 @@ export function assignItemsToCharges(
   if (n === 0) return null;
   if (m === 0) return null;
   if (m > n) return null;
-  if (m > 1 && n > MAX_ITEMS) return null;
+  if (m > 1 && n > MAX_ITEMS) {
+    return assignItemsToChargesGreedy(
+      itemSubtotalsCents,
+      chargeAmountsCents,
+      orderTotalCents,
+      itemsSubtotalCents,
+    );
+  }
 
   const ratio = itemsSubtotalCents > 0 ? orderTotalCents / itemsSubtotalCents : 1;
 
@@ -149,6 +157,82 @@ export function assignItemsToCharges(
     indicesPerCharge: bestPartition,
     distanceCentsPerCharge: bestDistances,
   };
+}
+
+/**
+ * Best-effort partition for orders too large for the exact branch-and-bound
+ * (m > 1 and n > MAX_ITEMS, where enumerating 2^n subsets would hang the
+ * worker). Runs in O(n log n) instead, so distributeOrder can still split a
+ * large multi-charge grocery order rather than surfacing it as a read failure.
+ *
+ * Places items largest-first into the charge that is currently most underfilled
+ * relative to its target (chargeAmount grossed down by the tax/fee ratio), then
+ * repairs any empty bucket by moving one item over so every charge gets ≥1 item
+ * (n ≥ m guarantees a donor exists). The partition is approximate — only item-
+ * to-charge attribution, not totals: allocateProportional still scales each
+ * charge's items to its exact amount downstream.
+ */
+function assignItemsToChargesGreedy(
+  itemSubtotalsCents: number[],
+  chargeAmountsCents: number[],
+  orderTotalCents: number,
+  itemsSubtotalCents: number,
+): { indicesPerCharge: number[][]; distanceCentsPerCharge: number[] } {
+  const n = itemSubtotalsCents.length;
+  const m = chargeAmountsCents.length;
+  const ratio = itemsSubtotalCents > 0 ? orderTotalCents / itemsSubtotalCents : 1;
+  // Targets in item-subtotal space, so we compare like-for-like with subtotals.
+  const targets = chargeAmountsCents.map((a) => a / ratio);
+
+  const buckets: number[][] = chargeAmountsCents.map(() => []);
+  const bucketSums = chargeAmountsCents.map(() => 0);
+
+  // Largest items first: keeps big items off the small charges.
+  const order = Array.from({ length: n }, (_, i) => i).sort(
+    (a, b) => itemSubtotalsCents[b] - itemSubtotalsCents[a],
+  );
+  for (const idx of order) {
+    // Most underfilled charge (largest remaining need); ties resolve to lowest j.
+    let best = 0;
+    let bestSlack = targets[0] - bucketSums[0];
+    for (let j = 1; j < m; j++) {
+      const slack = targets[j] - bucketSums[j];
+      if (slack > bestSlack) {
+        best = j;
+        bestSlack = slack;
+      }
+    }
+    buckets[best].push(idx);
+    bucketSums[best] += itemSubtotalsCents[idx];
+  }
+
+  // Repair: every charge needs ≥1 item. Move the smallest item from the bucket
+  // holding the most (n ≥ m guarantees one has a spare) into each empty bucket.
+  for (let j = 0; j < m; j++) {
+    if (buckets[j].length > 0) continue;
+    let donor = 0;
+    for (let k = 1; k < m; k++) {
+      if (buckets[k].length > buckets[donor].length) donor = k;
+    }
+    let smallestPos = 0;
+    for (let p = 1; p < buckets[donor].length; p++) {
+      if (itemSubtotalsCents[buckets[donor][p]] < itemSubtotalsCents[buckets[donor][smallestPos]]) {
+        smallestPos = p;
+      }
+    }
+    const [moved] = buckets[donor].splice(smallestPos, 1);
+    bucketSums[donor] -= itemSubtotalsCents[moved];
+    buckets[j].push(moved);
+    bucketSums[j] += itemSubtotalsCents[moved];
+  }
+
+  const distanceCentsPerCharge = buckets.map((idxs, j) =>
+    Math.abs(
+      Math.round(idxs.reduce((s, i) => s + itemSubtotalsCents[i], 0) * ratio) -
+        chargeAmountsCents[j],
+    ),
+  );
+  return { indicesPerCharge: buckets, distanceCentsPerCharge };
 }
 
 /**
