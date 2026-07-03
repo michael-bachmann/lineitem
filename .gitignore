@@ -44,5 +44,10 @@ storybook-static/
 /cs-*.png
 /scripts/shot.mjs
 
+# Regenerable 2x screenshot masters. The shipped store images (store-assets/*.jpg,
+# *.png) are committed; these high-res intermediates are rebuilt on demand from the
+# Store/Screenshots stories via headless capture, so they stay out of history.
+apps/extension/store-assets/masters/
+
 # Claude Code local working dir (worktrees, settings)
 .claude/

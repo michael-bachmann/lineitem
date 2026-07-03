@@ -34,7 +34,7 @@ export default defineConfig({
       fileFilter: (file) => !/\.(stories|test)\.[jt]sx?$/.test(file),
     },
   },
-  manifest: ({ browser }) => ({
+  manifest: ({ browser, command }) => ({
     name: "lineitem",
     description: "Match YNAB transactions to your Amazon and Target orders and split each charge into the right budget categories",
     // Each browser has its own stable-extension-ID mechanism, and each warns on
@@ -43,7 +43,9 @@ export default defineConfig({
     //    redirect URI (https://<id>.extensions.allizom.org/).
     //  - Chrome: the pinned public `key` (public half of the keypair, safe to
     //    commit), which derives a stable extension ID so the YNAB redirect-URI
-    //    registration doesn't change across machines or fresh installs.
+    //    registration doesn't change across machines or fresh installs. Only
+    //    emitted for `wxt dev` (command "serve") — the Chrome Web Store rejects
+    //    a manifest `key` on upload, so it's stripped from the production zip.
     ...(browser === "firefox"
       ? {
           browser_specific_settings: {
@@ -64,9 +66,11 @@ export default defineConfig({
             },
           },
         }
-      : {
-          key: "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAtkJGQ2J6/qiSlDdRHLrauLgKxTeGx2W68jpk+0TPcebtbtdS7OaHxaN+CKTY8a5EUfFdpv/8LDfQC+L7xAjwsKihbagaWiOpe/dKsdzUYi3dUllzIJlDLlEhz9jEqumG6JyQVP6fq1S22+5bXLNCXRNM0vNDDTiq/2m8sytxCN9D5ufv0556uklIBJ/wQvqcCnp107gdYGs3x0ooVwxXZu035YJBLDoIriB/zmwsDoim1koahf9TKV1VqgzdlIt7Jx+sHIUvNA9IA1KGyvwE6Zp2eE6voT3haO2iInwj8QuEvDYmovW7piun5kXPICGXWqNQcjv3HPKhZxXSt3G+8wIDAQAB",
-        }),
+      : command === "serve"
+        ? {
+            key: "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAtkJGQ2J6/qiSlDdRHLrauLgKxTeGx2W68jpk+0TPcebtbtdS7OaHxaN+CKTY8a5EUfFdpv/8LDfQC+L7xAjwsKihbagaWiOpe/dKsdzUYi3dUllzIJlDLlEhz9jEqumG6JyQVP6fq1S22+5bXLNCXRNM0vNDDTiq/2m8sytxCN9D5ufv0556uklIBJ/wQvqcCnp107gdYGs3x0ooVwxXZu035YJBLDoIriB/zmwsDoim1koahf9TKV1VqgzdlIt7Jx+sHIUvNA9IA1KGyvwE6Zp2eE6voT3haO2iInwj8QuEvDYmovW7piun5kXPICGXWqNQcjv3HPKhZxXSt3G+8wIDAQAB",
+          }
+        : {}),
     // `sidePanel` is Chrome-only; including it on Firefox triggers an "Unknown
     // permission" load warning and an AMO review flag. Firefox uses
     // sidebar_action (auto-generated from the sidepanel entrypoint) instead.
@@ -94,6 +98,21 @@ export default defineConfig({
       "https://api.web3forms.com/*",    // feedback form submissions
     ],
   }),
+  // Firefox's AMO review must be able to rebuild the add-on from source. This is
+  // a pnpm monorepo — apps/extension depends on the @lineitem/ui workspace
+  // package — so the sources ZIP has to span the whole repo (the app dir alone
+  // can't `pnpm install`). Point sourcesRoot at the monorepo root so packages/ui,
+  // pnpm-workspace.yaml, and pnpm-lock.yaml are included, and drop build outputs
+  // that aren't needed to build (node_modules / hidden dirs / tests are already
+  // excluded by WXT).
+  zip: {
+    sourcesRoot: fileURLToPath(new URL("../../", import.meta.url)),
+    excludeSources: [
+      "**/storybook-static/**",
+      "apps/extension/store-assets/**",
+      "**/dist/**",
+    ],
+  },
   // Copy the ONNX runtime files into the build at /ort/ for BOTH browsers.
   // Firefox loads them via env.backends.onnx.wasm.wasmPaths (set in the
   // embedder); Chrome's bundled glue fetches the .wasm from here via the
