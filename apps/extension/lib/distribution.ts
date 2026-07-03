@@ -50,10 +50,11 @@ const MAX_ITEMS = 20;
  * the best total found so far.
  *
  * Returns indices per charge in input charge order, plus the per-charge
- * distance contributed by that bucket. Returns null when M > n
- * (structurally impossible), or when M > 1 and n > MAX_ITEMS — the cap
- * only applies to the multi-charge path because the single-charge case
- * short-circuits to the base case without subset enumeration.
+ * distance contributed by that bucket. Returns null only when M > n
+ * (structurally impossible — a charge would get no item). When M > 1 and
+ * n > MAX_ITEMS the exact subset enumeration would blow up (2^n), so we fall
+ * back to a best-effort greedy partition rather than failing the order — the
+ * single-charge case never enumerates and always uses the exact base case.
  */
 export function assignItemsToCharges(
   itemSubtotalsCents: number[],
@@ -67,7 +68,14 @@ export function assignItemsToCharges(
   if (n === 0) return null;
   if (m === 0) return null;
   if (m > n) return null;
-  if (m > 1 && n > MAX_ITEMS) return null;
+  if (m > 1 && n > MAX_ITEMS) {
+    return assignItemsToChargesGreedy(
+      itemSubtotalsCents,
+      chargeAmountsCents,
+      orderTotalCents,
+      itemsSubtotalCents,
+    );
+  }
 
   const ratio = itemsSubtotalCents > 0 ? orderTotalCents / itemsSubtotalCents : 1;
 
@@ -148,6 +156,105 @@ export function assignItemsToCharges(
   return {
     indicesPerCharge: bestPartition,
     distanceCentsPerCharge: bestDistances,
+  };
+}
+
+/** Index of the largest value; ties resolve to the lowest index. */
+function argmax(values: number[]): number {
+  return values.reduce((best, v, i) => (v > values[best] ? i : best), 0);
+}
+
+/** Total subtotal a bucket of item indices carries, scaled by the tax/fee ratio
+ *  into charge space — what its charge would have to cover. */
+function scaledBucketCents(bucket: number[], itemSubtotalsCents: number[], ratio: number): number {
+  return Math.round(sum(bucket.map((i) => itemSubtotalsCents[i])) * ratio);
+}
+
+/**
+ * Greedily assign each item to the charge with the largest remaining need
+ * (target − assigned so far), largest items first so they land on the big
+ * charges. Returns one charge index per item, keyed by item index.
+ *
+ * A pure fold: the running per-charge sums are threaded through the accumulator,
+ * never mutated in place.
+ */
+function greedyAssignment(itemSubtotalsCents: number[], targets: number[]): number[] {
+  const largestFirst = itemSubtotalsCents
+    .map((_, i) => i)
+    .sort((a, b) => itemSubtotalsCents[b] - itemSubtotalsCents[a]);
+
+  const { chargeOf } = largestFirst.reduce(
+    (acc, item) => {
+      const charge = argmax(targets.map((t, j) => t - acc.sums[j]));
+      return {
+        sums: acc.sums.map((s, j) => (j === charge ? s + itemSubtotalsCents[item] : s)),
+        chargeOf: { ...acc.chargeOf, [item]: charge },
+      };
+    },
+    { sums: targets.map(() => 0), chargeOf: {} as Record<number, number> },
+  );
+
+  return itemSubtotalsCents.map((_, item) => chargeOf[item]);
+}
+
+/** Group item indices into one ascending-order bucket per charge. */
+function bucketsFromAssignment(chargeOf: number[], chargeCount: number): number[][] {
+  return Array.from({ length: chargeCount }, (_, j) =>
+    chargeOf.flatMap((charge, item) => (charge === j ? [item] : [])),
+  );
+}
+
+/**
+ * Ensure every charge holds ≥1 item by moving the smallest item out of the
+ * fullest bucket into each empty one (n ≥ m guarantees a donor with a spare).
+ * A pure fold over the empty charges, rebuilding buckets immutably each step.
+ */
+function repairEmptyBuckets(buckets: number[][], itemSubtotalsCents: number[]): number[][] {
+  const emptyCharges = buckets.flatMap((b, j) => (b.length === 0 ? [j] : []));
+  return emptyCharges.reduce((acc, target) => {
+    const donor = argmax(acc.map((b) => b.length));
+    const smallest = acc[donor].reduce((min, i) =>
+      itemSubtotalsCents[i] < itemSubtotalsCents[min] ? i : min,
+    );
+    return acc.map((b, j) =>
+      j === donor ? b.filter((i) => i !== smallest) : j === target ? [...b, smallest] : b,
+    );
+  }, buckets);
+}
+
+/**
+ * Best-effort partition for orders too large for the exact branch-and-bound
+ * (m > 1 and n > MAX_ITEMS, where enumerating 2^n subsets would hang the
+ * worker). Runs in O(n log n) instead, so distributeOrder can still split a
+ * large multi-charge grocery order rather than surfacing it as a read failure.
+ *
+ * The partition is approximate — only item-to-charge attribution, not totals:
+ * allocateProportional still scales each charge's items to its exact amount
+ * downstream.
+ */
+function assignItemsToChargesGreedy(
+  itemSubtotalsCents: number[],
+  chargeAmountsCents: number[],
+  orderTotalCents: number,
+  itemsSubtotalCents: number,
+): { indicesPerCharge: number[][]; distanceCentsPerCharge: number[] } {
+  const ratio = itemsSubtotalCents > 0 ? orderTotalCents / itemsSubtotalCents : 1;
+  // Targets in item-subtotal space, so charges compare like-for-like with items.
+  const targets = chargeAmountsCents.map((a) => a / ratio);
+
+  const indicesPerCharge = repairEmptyBuckets(
+    bucketsFromAssignment(
+      greedyAssignment(itemSubtotalsCents, targets),
+      chargeAmountsCents.length,
+    ),
+    itemSubtotalsCents,
+  );
+
+  return {
+    indicesPerCharge,
+    distanceCentsPerCharge: indicesPerCharge.map((bucket, j) =>
+      Math.abs(scaledBucketCents(bucket, itemSubtotalsCents, ratio) - chargeAmountsCents[j]),
+    ),
   };
 }
 

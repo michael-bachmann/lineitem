@@ -102,9 +102,44 @@ describe("assignItemsToCharges", () => {
     expect(sum(result!.distanceCentsPerCharge)).toBe(0);
   });
 
-  it("multi-charge: n > MAX_ITEMS returns null (subset-enumeration cap)", () => {
+  it("multi-charge: n > MAX_ITEMS falls back to a best-effort greedy partition", () => {
+    // Past the exact-enumeration cap we no longer fail the order — every item is
+    // assigned exactly once and every charge gets at least one item.
     const items = Array(21).fill(100);
-    expect(assignItemsToCharges(items, [1050, 1050], 2100, 2100)).toBeNull();
+    const result = assignItemsToCharges(items, [1050, 1050], 2100, 2100);
+    expect(result).not.toBeNull();
+    expect(result!.indicesPerCharge).toHaveLength(2);
+    expect(result!.indicesPerCharge.every((b) => b.length >= 1)).toBe(true);
+    expect(result!.indicesPerCharge.flat().sort((a, b) => a - b)).toEqual(
+      items.map((_, i) => i),
+    );
+  });
+
+  it("greedy fallback keeps big items off the small charge", () => {
+    // 21 items so we cross MAX_ITEMS: twenty $10 items + one $200 item, split
+    // across a big ($200) and a small ($10) charge. The $200 item must land on
+    // the big charge, not the small one.
+    const items = [...Array(20).fill(1000), 20000];
+    const result = assignItemsToCharges(items, [20000, 1000], 21000, 21000);
+    expect(result).not.toBeNull();
+    const bigItemIdx = 20;
+    const bigChargeBucket = result!.indicesPerCharge[0];
+    expect(bigChargeBucket).toContain(bigItemIdx);
+  });
+
+  it("greedy fallback repairs an empty bucket so every charge gets an item", () => {
+    // Skewed targets that force the repair branch: 21 equal $10 items with a
+    // near-all-consuming charge ($209.99) beside a $0.01 charge. Underfilled-
+    // first assignment piles all 21 items onto the big charge (its slack never
+    // drops below the tiny charge's target), leaving the small charge empty —
+    // repair must then move one item over so it isn't left with zero.
+    const items = Array(21).fill(1000);
+    const result = assignItemsToCharges(items, [20999, 1], 21000, 21000);
+    expect(result).not.toBeNull();
+    expect(result!.indicesPerCharge.map((b) => b.length)).toEqual([20, 1]);
+    expect(result!.indicesPerCharge.flat().sort((a, b) => a - b)).toEqual(
+      items.map((_, i) => i),
+    );
   });
 
   it("single-charge: n > MAX_ITEMS still succeeds (no enumeration needed)", () => {
@@ -190,6 +225,28 @@ describe("distributeOrder", () => {
     expect(tx2.items.map((i) => i.productId)).toEqual(["C"]);
     expect(tx2.items[0].allocatedCents).toBe(3000);
     expect(result.failures).toEqual([]);
+  });
+
+  it("large grocery order split across 3 charges (30 items) allocates instead of failing", () => {
+    // Regression for BAC "Couldn't read order": a 30-item Whole Foods order that
+    // YNAB split into three charges used to trip the exact partitioner's
+    // n > MAX_ITEMS cap (m > 1), failing all three charges. It now partitions
+    // best-effort so every charge allocates and its split sums exactly.
+    const items = Array.from({ length: 30 }, (_, i) => mkItem(`P${i}`, 700));
+    const order = mkOrder(items, "113-9595876-1111455");
+    const charges = [
+      mkCharge("tx1", 21502),
+      mkCharge("tx2", 787),
+      mkCharge("tx3", 583),
+    ];
+    const result = distributeOrder(order, charges);
+    expect(result.failures).toEqual([]);
+    expect(result.allocated).toHaveLength(3);
+    for (const at of result.allocated) {
+      expect(sum(at.items.map((i) => i.allocatedCents))).toBe(at.amountCents);
+    }
+    const totalItems = result.allocated.reduce((acc, at) => acc + at.items.length, 0);
+    expect(totalItems).toBe(30);
   });
 
   it("invariant: every charge's allocations sum to exactly amountCents", () => {
