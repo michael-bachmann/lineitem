@@ -44,6 +44,20 @@ export default function DetailView({ entry, categories, onBack, onApprove }: Det
   const orderId = parseOrderId(order.orderKey);
   const isRefund = ynabTransaction.amount > 0;
 
+  // A charge whose listed items far exceed the charge itself is a partial
+  // payment: only part of the order was billed to this card, the rest to another
+  // charge or a gift card. distributeOrder still splits THIS charge's amount
+  // proportionally across every item, so each item shows its full price — which
+  // reads as a mismatch ("$73 of items in a $10 charge") without a note. Refunds
+  // allocate only their matched subset, not the whole basket, so they never trip
+  // this. The 0.85 margin keeps ordinary tax/discount noise from tripping it —
+  // for a fully-billed order the charge covers the items with fees on top.
+  const itemsFullCents = classifiedItems.reduce(
+    (s, it) => s + it.unitPriceCents * it.quantity,
+    0,
+  );
+  const isPartialCharge = !isRefund && totalCents < itemsFullCents * 0.85;
+
   const handleCategoryChange = (index: number, categoryId: string) => {
     setSelectedCategories((prev) => {
       const next = new Map(prev);
@@ -112,6 +126,14 @@ export default function DetailView({ entry, categories, onBack, onApprove }: Det
           </div>
         </div>
       </div>
+
+      {isPartialCharge && (
+        <div className="rounded-card border border-line bg-surface px-[14px] py-[11px] text-[12.5px] leading-[1.45] text-faint shadow-card">
+          Only part of this order was billed to this {formatCents(totalCents)} charge — the rest went to
+          another payment. Items are shown at full price; this charge&rsquo;s share is split across them
+          proportionally (see the breakdown below).
+        </div>
+      )}
 
       <SectionLabel>Items</SectionLabel>
 
