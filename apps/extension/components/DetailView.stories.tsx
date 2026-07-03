@@ -24,6 +24,7 @@ function item(
   cents: number,
   suggested: string | null,
   source: ClassifiedItem["classificationSource"],
+  allocated = cents,
 ): ClassifiedItem {
   return {
     productId,
@@ -32,7 +33,7 @@ function item(
     unitPriceCents: cents,
     quantity: 1,
     refundedAmountCents: 0,
-    allocatedCents: cents,
+    allocatedCents: allocated,
     suggestedCategoryId: suggested,
     classificationSource: source,
   } as ClassifiedItem;
@@ -96,3 +97,36 @@ type Story = StoryObj<typeof DetailView>;
 export const MatchedPartial: Story = { args: { entry: entry(matched(PARTIAL)) } };
 export const MatchedReady: Story = { args: { entry: entry(matched(READY)) } };
 export const MatchedRefund: Story = { args: { entry: entry(matched(READY), 42990) } };
+
+// One Target invoice ($79.69) whose payment was split into two Amex charges. This
+// is the $10.43 charge: it lists the whole basket at full price ($72.97 of items)
+// but only bills $10.43, allocated proportionally. Exercises the partial-payment
+// note.
+const SPLIT = [
+  item("s1", "Freestyle Total Chlorine Free Baby Diapers - Size 3 - 72ct", 2499, "n1", "product_cache", 357),
+  item("s2", "Advil Pain Reliever Liqui-Gel Minis - Ibuprofen - 160ct", 2299, "g1", "product_cache", 329),
+  item("s3", "Freestyle Total Chlorine Free Baby Diapers - Size 4 - 60ct", 2499, "n1", "product_cache", 357),
+];
+
+const splitOrder = {
+  ynabTransactionId: "t2",
+  orderKey: "target:912003562643199",
+  retailer: "target",
+  date: "2026-07-01",
+  amountCents: 1043,
+  isRefund: false,
+  items: SPLIT,
+} as AllocatedTransaction;
+
+const splitEntry: QueueEntry = {
+  ynabTransaction: {
+    id: "t2",
+    payee_name: "TARGET",
+    amount: -10430,
+    date: "2026-07-01",
+  } as QueueEntry["ynabTransaction"],
+  retailer: "target",
+  matchStatus: { status: "matched", order: splitOrder, classifiedItems: SPLIT },
+};
+
+export const MatchedSplitCharge: Story = { args: { entry: splitEntry } };
