@@ -28,8 +28,8 @@
     "remeda": "^2.39.0"
   },
   "devDependencies": {
-    "@storybook/addon-a11y": "^10.4.6",
-    "@storybook/react-vite": "^10.4.6",
+    "@storybook/addon-a11y": "^10.5.0",
+    "@storybook/react-vite": "^10.5.0",
     "@tailwindcss/vite": "^4.3.2",
     "@types/chrome": "^0.2.2",
     "@types/react": "^19.2.17",
@@ -38,7 +38,7 @@
     "@wxt-dev/auto-icons": "^1.1.1",
     "@wxt-dev/module-react": "^1.1.5",
     "happy-dom": "^20.10.6",
-    "storybook": "^10.4.6",
+    "storybook": "^10.5.0",
     "tailwindcss": "^4.3.2",
     "typescript": "^5.9.3",
     "vite-plugin-svgr": "^5.2.0",
