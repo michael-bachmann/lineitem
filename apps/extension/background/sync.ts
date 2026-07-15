@@ -9,6 +9,7 @@ import { getAdapter } from "@/retailers/registry";
 import { classifyItems } from "@/lib/classifier";
 import { distributeOrder } from "@/lib/distribution";
 import { verifyScrape } from "@/lib/verify-scrape";
+import { dlog, isDebugEnabled } from "@/lib/debug";
 import { groupBy, partition } from "remeda";
 import { mapSeries } from "@/lib/async";
 import type {
@@ -42,6 +43,15 @@ async function performSyncInner(): Promise<SyncResult> {
     //    immediately as matched entries) from the ones that need a retailer scrape.
     const charges = await identifyScrapeCharges(settings.planId);
     const { fastPath, needsScraping } = await triageCharges(charges);
+
+    // Debug: if `needsScraping` is 0, every matching charge was already cached
+    // and NO scrape runs this sync — which is why you'd see no `[lineitem:amazon]`
+    // logs. Approve/clear the cached ones, or resync a charge that isn't cached.
+    dlog("sync", "triage", {
+      matchingCharges: charges.length,
+      cachedFastPath: fastPath.length,
+      needsScraping: needsScraping.length,
+    });
 
     // 2. SCRAPE each retailer into a self-contained outcome (one tab at a time),
     //    keyed back to its originating tx through entryById.
@@ -228,6 +238,28 @@ async function scrapeRetailer(
   const distributeFailedEntries = distributionResults.flatMap((r) =>
     r.failures.flatMap((f) => entryFor(f.ynabTransactionId, { status: "error", message: f.reason })),
   );
+
+  // Debug: the post-scrape stage where matched-and-scraped orders can still fail
+  // (a verify mismatch, or a refund that couldn't be attributed to items). Dumps
+  // every order's refund data next to the raw distribution failure reasons the UI
+  // hides behind "Couldn't read order". Guarded so the payload isn't built in
+  // shipped builds.
+  if (isDebugEnabled()) {
+    dlog(retailerId, "post-scrape verify + distribute", {
+      orders: verified.map((v) => ({
+        orderId: v.order.orderId,
+        verifyOk: v.verification.ok,
+        refundPopover: v.order.refund,
+        itemRefundMarkersCents: v.order.items.map((it) => it.refundedAmountCents),
+        charges: v.charges.map((c) => ({
+          id: c.ynabTransactionId,
+          amountCents: c.amountCents,
+          isRefund: c.isRefund,
+        })),
+      })),
+      distributionFailures: distributionResults.flatMap((r) => r.failures),
+    });
+  }
 
   // Unmatched charges → no_match (or a specific read-failure reason).
   const unmatchedEntries = unmatched.flatMap(({ charge, reason }) =>

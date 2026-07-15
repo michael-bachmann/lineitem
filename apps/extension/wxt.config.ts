@@ -126,6 +126,12 @@ export default defineConfig({
     },
   },
   vite: () => ({
+    // `pnpm build:debug` (LINEITEM_DEBUG=1) compiles a loadable build with gated
+    // debug logging on; a normal `wxt build` leaves it false. `wxt dev` doesn't
+    // need this — lib/debug also keys off import.meta.env.DEV.
+    define: {
+      __DEBUG__: JSON.stringify(process.env.LINEITEM_DEBUG === "1"),
+    },
     plugins: [
       tailwindcss(),
       // Lets components import SVGs as React components via the `?react` query
