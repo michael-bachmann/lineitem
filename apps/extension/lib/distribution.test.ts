@@ -423,6 +423,141 @@ describe("distributeOrder with refunds", () => {
     expect(result.failures).toHaveLength(1);
   });
 
+  it("refund with per-item markers but no popover (grocery): allocates to the marked items", () => {
+    // Regression for "Couldn't read order" on Whole Foods / Fresh refunds: the
+    // order has per-item refund markers but no "Refund Total" popover
+    // (order.refund: null), so matchOneRefund used to reject it outright.
+    const items = [
+      { ...mkItem("REFUNDED", 2971), refundedAmountCents: 2971 },
+      { ...mkItem("KEPT", 5000), refundedAmountCents: 0 },
+    ];
+    const order = mkOrder(items); // refund: null — grocery has no popover
+    const refundCharge: YnabCharge = {
+      ynabTransactionId: "yt-refund",
+      date: "2026-07-07",
+      amountCents: 2971,
+      payeeName: "Amazon",
+      isRefund: true,
+    };
+    const result = distributeOrder(order, [refundCharge]);
+    expect(result.failures).toEqual([]);
+    expect(result.allocated).toHaveLength(1);
+    expect(result.allocated[0].ynabTransactionId).toBe("yt-refund");
+    expect(result.allocated[0].isRefund).toBe(true);
+    expect(result.allocated[0].items.map((i) => i.productId)).toEqual(["REFUNDED"]);
+    expect(sum(result.allocated[0].items.map((i) => i.allocatedCents))).toBe(2971);
+  });
+
+  it("regular-order partial refund: over-stated marker, popover total matches charge → attributes to the marked item", () => {
+    // Real case (order 113-4472585-9829043): the refunded item's marker is its
+    // full line total ($34.95), but Amazon refunded $29.71 (the popover total,
+    // which equals the YNAB charge). matchRefundToItems can't subset-match the
+    // over-stated marker, so we fall back to the authoritative popover total.
+    const items = [
+      { ...mkItem("KEPT", 5000), refundedAmountCents: 0 },
+      { ...mkItem("REFUNDED", 3495), refundedAmountCents: 3495 },
+    ];
+    const order: ScrapedOrder = {
+      ...mkOrder(items),
+      refund: { itemCents: 2971, taxCents: 0, totalCents: 2971 },
+    };
+    const refundCharge: YnabCharge = {
+      ynabTransactionId: "yt-r1", date: "2026-07-06", amountCents: 2971, payeeName: "Amazon", isRefund: true,
+    };
+    const result = distributeOrder(order, [refundCharge]);
+    expect(result.failures).toEqual([]);
+    expect(result.allocated).toHaveLength(1);
+    expect(result.allocated[0].items.map((i) => i.productId)).toEqual(["REFUNDED"]);
+    expect(sum(result.allocated[0].items.map((i) => i.allocatedCents))).toBe(2971);
+  });
+
+  it("regular-order refund with tax: over-stated marker, popover total (incl. tax) matches charge", () => {
+    // Real case (order 113-6162074-5649818): marker $35.97 (line total); popover
+    // item $33.99 + tax $3.51 = $37.50 total = the YNAB charge.
+    const items = [{ ...mkItem("REFUNDED", 3597), refundedAmountCents: 3597 }];
+    const order: ScrapedOrder = {
+      ...mkOrder(items),
+      refund: { itemCents: 3399, taxCents: 351, totalCents: 3750 },
+    };
+    const refundCharge: YnabCharge = {
+      ynabTransactionId: "yt-r2", date: "2026-07-06", amountCents: 3750, payeeName: "Amazon", isRefund: true,
+    };
+    const result = distributeOrder(order, [refundCharge]);
+    expect(result.failures).toEqual([]);
+    expect(result.allocated).toHaveLength(1);
+    expect(result.allocated[0].items.map((i) => i.productId)).toEqual(["REFUNDED"]);
+    expect(sum(result.allocated[0].items.map((i) => i.allocatedCents))).toBe(3750);
+  });
+
+  it("refund whose charge doesn't match the popover total: still fails (fallback stays guarded)", () => {
+    const items = [{ ...mkItem("REFUNDED", 3597), refundedAmountCents: 3597 }];
+    const order: ScrapedOrder = {
+      ...mkOrder(items),
+      refund: { itemCents: 3399, taxCents: 351, totalCents: 3750 },
+    };
+    const refundCharge: YnabCharge = {
+      ynabTransactionId: "yt-r3", date: "2026-07-06", amountCents: 1000, payeeName: "Amazon", isRefund: true,
+    };
+    const result = distributeOrder(order, [refundCharge]);
+    expect(result.allocated).toEqual([]);
+    expect(result.failures).toHaveLength(1);
+  });
+
+  it("multi-item order, refunded item NOT flagged: identified by list-price subset (multi_item_one_return)", () => {
+    // Real case: no shipment shows "Refunded", so every marker is 0. The refunded
+    // item is found because its list price equals the popover item refund (5200).
+    const items = [
+      { ...mkItem("B0DNT6TWWV", 2499), refundedAmountCents: 0 },
+      { ...mkItem("B0C77C95K2", 2018), refundedAmountCents: 0 },
+      { ...mkItem("B0BLT8SY1X", 5200), refundedAmountCents: 0 },
+    ];
+    const order: ScrapedOrder = { ...mkOrder(items), refund: { itemCents: 5200, taxCents: 507, totalCents: 5707 } };
+    const refund: YnabCharge = { ynabTransactionId: "r", date: "2026-07-06", amountCents: 5707, payeeName: "Amazon", isRefund: true };
+    const result = distributeOrder(order, [refund]);
+    expect(result.failures).toEqual([]);
+    expect(result.allocated[0].items.map((i) => [i.productId, i.allocatedCents])).toEqual([["B0BLT8SY1X", 5707]]);
+  });
+
+  it("two items refunded, only one flagged: split across BOTH via list-price subset (one_ship_one_return)", () => {
+    // Real case: the shipment flag marked only B01644OCVS, but the popover item
+    // refund (2996) = 1699 + 1297, so both refunded items are recovered and the
+    // charge is split proportionally.
+    const items = [
+      { ...mkItem("B07NV7RX7H", 3295), refundedAmountCents: 0 },
+      { ...mkItem("B00ZRD99C0", 474), refundedAmountCents: 0 },
+      { ...mkItem("B09Y28YM7K", 1699), refundedAmountCents: 0 },
+      { ...mkItem("B01644OCVS", 1297), refundedAmountCents: 1297 },
+    ];
+    const order: ScrapedOrder = { ...mkOrder(items), refund: { itemCents: 2996, taxCents: 292, totalCents: 3288 } };
+    const refund: YnabCharge = { ynabTransactionId: "r", date: "2026-07-06", amountCents: 3288, payeeName: "Amazon", isRefund: true };
+    const result = distributeOrder(order, [refund]);
+    expect(result.failures).toEqual([]);
+    expect(result.allocated[0].items).toHaveLength(2);
+    const alloc = new Map(result.allocated[0].items.map((i) => [i.productId, i.allocatedCents]));
+    expect(alloc.get("B09Y28YM7K")).toBe(1865);
+    expect(alloc.get("B01644OCVS")).toBe(1423);
+  });
+
+  it("partial refund of the only item, no flag: attributed to that item (partial_refund)", () => {
+    // Real case: $22.93 refunded on a $209.99 item, no marker — the single item
+    // gets it.
+    const items = [{ ...mkItem("B00DJ8HX96", 20999), refundedAmountCents: 0 }];
+    const order: ScrapedOrder = { ...mkOrder(items), refund: { itemCents: 2090, taxCents: 203, totalCents: 2293 } };
+    const refund: YnabCharge = { ynabTransactionId: "r", date: "2026-07-06", amountCents: 2293, payeeName: "Amazon", isRefund: true };
+    const result = distributeOrder(order, [refund]);
+    expect(result.failures).toEqual([]);
+    expect(result.allocated[0].items.map((i) => [i.productId, i.allocatedCents])).toEqual([["B00DJ8HX96", 2293]]);
+  });
+
+  it("refund identified to only $0-priced items: fails cleanly instead of an all-zeros allocation", () => {
+    const items = [{ ...mkItem("FREEBIE", 0), refundedAmountCents: 0 }];
+    const order: ScrapedOrder = { ...mkOrder(items), refund: { itemCents: 0, taxCents: 500, totalCents: 500 } };
+    const refund: YnabCharge = { ynabTransactionId: "r", date: "2026-07-06", amountCents: 500, payeeName: "Amazon", isRefund: true };
+    const result = distributeOrder(order, [refund]);
+    expect(result.allocated).toEqual([]);
+    expect(result.failures).toHaveLength(1);
+  });
+
   it("mixed: purchase charge gets non-refunded items, refund gets refunded items", () => {
     const items = [
       { ...mkItem("A", 1000), refundedAmountCents: 0 }, // purchase
