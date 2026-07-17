@@ -43,9 +43,11 @@ export default defineConfig({
     //    redirect URI (https://<id>.extensions.allizom.org/).
     //  - Chrome: the pinned public `key` (public half of the keypair, safe to
     //    commit), which derives a stable extension ID so the YNAB redirect-URI
-    //    registration doesn't change across machines or fresh installs. Only
-    //    emitted for `wxt dev` (command "serve") — the Chrome Web Store rejects
-    //    a manifest `key` on upload, so it's stripped from the production zip.
+    //    registration doesn't change across machines or fresh installs. Emitted
+    //    for `wxt dev` (command "serve") AND `pnpm build:debug` — a loadable debug
+    //    build must OAuth against the same registered redirect URI. The Chrome Web
+    //    Store rejects a manifest `key` on upload, so a normal `wxt build`/zip
+    //    omits it.
     ...(browser === "firefox"
       ? {
           browser_specific_settings: {
@@ -66,7 +68,7 @@ export default defineConfig({
             },
           },
         }
-      : command === "serve"
+      : command === "serve" || process.env.LINEITEM_DEBUG === "1"
         ? {
             key: "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAtkJGQ2J6/qiSlDdRHLrauLgKxTeGx2W68jpk+0TPcebtbtdS7OaHxaN+CKTY8a5EUfFdpv/8LDfQC+L7xAjwsKihbagaWiOpe/dKsdzUYi3dUllzIJlDLlEhz9jEqumG6JyQVP6fq1S22+5bXLNCXRNM0vNDDTiq/2m8sytxCN9D5ufv0556uklIBJ/wQvqcCnp107gdYGs3x0ooVwxXZu035YJBLDoIriB/zmwsDoim1koahf9TKV1VqgzdlIt7Jx+sHIUvNA9IA1KGyvwE6Zp2eE6voT3haO2iInwj8QuEvDYmovW7piun5kXPICGXWqNQcjv3HPKhZxXSt3G+8wIDAQAB",
           }
