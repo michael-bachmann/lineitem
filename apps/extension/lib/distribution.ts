@@ -292,6 +292,14 @@ function enumerateSubsets(
 const REFUND_MATCH_TOLERANCE_CENTS_PER_ITEM = 1;
 
 /**
+ * How close a single refund charge must sit to the order's popover Refund Total
+ * to trigger the popover-total fallback in `matchOneRefund` (which then
+ * identifies the refunded items via `identifyRefundedItems`). The charge and the
+ * popover describe the same refund, so this is only rounding slack.
+ */
+const REFUND_TOTAL_TOLERANCE_CENTS = 2;
+
+/**
  * Find the unique subset of refunded items whose grossed-up amounts match
  * the YNAB refund charge.
  *
@@ -369,10 +377,11 @@ export interface DistributionResult {
  * The dispatch splits charges by sign:
  *  - Purchase charges (isRefund=false) run through `assignItemsToCharges`
  *    against the order's non-refunded items, exactly as before.
- *  - Refund charges (isRefund=true) run through `matchRefundToItems`
- *    against the refunded items pool, with the order's popover ratio.
- *    Each refund consumes its matched items so a later refund can't
- *    re-use them.
+ *  - Refund charges (isRefund=true) run through `matchOneRefund`: accurate
+ *    per-item markers subset-match the charge; otherwise, when the charge equals
+ *    the popover Refund Total, the refunded items are identified by list-price /
+ *    shipment flag and the charge is split proportional to list price. Each
+ *    refund consumes its matched items so a later refund can't re-use them.
  *
  * A refund that can't be matched cleanly never falls back to "all items
  * on the refund" — it returns a per-charge failure so the user sees the
@@ -503,7 +512,13 @@ function matchOneRefund(
   alreadyConsumed: ReadonlySet<number>,
   ratio: number,
 ): { outcome: ChargeOutcome; newlyConsumed: readonly number[] } {
-  if (!order.refund) {
+  // Refund data can come from the order-level popover (`order.refund`) OR the
+  // per-item markers (`refundedAmounts`). Grocery orders (Whole Foods / Fresh)
+  // carry only the markers — there's no "Refund Total" popover — so gate on
+  // BOTH being absent. Gating on the popover alone rejected every grocery
+  // refund as "no refund data" even though the per-item markers were scraped.
+  const hasRefundData = order.refund != null || refundedAmounts.some((a) => a > 0);
+  if (!hasRefundData) {
     return {
       outcome: failed(
         charge,
@@ -517,20 +532,111 @@ function matchOneRefund(
   const available = refundedAmounts.map((amt, i) =>
     alreadyConsumed.has(i) ? 0 : amt,
   );
-  const subset = matchRefundToItems(available, charge.amountCents, ratio);
-  if (subset === null) {
+
+  // Accurate per-item markers (grocery itemmod): the marker IS the refund amount.
+  // Subset-match it to the charge; the consumed set lets several partial refunds
+  // on one order each take their own items. Split by the markers themselves.
+  const byMarker = matchRefundToItems(available, charge.amountCents, ratio);
+  if (byMarker !== null) {
+    return allocateRefund(order, charge, byMarker, refundedAmounts);
+  }
+
+  return (
+    matchByPopoverTotal(order, charge, available, alreadyConsumed) ?? {
+      outcome: failed(charge, "Couldn't unambiguously match refund to specific items"),
+      newlyConsumed: [],
+    }
+  );
+}
+
+/**
+ * Regular-order strategy. The per-item markers are unreliable there — each is
+ * the item's full LINE TOTAL, and the shipment "Refunded" flag over-marks,
+ * misses items, or is absent. But the popover Refund Total is authoritative:
+ * when this single charge equals it, identify the refunded items from the
+ * reliable signals and split the charge across them proportional to list price.
+ * Returns null — so `matchOneRefund` fails cleanly — unless the popover matches
+ * and the items are identifiable.
+ */
+function matchByPopoverTotal(
+  order: ScrapedOrder,
+  charge: YnabCharge,
+  available: number[],
+  alreadyConsumed: ReadonlySet<number>,
+): { outcome: ChargeOutcome; newlyConsumed: readonly number[] } | null {
+  if (
+    !order.refund ||
+    Math.abs(charge.amountCents - order.refund.totalCents) > REFUND_TOTAL_TOLERANCE_CENTS
+  ) {
+    return null;
+  }
+  const idx = identifyRefundedItems(order, available, alreadyConsumed, order.refund.itemCents);
+  if (idx === null) return null;
+
+  const listTotals = order.items.map((it) => it.unitPriceCents * it.quantity);
+  return allocateRefund(order, charge, idx, listTotals);
+}
+
+/**
+ * Which items a regular-order refund covers, from most to least reliable signal.
+ * Returns item indices (excluding already-consumed ones), or null when nothing
+ * identifies them.
+ */
+function identifyRefundedItems(
+  order: ScrapedOrder,
+  available: number[],
+  consumed: ReadonlySet<number>,
+  itemRefundCents: number,
+): number[] | null {
+  // 1) The subset of item LIST prices that sums to the popover's item refund.
+  //    Reliable exactly when the refund wasn't discounted (list == refund) — the
+  //    case the markers miss (no "Refunded" status, or only some items flagged).
+  //    Limitation: for a discounted AND unflagged refund whose real item's list
+  //    price differs, a coincidental unique subset of other items could match
+  //    here instead. matchRefundToItems's uniqueness guard makes that rare; the
+  //    refund total is unaffected, only the item split can be off.
+  const listPrices = order.items.map((it, i) =>
+    consumed.has(i) ? 0 : it.unitPriceCents * it.quantity,
+  );
+  const byPrice = matchRefundToItems(listPrices, itemRefundCents, 1);
+  if (byPrice !== null) return byPrice;
+
+  // 2) Items flagged by the shipment "Refunded" status. Reliable when the refund
+  //    WAS discounted (so list != refund and (1) can't match) — the flag still
+  //    names the item.
+  const marked = available.flatMap((amt, i) => (amt > 0 ? [i] : []));
+  if (marked.length > 0) return marked;
+
+  // 3) A single unconsumed item — a partial refund of the only thing in the order.
+  const remaining = order.items.flatMap((_, i) => (consumed.has(i) ? [] : [i]));
+  return remaining.length === 1 ? remaining : null;
+}
+
+/** Allocate a refund charge across `idx`, split proportional to `weights[i]`,
+ *  and mark those indices consumed. Fails when the selected weights sum to 0
+ *  (e.g. only $0-priced items) — there'd be nothing to split against, and
+ *  allocateProportional would emit an all-zeros allocation. */
+function allocateRefund(
+  order: ScrapedOrder,
+  charge: YnabCharge,
+  idx: number[],
+  weights: number[],
+): { outcome: ChargeOutcome; newlyConsumed: readonly number[] } {
+  const selected = idx.map((i) => weights[i]);
+  if (sum(selected) === 0) {
     return {
       outcome: failed(charge, "Couldn't unambiguously match refund to specific items"),
       newlyConsumed: [],
     };
   }
-
-  const matchedItems = subset.map((i) => order.items[i]);
-  const matchedSubtotals = subset.map((i) => refundedAmounts[i]);
-  const items = allocateItems(matchedItems, matchedSubtotals, charge.amountCents);
+  const items = allocateItems(
+    idx.map((i) => order.items[i]),
+    selected,
+    charge.amountCents,
+  );
   return {
     outcome: allocated(buildAllocatedTx(order, charge, items)),
-    newlyConsumed: subset,
+    newlyConsumed: idx,
   };
 }
 

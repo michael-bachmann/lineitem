@@ -9,6 +9,7 @@ import { ensureModelLoaded } from "@/background/embedder";
 import { runBackfill } from "@/background/backfill";
 import { getAdapter } from "@/retailers/registry";
 import { openRetailerTab, initPageResultListener } from "@/background/tabs";
+import { dlog } from "@/lib/debug";
 import type { MessageBroadcast, MessageRequest } from "@/lib/types";
 
 /** Single in-flight backfill controller. Held at module scope so a
@@ -18,6 +19,11 @@ let backfillController: AbortController | null = null;
 
 /** Service worker entry point — routes messages from the side panel to domain handlers. */
 export default defineBackground(() => {
+  // Fires on every service-worker startup. If you DON'T see this in the SW
+  // console, you're running a non-debug build (or the extension wasn't reloaded
+  // after `pnpm build:debug`).
+  dlog("boot", "debug logging active");
+
   // Chrome opens the side panel when its toolbar icon is clicked. Firefox has
   // no sidePanel API — its sidebar_action provides a toolbar toggle button
   // natively — so skip this there to avoid a startup TypeError.

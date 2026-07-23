@@ -7,6 +7,7 @@ import type {
   PayeeMapping,
 } from "@/lib/types";
 import { assignByAmountAndDate, cutoffDateFor, NO_MATCH_REASON, READ_FAILED_REASON } from "@/lib/matcher";
+import { dlog, isDebugEnabled } from "@/lib/debug";
 import { openRetailerTab, awaitPageResult, clearBufferedPageResult } from "@/background/tabs";
 import { orderDetailUrl, TRANSACTIONS_URL } from "@/retailers/amazon/selectors";
 import type { AmazonPageResult } from "@/retailers/amazon/page";
@@ -195,6 +196,28 @@ async function paginateAndMatch(
     allMatched = [...allMatched, ...matchedThisPage];
     remaining = stillUnmatched;
     candidates = allCandidates.filter((c) => !matchedRaws.has(c));
+
+    // Debug: every parsed row (with orderId + isRefund) plus the charges still
+    // unmatched after this page. Refund charges that never match show up here —
+    // and the rows reveal why (a refund row with orderId:null can't be matched;
+    // a date-skewed refund falls outside the ±3-day window). Guarded so the
+    // payload isn't built in shipped builds.
+    if (isDebugEnabled()) {
+      dlog("amazon", `transactions page ${pagesWalked}`, {
+        rows: page.transactions.map((t) => ({
+          date: t.date,
+          amountCents: t.amountCents,
+          isRefund: t.isRefund,
+          orderId: t.orderId,
+        })),
+        stillUnmatched: remaining.map((c) => ({
+          id: c.ynabTransactionId,
+          date: c.date,
+          amountCents: c.amountCents,
+          isRefund: c.isRefund,
+        })),
+      });
+    }
 
     // Liveness during the list walk: order rows matched so far. No denominator
     // yet — the bar just shows we're working and on which retailer, not a
