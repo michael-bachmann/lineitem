@@ -15,8 +15,11 @@ import type { MessageBroadcast, MessageRequest } from "@/lib/types";
 
 /** Single in-flight backfill controller. Held at module scope so a
  *  CANCEL_BACKFILL message arriving while START_BACKFILL is still pending
- *  can abort it. */
+ *  can abort it. `backfillRun` is the run's promise — switchPlan awaits it
+ *  after aborting, because the learn phase doesn't observe the signal and
+ *  its writes must land before the learned stores are cleared. */
 let backfillController: AbortController | null = null;
+let backfillRun: Promise<unknown> | null = null;
 
 /** Serializes the two categories-store writers (SAVE_PLAN, REFRESH_CATEGORIES).
  *  putCategories is clear-then-put, so an in-flight refresh finishing after a
@@ -121,7 +124,10 @@ async function handleMessage(message: MessageRequest): Promise<unknown> {
       try {
         await serializeCategoriesWrite(() =>
           switchPlan(message.planId, message.planName, {
-            abortBackfill: () => backfillController?.abort(),
+            abortBackfill: () => {
+              backfillController?.abort();
+              return backfillRun ?? undefined;
+            },
           }),
         );
         return { ok: true };
@@ -177,12 +183,21 @@ async function handleMessage(message: MessageRequest): Promise<unknown> {
 
     case "START_BACKFILL": {
       if (backfillController) return { error: "Backfill already running" };
-      backfillController = new AbortController();
+      const controller = new AbortController();
+      backfillController = controller;
       try {
-        const result = await runBackfill({
+        // Barrier: let any in-flight plan switch commit its settings before
+        // this run reads them, so a backfill can't start against the plan
+        // being switched away from. A switch that runs during the wait sees
+        // our already-registered controller and aborts it — the check below
+        // turns that into a clean cancel.
+        await serializeCategoriesWrite(async () => {});
+        controller.signal.throwIfAborted();
+
+        const run = runBackfill({
           fromDate: message.fromDate,
           retailers: message.retailers,
-          signal: backfillController.signal,
+          signal: controller.signal,
           onProgress: (event) => {
             const broadcast: MessageBroadcast = { type: "BACKFILL_PROGRESS", event };
             // Side panel may be closed; sendMessage rejects with no
@@ -190,12 +205,21 @@ async function handleMessage(message: MessageRequest): Promise<unknown> {
             browser.runtime.sendMessage(broadcast).catch(() => {});
           },
         });
+        backfillRun = run;
+        const result = await run;
         return { ok: true, result };
       } catch (e) {
+        // A user cancel or a plan switch aborting the run is an expected
+        // outcome, not a failure — report it so the card resets quietly
+        // instead of alarming with the DOMException's raw message.
+        if (e instanceof DOMException && e.name === "AbortError") {
+          return { canceled: true };
+        }
         const reason = e instanceof Error ? e.message : "Backfill failed";
         return { error: reason };
       } finally {
         backfillController = null;
+        backfillRun = null;
       }
     }
 

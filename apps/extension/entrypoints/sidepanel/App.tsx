@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { browser } from "wxt/browser";
 import Onboarding from "@/components/Onboarding";
 import BackfillPrompt from "@/components/BackfillPrompt";
@@ -34,11 +34,19 @@ export default function App() {
   const [showCoffee, setShowCoffee] = useState(false);
   const [coffeeClassified, setCoffeeClassified] = useState(0);
 
+  // Bumped on plan switch. A sync that started before the bump discards its
+  // result — the background's dedup slot is reset on switch, so a slow old-plan
+  // run can settle late and must not overwrite the new plan's queue.
+  const syncEpoch = useRef(0);
+
   const handleSync = useCallback(async () => {
+    const epoch = syncEpoch.current;
+    const isCurrent = () => epoch === syncEpoch.current;
     setSyncing(true);
     setError(null);
     try {
       const catResponse = await getCategories();
+      if (!isCurrent()) return;
       if (catResponse?.error) {
         setError(catResponse.error);
         return;
@@ -46,6 +54,7 @@ export default function App() {
       setCategories(catResponse?.categories ?? []);
 
       const result = await sync();
+      if (!isCurrent()) return;
       if (result?.error) {
         setError(result.error);
         return;
@@ -54,9 +63,9 @@ export default function App() {
       setBlocked(result?.blocked ?? []);
       setShowCoffee(false);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Sync failed");
+      if (isCurrent()) setError(e instanceof Error ? e.message : "Sync failed");
     } finally {
-      setSyncing(false);
+      if (isCurrent()) setSyncing(false);
     }
   }, []);
 
@@ -109,7 +118,9 @@ export default function App() {
           setPlan(next);
           // Everything below was synced from the previous plan — drop it and
           // resync so the queue can't offer old-plan transactions/categories
-          // for approval against the new plan.
+          // for approval against the new plan. The epoch bump makes any
+          // still-running old-plan sync discard its late result.
+          syncEpoch.current += 1;
           setQueue([]);
           setBlocked([]);
           setSelectedEntry(null);

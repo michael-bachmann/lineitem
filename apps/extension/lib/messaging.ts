@@ -47,7 +47,11 @@ export async function savePlan(planId: string, planName: string): Promise<{ erro
   return (await send({ type: "SAVE_PLAN", planId, planName })) as { error?: string };
 }
 
-export type StartBackfillResponse = { ok: true; result: BackfillResult } | { error: string };
+export type StartBackfillResponse =
+  | { ok: true; result: BackfillResult }
+  /** The run was aborted (user cancel, or a plan switch) — not a failure. */
+  | { canceled: true }
+  | { error: string };
 
 export async function startBackfill(
   fromDate: string,

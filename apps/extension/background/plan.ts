@@ -23,13 +23,17 @@ import { resetActiveSync } from "./sync";
 export async function switchPlan(
   planId: string,
   planName: string,
-  opts: { abortBackfill?: () => void } = {},
+  opts: { abortBackfill?: () => Promise<unknown> | void } = {},
 ): Promise<void> {
   const { planId: prevPlanId } = await getSettings();
   const categories = await getCategories(planId);
 
   if (prevPlanId !== null && prevPlanId !== planId) {
-    opts.abortBackfill?.();
+    // Abort any running backfill and WAIT for it to settle — its learn phase
+    // doesn't observe the signal, so clearing before it finishes would let
+    // old-plan rows land after the clear. The rejection (AbortError) is the
+    // expected way an aborted run settles; swallow it.
+    await Promise.resolve(opts.abortBackfill?.()).catch(() => {});
     resetActiveSync();
     await clearLearnedData();
   }

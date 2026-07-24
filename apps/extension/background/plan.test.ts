@@ -71,6 +71,34 @@ describe("switchPlan clears plan-scoped state on an actual change", () => {
     expect(mocked.clearLearnedData).toHaveBeenCalledOnce();
   });
 
+  it("waits for the aborted backfill to settle before clearing learned data", async () => {
+    // The backfill's learn phase doesn't observe the abort signal — its writes
+    // must land before the clear, or old-plan rows survive the switch.
+    const order: string[] = [];
+    const abortBackfill = vi.fn(() =>
+      Promise.resolve().then(() => {
+        order.push("backfill-settled");
+      }),
+    );
+    mocked.clearLearnedData.mockImplementationOnce(async () => {
+      order.push("clear");
+    });
+
+    await switchPlan("plan-b", "Budget B", { abortBackfill });
+
+    expect(order).toEqual(["backfill-settled", "clear"]);
+  });
+
+  it("treats the aborted backfill's rejection as a normal settle", async () => {
+    // An aborted run settles by rejecting with AbortError — that's the
+    // expected outcome, not a switch failure.
+    const abortBackfill = vi.fn(() => Promise.reject(new Error("aborted")));
+
+    await expect(switchPlan("plan-b", "Budget B", { abortBackfill })).resolves.toBeUndefined();
+    expect(mocked.clearLearnedData).toHaveBeenCalledOnce();
+    expect(mocked.saveSettings).toHaveBeenCalledWith({ planId: "plan-b", planName: "Budget B" });
+  });
+
   it("keeps learned data when re-saving the already-connected plan", async () => {
     const abortBackfill = vi.fn();
 
