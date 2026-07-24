@@ -108,6 +108,21 @@ export async function deleteProductEmbedding(id: string): Promise<void> {
   await requestToPromise(store.delete(id));
 }
 
+/** Clear both learning stores (learnedProducts + productEmbeddings) in one
+ *  transaction. Used when the connected plan changes: learned rows are keyed by
+ *  product (plan-agnostic) but carry category ids that only exist in the plan
+ *  they were learned on. */
+export async function clearLearnedData(): Promise<void> {
+  const db = await openDB();
+  const tx = db.transaction(["learnedProducts", "productEmbeddings"], "readwrite");
+  tx.objectStore("learnedProducts").clear();
+  tx.objectStore("productEmbeddings").clear();
+  return new Promise((resolve, reject) => {
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
 // --- Categories ---
 
 export async function getAllCategories(): Promise<Category[]> {

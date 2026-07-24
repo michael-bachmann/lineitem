@@ -19,7 +19,7 @@ vi.mock("@/background/embedder", () => ({
 // Mock the YNAB update so approveTransaction's external call is a no-op:
 vi.mock("@/lib/ynab", () => ({
   updateTransaction: vi.fn(async () => ({ ok: true })),
-  getPlans: vi.fn(),
+  getDefaultPlan: vi.fn(),
   getCategories: vi.fn(),
 }));
 
@@ -323,7 +323,7 @@ describe("approveBatch approves a fully-categorized transaction", () => {
 
     const result = await approveBatch(["txn-batch-ok"]);
 
-    expect(result).toEqual({ ok: true, errors: [] });
+    expect(result).toEqual({ ok: true, approvedIds: ["txn-batch-ok"], errors: [] });
     // The approval ran end-to-end: items were learned back into the cache.
     expect(learnedStore.get("amazon:A")).toEqual({ id: "amazon:A", categoryId: "cat-household" });
   });
@@ -343,7 +343,7 @@ describe("approveBatch approves a fully-categorized transaction", () => {
 
     const result = await approveBatch(["txn-write-fail"]);
 
-    expect(result).toEqual({ ok: true, errors: ["txn-write-fail: YNAB API 500"] });
+    expect(result).toEqual({ ok: true, approvedIds: [], errors: ["txn-write-fail: YNAB API 500"] });
   });
 
   it("skips and reports a transaction with an uncategorizable item", async () => {
@@ -362,6 +362,7 @@ describe("approveBatch approves a fully-categorized transaction", () => {
 
     expect(result).toEqual({
       ok: true,
+      approvedIds: [],
       errors: ["txn-uncat: not all items have categories assigned"],
     });
   });
@@ -378,7 +379,7 @@ describe("approveBatch isolates per-transaction failures", () => {
 
     const result = await approveBatch(["txn-boom"]);
 
-    expect(result).toEqual({ ok: true, errors: ["txn-boom: idb unavailable"] });
+    expect(result).toEqual({ ok: true, approvedIds: [], errors: ["txn-boom: idb unavailable"] });
   });
 
   it("continues to later transactions after one throws", async () => {

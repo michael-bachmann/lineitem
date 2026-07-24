@@ -1,9 +1,23 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { SettingsView } from "./SettingsView";
 import { BackfillCardView } from "./BackfillCardView";
+import { BudgetSwitcherView } from "./BudgetSwitcherView";
 
-// Inject the presentational backfill card (idle) so the view needs no browser.
+// Inject the presentational containers (idle) so the view needs no browser.
 const backfill = <BackfillCardView state={{ kind: "idle" }} onStart={() => {}} onCancel={() => {}} />;
+const budget = (
+  <BudgetSwitcherView
+    current={{ id: "1", name: "My Budget" }}
+    plans={[]}
+    selectedId="1"
+    mode={{ kind: "idle" }}
+    onChange={() => {}}
+    onSelect={() => {}}
+    onSave={() => {}}
+    onCancel={() => {}}
+    onRetry={() => {}}
+  />
+);
 
 const meta = {
   title: "Settings/SettingsView",
@@ -17,7 +31,7 @@ const meta = {
     ),
   ],
   args: {
-    planName: "My Budget",
+    budget,
     backfill,
     onRefresh: () => {},
     onDisconnect: () => {},

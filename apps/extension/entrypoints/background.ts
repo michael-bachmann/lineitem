@@ -1,8 +1,9 @@
-import { NOT_CONNECTED } from "@/lib/messages";
-import { getSettings, saveSettings, clearSettings } from "@/lib/settings";
+import { NOT_CONNECTED, YNAB_RECONNECT } from "@/lib/messages";
+import { getSettings, clearSettings } from "@/lib/settings";
 import { runOAuthFlow } from "@/lib/oauth";
-import { getPlans, getCategories } from "@/lib/ynab";
+import { getDefaultPlan, getPlans, getCategories, NeedsReauthError, YnabApiError } from "@/lib/ynab";
 import { putCategories, getAllCategories } from "@/lib/db";
+import { switchPlan } from "@/background/plan";
 import { performSync } from "@/background/sync";
 import { approveTransaction, approveBatch } from "@/background/approval";
 import { ensureModelLoaded } from "@/background/embedder";
@@ -16,6 +17,26 @@ import type { MessageBroadcast, MessageRequest } from "@/lib/types";
  *  CANCEL_BACKFILL message arriving while START_BACKFILL is still pending
  *  can abort it. */
 let backfillController: AbortController | null = null;
+
+/** Serializes the two categories-store writers (SAVE_PLAN, REFRESH_CATEGORIES).
+ *  putCategories is clear-then-put, so an in-flight refresh finishing after a
+ *  plan switch would otherwise land the OLD plan's categories under the new
+ *  planId. Chained so each writer starts only after the previous settles. */
+let categoriesWriteChain: Promise<unknown> = Promise.resolve();
+function serializeCategoriesWrite<T>(fn: () => Promise<T>): Promise<T> {
+  const run = categoriesWriteChain.then(fn, fn);
+  categoriesWriteChain = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  return run;
+}
+
+/** User-facing message for a handler failure — maps the known typed errors. */
+function errorMessage(e: unknown, fallback: string): string {
+  if (e instanceof NeedsReauthError) return YNAB_RECONNECT;
+  return e instanceof Error ? e.message : fallback;
+}
 
 /** Service worker entry point — routes messages from the side panel to domain handlers. */
 export default defineBackground(() => {
@@ -64,12 +85,26 @@ async function handleMessage(message: MessageRequest): Promise<unknown> {
       }
     }
 
+    case "GET_DEFAULT_PLAN": {
+      try {
+        const plan = await getDefaultPlan();
+        return { plan };
+      } catch (e) {
+        // /plans/default 404s when the consent step wasn't given a default
+        // budget — the one failure with a user-actionable fix, so name it.
+        if (e instanceof YnabApiError && e.status === 404) {
+          return { error: "No default budget selected in YNAB. Reconnect and pick a budget when prompted." };
+        }
+        return { error: errorMessage(e, "Failed to fetch plan") };
+      }
+    }
+
     case "GET_PLANS": {
       try {
         const plans = await getPlans();
         return { plans };
       } catch (e) {
-        return { error: e instanceof Error ? e.message : "Failed to fetch plans" };
+        return { error: errorMessage(e, "Failed to fetch budgets") };
       }
     }
 
@@ -84,26 +119,32 @@ async function handleMessage(message: MessageRequest): Promise<unknown> {
 
     case "SAVE_PLAN": {
       try {
-        await saveSettings({ planId: message.planId, planName: message.planName });
-        const categories = await getCategories(message.planId);
-        await putCategories(categories);
+        await serializeCategoriesWrite(() =>
+          switchPlan(message.planId, message.planName, {
+            abortBackfill: () => backfillController?.abort(),
+          }),
+        );
         return { ok: true };
       } catch (e) {
-        return { error: e instanceof Error ? e.message : "Failed to save plan" };
+        return { error: errorMessage(e, "Failed to save plan") };
       }
     }
 
     case "REFRESH_CATEGORIES": {
       try {
-        const settings = await getSettings();
-        if (!settings.accessToken || !settings.planId) {
-          return { error: NOT_CONNECTED };
-        }
-        const categories = await getCategories(settings.planId);
-        await putCategories(categories);
-        return { ok: true };
+        // planId is read INSIDE the serialized section so a refresh queued
+        // behind a plan switch fetches the plan the switch just committed.
+        return await serializeCategoriesWrite(async () => {
+          const settings = await getSettings();
+          if (!settings.accessToken || !settings.planId) {
+            return { error: NOT_CONNECTED };
+          }
+          const categories = await getCategories(settings.planId);
+          await putCategories(categories);
+          return { ok: true };
+        });
       } catch (e) {
-        return { error: e instanceof Error ? e.message : "Failed to refresh categories" };
+        return { error: errorMessage(e, "Failed to refresh categories") };
       }
     }
 
