@@ -9,6 +9,7 @@ import type {
   QueueEntry,
 } from "./types";
 import type { Settings } from "./settings";
+import type { YnabPlan } from "./ynab";
 
 /**
  * Typed client over the background message bus. Components call these named
@@ -20,10 +21,9 @@ import type { Settings } from "./settings";
  * payload); the background `handleMessage` returns the underlying union.
  */
 
-export interface PlanInfo {
-  id: string;
-  name: string;
-}
+/** The plan shape crossing the message bus — aliased to the API client's type
+ *  so the two ends of the boundary can't silently drift. */
+export type PlanInfo = YnabPlan;
 
 /** Request-typed send (the response shape is per-message, asserted by callers). */
 function send(message: MessageRequest): Promise<unknown> {
@@ -34,15 +34,24 @@ export async function startOAuth(): Promise<{ error?: string }> {
   return (await send({ type: "START_OAUTH" })) as { error?: string };
 }
 
-export async function getPlans(): Promise<{ error?: string; plans: PlanInfo[] }> {
-  return (await send({ type: "GET_PLANS" })) as { error?: string; plans: PlanInfo[] };
+export async function getDefaultPlan(): Promise<{ error?: string; plan?: PlanInfo }> {
+  return (await send({ type: "GET_DEFAULT_PLAN" })) as { error?: string; plan?: PlanInfo };
+}
+
+/** List every budget the token can access — for the Settings budget switcher. */
+export async function getPlans(): Promise<{ error?: string; plans?: PlanInfo[] }> {
+  return (await send({ type: "GET_PLANS" })) as { error?: string; plans?: PlanInfo[] };
 }
 
 export async function savePlan(planId: string, planName: string): Promise<{ error?: string }> {
   return (await send({ type: "SAVE_PLAN", planId, planName })) as { error?: string };
 }
 
-export type StartBackfillResponse = { ok: true; result: BackfillResult } | { error: string };
+export type StartBackfillResponse =
+  | { ok: true; result: BackfillResult }
+  /** The run was aborted (user cancel, or a plan switch) — not a failure. */
+  | { canceled: true }
+  | { error: string };
 
 export async function startBackfill(
   fromDate: string,
@@ -95,8 +104,16 @@ export async function approveTransaction(
   };
 }
 
-export async function approveBatch(ynabTransactionIds: string[]): Promise<{ error?: string }> {
-  return (await send({ type: "APPROVE_BATCH", ynabTransactionIds })) as { error?: string };
+export interface ApproveBatchResponse {
+  error?: string;
+  /** Ids actually written to YNAB — the caller removes only these from the queue. */
+  approvedIds?: string[];
+  /** Per-transaction failure descriptions ("txId: reason"). */
+  errors?: string[];
+}
+
+export async function approveBatch(ynabTransactionIds: string[]): Promise<ApproveBatchResponse> {
+  return (await send({ type: "APPROVE_BATCH", ynabTransactionIds })) as ApproveBatchResponse;
 }
 
 /** Subscribe to backfill progress broadcasts. Returns an unsubscribe fn. */

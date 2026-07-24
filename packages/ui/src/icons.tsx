@@ -76,6 +76,13 @@ export const Icon = {
       <path d="M12 22V12.5" />
     </svg>
   ),
+  wallet: (p: IconProps) => (
+    <svg viewBox="0 0 24 24" strokeWidth={1.8} {...s} {...p}>
+      <path d="M19 7V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-1" />
+      <path d="M20 7H10a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h10a1 1 0 0 0 1-1V8a1 1 0 0 0-1-1z" />
+      <path d="M15.5 12h.01" strokeWidth={2.4} />
+    </svg>
+  ),
   refresh: (p: IconProps) => (
     <svg viewBox="0 0 24 24" strokeWidth={1.8} {...s} {...p}>
       <path d="M21 2v6h-6" />

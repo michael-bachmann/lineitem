@@ -121,6 +121,7 @@ export type MessageRequest =
   | { type: "APPROVE_BATCH"; ynabTransactionIds: string[] }
   | { type: "GET_SETTINGS" }
   | { type: "START_OAUTH" }
+  | { type: "GET_DEFAULT_PLAN" }
   | { type: "GET_PLANS" }
   | { type: "SAVE_PLAN"; planId: string; planName: string }
   | { type: "REFRESH_CATEGORIES" }

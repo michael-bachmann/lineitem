@@ -1,8 +1,9 @@
-import { NOT_CONNECTED } from "@/lib/messages";
-import { getSettings, saveSettings, clearSettings } from "@/lib/settings";
+import { NOT_CONNECTED, YNAB_RECONNECT } from "@/lib/messages";
+import { getSettings, clearSettings } from "@/lib/settings";
 import { runOAuthFlow } from "@/lib/oauth";
-import { getPlans, getCategories } from "@/lib/ynab";
+import { getDefaultPlan, getPlans, getCategories, NeedsReauthError, YnabApiError } from "@/lib/ynab";
 import { putCategories, getAllCategories } from "@/lib/db";
+import { switchPlan } from "@/background/plan";
 import { performSync } from "@/background/sync";
 import { approveTransaction, approveBatch } from "@/background/approval";
 import { ensureModelLoaded } from "@/background/embedder";
@@ -14,8 +15,31 @@ import type { MessageBroadcast, MessageRequest } from "@/lib/types";
 
 /** Single in-flight backfill controller. Held at module scope so a
  *  CANCEL_BACKFILL message arriving while START_BACKFILL is still pending
- *  can abort it. */
+ *  can abort it. `backfillRun` is the run's promise — switchPlan awaits it
+ *  after aborting, because the learn phase doesn't observe the signal and
+ *  its writes must land before the learned stores are cleared. */
 let backfillController: AbortController | null = null;
+let backfillRun: Promise<unknown> | null = null;
+
+/** Serializes the two categories-store writers (SAVE_PLAN, REFRESH_CATEGORIES).
+ *  putCategories is clear-then-put, so an in-flight refresh finishing after a
+ *  plan switch would otherwise land the OLD plan's categories under the new
+ *  planId. Chained so each writer starts only after the previous settles. */
+let categoriesWriteChain: Promise<unknown> = Promise.resolve();
+function serializeCategoriesWrite<T>(fn: () => Promise<T>): Promise<T> {
+  const run = categoriesWriteChain.then(fn, fn);
+  categoriesWriteChain = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  return run;
+}
+
+/** User-facing message for a handler failure — maps the known typed errors. */
+function errorMessage(e: unknown, fallback: string): string {
+  if (e instanceof NeedsReauthError) return YNAB_RECONNECT;
+  return e instanceof Error ? e.message : fallback;
+}
 
 /** Service worker entry point — routes messages from the side panel to domain handlers. */
 export default defineBackground(() => {
@@ -64,12 +88,26 @@ async function handleMessage(message: MessageRequest): Promise<unknown> {
       }
     }
 
+    case "GET_DEFAULT_PLAN": {
+      try {
+        const plan = await getDefaultPlan();
+        return { plan };
+      } catch (e) {
+        // /plans/default 404s when the consent step wasn't given a default
+        // budget — the one failure with a user-actionable fix, so name it.
+        if (e instanceof YnabApiError && e.status === 404) {
+          return { error: "No default budget selected in YNAB. Reconnect and pick a budget when prompted." };
+        }
+        return { error: errorMessage(e, "Failed to fetch plan") };
+      }
+    }
+
     case "GET_PLANS": {
       try {
         const plans = await getPlans();
         return { plans };
       } catch (e) {
-        return { error: e instanceof Error ? e.message : "Failed to fetch plans" };
+        return { error: errorMessage(e, "Failed to fetch budgets") };
       }
     }
 
@@ -84,26 +122,35 @@ async function handleMessage(message: MessageRequest): Promise<unknown> {
 
     case "SAVE_PLAN": {
       try {
-        await saveSettings({ planId: message.planId, planName: message.planName });
-        const categories = await getCategories(message.planId);
-        await putCategories(categories);
+        await serializeCategoriesWrite(() =>
+          switchPlan(message.planId, message.planName, {
+            abortBackfill: () => {
+              backfillController?.abort();
+              return backfillRun ?? undefined;
+            },
+          }),
+        );
         return { ok: true };
       } catch (e) {
-        return { error: e instanceof Error ? e.message : "Failed to save plan" };
+        return { error: errorMessage(e, "Failed to save plan") };
       }
     }
 
     case "REFRESH_CATEGORIES": {
       try {
-        const settings = await getSettings();
-        if (!settings.accessToken || !settings.planId) {
-          return { error: NOT_CONNECTED };
-        }
-        const categories = await getCategories(settings.planId);
-        await putCategories(categories);
-        return { ok: true };
+        // planId is read INSIDE the serialized section so a refresh queued
+        // behind a plan switch fetches the plan the switch just committed.
+        return await serializeCategoriesWrite(async () => {
+          const settings = await getSettings();
+          if (!settings.accessToken || !settings.planId) {
+            return { error: NOT_CONNECTED };
+          }
+          const categories = await getCategories(settings.planId);
+          await putCategories(categories);
+          return { ok: true };
+        });
       } catch (e) {
-        return { error: e instanceof Error ? e.message : "Failed to refresh categories" };
+        return { error: errorMessage(e, "Failed to refresh categories") };
       }
     }
 
@@ -136,12 +183,21 @@ async function handleMessage(message: MessageRequest): Promise<unknown> {
 
     case "START_BACKFILL": {
       if (backfillController) return { error: "Backfill already running" };
-      backfillController = new AbortController();
+      const controller = new AbortController();
+      backfillController = controller;
       try {
-        const result = await runBackfill({
+        // Barrier: let any in-flight plan switch commit its settings before
+        // this run reads them, so a backfill can't start against the plan
+        // being switched away from. A switch that runs during the wait sees
+        // our already-registered controller and aborts it — the check below
+        // turns that into a clean cancel.
+        await serializeCategoriesWrite(async () => {});
+        controller.signal.throwIfAborted();
+
+        const run = runBackfill({
           fromDate: message.fromDate,
           retailers: message.retailers,
-          signal: backfillController.signal,
+          signal: controller.signal,
           onProgress: (event) => {
             const broadcast: MessageBroadcast = { type: "BACKFILL_PROGRESS", event };
             // Side panel may be closed; sendMessage rejects with no
@@ -149,12 +205,21 @@ async function handleMessage(message: MessageRequest): Promise<unknown> {
             browser.runtime.sendMessage(broadcast).catch(() => {});
           },
         });
+        backfillRun = run;
+        const result = await run;
         return { ok: true, result };
       } catch (e) {
+        // A user cancel or a plan switch aborting the run is an expected
+        // outcome, not a failure — report it so the card resets quietly
+        // instead of alarming with the DOMException's raw message.
+        if (e instanceof DOMException && e.name === "AbortError") {
+          return { canceled: true };
+        }
         const reason = e instanceof Error ? e.message : "Backfill failed";
         return { error: reason };
       } finally {
         backfillController = null;
+        backfillRun = null;
       }
     }
 

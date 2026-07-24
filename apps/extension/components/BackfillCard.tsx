@@ -39,7 +39,9 @@ export default function BackfillCard({ onStateChange }: BackfillCardProps = {}) 
     setState({ kind: "running", progress: { status: "preparing" } });
     try {
       const res = await startBackfill(defaultFromDate(), retailers);
-      if ("error" in res) setState({ kind: "error", message: res.error });
+      // Aborted (user cancel or a plan switch) — reset quietly, no error card.
+      if ("canceled" in res) setState({ kind: "idle" });
+      else if ("error" in res) setState({ kind: "error", message: res.error });
       else setState({ kind: "done", result: res.result });
     } catch (e) {
       setState({ kind: "error", message: e instanceof Error ? e.message : "Backfill failed" });
