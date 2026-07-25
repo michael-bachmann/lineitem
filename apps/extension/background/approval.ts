@@ -3,6 +3,7 @@ import { getSettings } from "@/lib/settings";
 import { updateTransaction } from "@/lib/ynab";
 import {
   getAllocatedTransaction,
+  learnedKey,
   putLearnedProduct,
   getAllProductEmbeddings,
   putProductEmbedding,
@@ -110,18 +111,20 @@ async function safeEmbedBatch(titles: string[]): Promise<(Float32Array | null)[]
   }
 }
 
-function buildLearnedProduct(id: string, entry: LearnEntry): LearnedProduct {
-  return { id, categoryId: entry.categoryId };
+function buildLearnedProduct(id: string, planId: string, entry: LearnEntry): LearnedProduct {
+  return { id, planId, categoryId: entry.categoryId };
 }
 
 function buildProductEmbedding(
   id: string,
+  planId: string,
   entry: LearnEntry,
   embedding: Float32Array,
   now: string,
 ): ProductEmbedding {
   return {
     id,
+    planId,
     categoryId: entry.categoryId,
     title: entry.title,
     embedding,
@@ -131,14 +134,16 @@ function buildProductEmbedding(
 
 /**
  * Learn from this approval — write the cache row (forever) and the embedding
- * row (capped pool, evicted on overflow). When embedBatch fails, the cache
- * row still gets written; the embedding is just skipped for that entry.
+ * row (capped pool, evicted on overflow). Rows are scoped to `planId`, the
+ * plan the approval was made on. When embedBatch fails, the cache row still
+ * gets written; the embedding is just skipped for that entry.
  *
  * Embedding is chunked so a long approval (e.g. backfill, hundreds of items)
  * can stream progress to the caller. `onProgress` fires after each chunk
  * completes with the cumulative item count.
  */
 export async function learnFromApproval(
+  planId: string,
   retailer: string,
   entries: readonly LearnEntry[],
   onProgress?: (p: LearnProgress) => void,
@@ -160,17 +165,17 @@ export async function learnFromApproval(
 
   // Cache writes go through unconditionally for every entry.
   const learnedRows = entries.map((entry) =>
-    buildLearnedProduct(`${retailer}:${entry.productId}`, entry),
+    buildLearnedProduct(learnedKey(planId, retailer, entry.productId), planId, entry),
   );
 
   // Embedding writes are gated on having a vector. Plan eviction against
-  // the existing embedding pool only.
+  // this plan's existing embedding pool only.
   const embeddingRows = entries.flatMap((entry, i): ProductEmbedding[] => {
     const vec = embeddings[i];
     if (!vec) return [];
-    return [buildProductEmbedding(`${retailer}:${entry.productId}`, entry, vec, now)];
+    return [buildProductEmbedding(learnedKey(planId, retailer, entry.productId), planId, entry, vec, now)];
   });
-  const existingEmbeddings = await getAllProductEmbeddings();
+  const existingEmbeddings = await getAllProductEmbeddings(planId);
   const { toDelete } = planEviction(existingEmbeddings, embeddingRows, PER_CATEGORY_CAP);
 
   await Promise.all(learnedRows.map(putLearnedProduct));
@@ -207,7 +212,7 @@ export async function approveTransaction(
       const categoryId = categoryById.get(it.productId);
       return categoryId ? [{ productId: it.productId, title: it.title, categoryId }] : [];
     });
-    await learnFromApproval(tx.retailer, learnEntries);
+    await learnFromApproval(settings.planId, tx.retailer, learnEntries);
 
     return { ok: true };
   } catch (e) {
@@ -218,6 +223,15 @@ export async function approveTransaction(
 export async function approveBatch(
   ynabTransactionIds: string[],
 ): Promise<{ ok: true; approvedIds: string[]; errors: string[] }> {
+  const { planId } = await getSettings();
+  if (!planId) {
+    return {
+      ok: true,
+      approvedIds: [],
+      errors: ynabTransactionIds.map((id) => `${id}: ${NOT_CONNECTED}`),
+    };
+  }
+
   const approvedIds: string[] = [];
   const errors: string[] = [];
 
@@ -233,7 +247,7 @@ export async function approveBatch(
         continue;
       }
 
-      const classifiedItems = await classifyItems(tx.items, tx.retailer);
+      const classifiedItems = await classifyItems(tx.items, tx.retailer, planId);
 
       // Skip if any item is uncategorized — partial approval would inflate categorized amounts
       const allCategorized = classifiedItems.every((ci) => ci.suggestedCategoryId !== null);

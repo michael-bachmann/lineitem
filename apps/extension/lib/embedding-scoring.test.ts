@@ -5,6 +5,7 @@ import type { ProductEmbedding } from "./types";
 function row(id: string, categoryId: string, title: string, vec: Float32Array): ProductEmbedding {
   return {
     id,
+    planId: "plan-a",
     categoryId,
     title,
     embedding: vec,

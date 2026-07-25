@@ -1,6 +1,6 @@
 import { getCategories } from "@/lib/ynab";
 import { getSettings, saveSettings } from "@/lib/settings";
-import { clearLearnedData, putCategories } from "@/lib/db";
+import { putCategories } from "@/lib/db";
 import { resetActiveSync } from "./sync";
 
 /**
@@ -10,11 +10,10 @@ import { resetActiveSync } from "./sync";
  *
  * 1. Fetch the new plan's categories FIRST — a network failure persists
  *    nothing, so the old plan stays fully intact (no settings/store split).
- * 2. On an actual change, stop old-plan work (a running backfill would keep
- *    learning the old plan's category ids; an in-flight sync's queue belongs
- *    to the old plan) and clear the learning stores — learned rows are keyed
- *    by product (plan-agnostic), so old-plan category ids would otherwise be
- *    suggested, and rejected by YNAB, on the new plan.
+ * 2. On an actual change, stop old-plan work: an in-flight sync's queue and a
+ *    running backfill's progress stream belong to the old plan. Learned rows
+ *    are plan-scoped (see lib/db.ts), so they stay put — the old plan's rows
+ *    go dormant and are reused on switch-back.
  * 3. Only then commit the categories store and settings.
  *
  * AllocatedTransactions stay: keyed by YNAB transaction id they're inert
@@ -29,13 +28,12 @@ export async function switchPlan(
   const categories = await getCategories(planId);
 
   if (prevPlanId !== null && prevPlanId !== planId) {
-    // Abort any running backfill and WAIT for it to settle — its learn phase
-    // doesn't observe the signal, so clearing before it finishes would let
-    // old-plan rows land after the clear. The rejection (AbortError) is the
-    // expected way an aborted run settles; swallow it.
+    // Abort any running backfill and WAIT for it to settle, so the switch
+    // resolves only after old-plan work has fully stopped and a post-switch
+    // START_BACKFILL can't collide with the dying run. The rejection
+    // (AbortError) is the expected way an aborted run settles; swallow it.
     await Promise.resolve(opts.abortBackfill?.()).catch(() => {});
     resetActiveSync();
-    await clearLearnedData();
   }
 
   await putCategories(categories);

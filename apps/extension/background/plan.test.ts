@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { switchPlan } from "./plan";
 import { getCategories } from "@/lib/ynab";
 import { getSettings, saveSettings } from "@/lib/settings";
-import { clearLearnedData, putCategories } from "@/lib/db";
+import { putCategories } from "@/lib/db";
 import { resetActiveSync } from "./sync";
 
 vi.mock("@/lib/ynab", () => ({
@@ -15,7 +15,6 @@ vi.mock("@/lib/settings", () => ({
 }));
 
 vi.mock("@/lib/db", () => ({
-  clearLearnedData: vi.fn(async () => {}),
   putCategories: vi.fn(async () => {}),
 }));
 
@@ -27,7 +26,6 @@ const mocked = {
   getCategories: vi.mocked(getCategories),
   getSettings: vi.mocked(getSettings),
   saveSettings: vi.mocked(saveSettings),
-  clearLearnedData: vi.mocked(clearLearnedData),
   putCategories: vi.mocked(putCategories),
   resetActiveSync: vi.mocked(resetActiveSync),
 };
@@ -44,7 +42,6 @@ describe("switchPlan fetches before committing", () => {
 
     expect(mocked.saveSettings).not.toHaveBeenCalled();
     expect(mocked.putCategories).not.toHaveBeenCalled();
-    expect(mocked.clearLearnedData).not.toHaveBeenCalled();
   });
 
   it("commits settings only after the categories store is replaced", async () => {
@@ -60,33 +57,34 @@ describe("switchPlan fetches before committing", () => {
   });
 });
 
-describe("switchPlan clears plan-scoped state on an actual change", () => {
-  it("aborts backfill, resets sync, and clears learned data", async () => {
+describe("switchPlan stops old-plan work on an actual change", () => {
+  // Learned data is plan-scoped in the db layer, so switching never clears
+  // it — these tests cover what a change still has to do: stop in-flight
+  // old-plan work before committing the new plan.
+
+  it("aborts backfill and resets sync", async () => {
     const abortBackfill = vi.fn();
 
     await switchPlan("plan-b", "Budget B", { abortBackfill });
 
     expect(abortBackfill).toHaveBeenCalledOnce();
     expect(mocked.resetActiveSync).toHaveBeenCalledOnce();
-    expect(mocked.clearLearnedData).toHaveBeenCalledOnce();
   });
 
-  it("waits for the aborted backfill to settle before clearing learned data", async () => {
-    // The backfill's learn phase doesn't observe the abort signal — its writes
-    // must land before the clear, or old-plan rows survive the switch.
+  it("waits for the aborted backfill to settle before committing", async () => {
     const order: string[] = [];
     const abortBackfill = vi.fn(() =>
       Promise.resolve().then(() => {
         order.push("backfill-settled");
       }),
     );
-    mocked.clearLearnedData.mockImplementationOnce(async () => {
-      order.push("clear");
+    mocked.putCategories.mockImplementationOnce(async () => {
+      order.push("commit");
     });
 
     await switchPlan("plan-b", "Budget B", { abortBackfill });
 
-    expect(order).toEqual(["backfill-settled", "clear"]);
+    expect(order).toEqual(["backfill-settled", "commit"]);
   });
 
   it("treats the aborted backfill's rejection as a normal settle", async () => {
@@ -95,27 +93,26 @@ describe("switchPlan clears plan-scoped state on an actual change", () => {
     const abortBackfill = vi.fn(() => Promise.reject(new Error("aborted")));
 
     await expect(switchPlan("plan-b", "Budget B", { abortBackfill })).resolves.toBeUndefined();
-    expect(mocked.clearLearnedData).toHaveBeenCalledOnce();
     expect(mocked.saveSettings).toHaveBeenCalledWith({ planId: "plan-b", planName: "Budget B" });
   });
 
-  it("keeps learned data when re-saving the already-connected plan", async () => {
+  it("leaves running work alone when re-saving the already-connected plan", async () => {
     const abortBackfill = vi.fn();
 
     await switchPlan("plan-a", "Budget A", { abortBackfill });
 
     expect(abortBackfill).not.toHaveBeenCalled();
     expect(mocked.resetActiveSync).not.toHaveBeenCalled();
-    expect(mocked.clearLearnedData).not.toHaveBeenCalled();
     expect(mocked.saveSettings).toHaveBeenCalledWith({ planId: "plan-a", planName: "Budget A" });
   });
 
-  it("keeps learned data on the first connect (no previous plan)", async () => {
+  it("leaves running work alone on the first connect (no previous plan)", async () => {
+    const abortBackfill = vi.fn();
     mocked.getSettings.mockResolvedValueOnce({ planId: null, planName: null } as never);
 
-    await switchPlan("plan-b", "Budget B");
+    await switchPlan("plan-b", "Budget B", { abortBackfill });
 
-    expect(mocked.clearLearnedData).not.toHaveBeenCalled();
+    expect(abortBackfill).not.toHaveBeenCalled();
     expect(mocked.saveSettings).toHaveBeenCalledWith({ planId: "plan-b", planName: "Budget B" });
   });
 });

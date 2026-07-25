@@ -2,7 +2,7 @@ import { NOT_CONNECTED, YNAB_RECONNECT } from "@/lib/messages";
 import { getSettings, clearSettings } from "@/lib/settings";
 import { runOAuthFlow } from "@/lib/oauth";
 import { getDefaultPlan, getPlans, getCategories, NeedsReauthError, YnabApiError } from "@/lib/ynab";
-import { putCategories, getAllCategories } from "@/lib/db";
+import { adoptLegacyLearnedData, putCategories, getAllCategories } from "@/lib/db";
 import { switchPlan } from "@/background/plan";
 import { performSync } from "@/background/sync";
 import { approveTransaction, approveBatch } from "@/background/approval";
@@ -60,6 +60,17 @@ export default defineBackground(() => {
   ensureModelLoaded().catch((err) => {
     console.warn("Initial embedder load failed; will retry on first use", err);
   });
+
+  // Adopt learned rows written before plan scoping into the connected plan
+  // (they were necessarily learned on it — switching used to clear them).
+  // Idempotent no-op once adopted; fire-and-forget, a failure retries on the
+  // next SW startup. Until it lands, legacy rows are invisible to classify —
+  // a missed suggestion, never a wrong one.
+  getSettings()
+    .then(({ planId }) => (planId ? adoptLegacyLearnedData(planId) : undefined))
+    .catch((err) => {
+      console.warn("Learned-data adoption failed; will retry on next startup", err);
+    });
 
   // Wire content-script page-result messages to the coordinator before any
   // scrape, so a result from the very first page load can't be missed.

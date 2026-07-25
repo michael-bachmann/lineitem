@@ -21,6 +21,7 @@ const {
   getAdapterMock: vi.fn(),
   learnFromApprovalMock: vi.fn(
     async (
+      _planId: string,
       _retailer: string,
       _entries: readonly { productId: string; title: string; categoryId: string }[],
       _onProgress?: (p: { index: number; total: number }) => void,
@@ -295,7 +296,8 @@ describe("runBackfill — happy path", () => {
     expect(result.hasUnbackfilled).toBe(false);
     expect(result.failed).toBe(0);
     expect(learnFromApprovalMock).toHaveBeenCalledTimes(1);
-    const [retailerArg, entriesArg] = learnFromApprovalMock.mock.calls[0];
+    const [planIdArg, retailerArg, entriesArg] = learnFromApprovalMock.mock.calls[0];
+    expect(planIdArg).toBe("plan");
     expect(retailerArg).toBe("amazon");
     expect(entriesArg).toHaveLength(4);
     expect(entriesArg.every((e: { categoryId: string }) => e.categoryId === "cat-groceries")).toBe(true);
@@ -643,6 +645,7 @@ describe("runBackfill — progress events", () => {
     // Simulate the chunked progress callback that real learnFromApproval emits.
     learnFromApprovalMock.mockImplementationOnce(
       async (
+        _planId: string,
         _retailer: string,
         entries: readonly { productId: string; title: string; categoryId: string }[],
         onProgress?: (p: { index: number; total: number }) => void,

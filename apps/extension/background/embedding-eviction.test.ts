@@ -7,6 +7,7 @@ const PER_CATEGORY_CAP = 50;
 function row(id: string, categoryId: string, lastSeen: string): ProductEmbedding {
   return {
     id,
+    planId: "plan-a",
     categoryId,
     title: id,
     embedding: new Float32Array(384),
