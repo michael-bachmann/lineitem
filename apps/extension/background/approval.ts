@@ -78,8 +78,8 @@ export function buildSubtransactions(
 
 /**
  * One item being learned from an approval — its productId (joined with the
- * retailer to form the storage key inside learnFromApproval), the title we
- * store for later re-embedding, and the user's category choice.
+ * plan and retailer to form the storage key inside learnFromApproval), the
+ * title we store for later re-embedding, and the user's category choice.
  */
 export interface LearnEntry {
   productId: string;

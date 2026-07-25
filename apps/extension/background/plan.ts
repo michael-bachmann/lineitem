@@ -1,7 +1,32 @@
+import { browser } from "wxt/browser";
 import { getCategories } from "@/lib/ynab";
 import { getSettings, saveSettings } from "@/lib/settings";
-import { putCategories } from "@/lib/db";
+import { adoptLegacyLearnedData, putCategories } from "@/lib/db";
 import { resetActiveSync } from "./sync";
+
+/** Set once legacy (pre-plan-scoping) learned rows have been adopted.
+ *  Deliberately not a SETTINGS_KEYS member: disconnecting must not reset it,
+ *  or a later reconnect to a different plan would adopt one plan's rows as
+ *  the other's. */
+const LEARNED_DATA_ADOPTED_KEY = "learnedDataAdopted";
+
+/**
+ * One-time adoption of pre-plan-scoping learned rows into the connected plan
+ * — they were necessarily learned on it, since switching used to clear the
+ * stores. Runs on every SW startup but is a flag-read no-op after the first
+ * successful pass; a failed pass leaves the flag unset and retries next
+ * startup. If no plan is connected when this first runs, the rows' plan is
+ * unknowable — leave them dormant (scoped reads can't see them, so they're
+ * never suggested) and mark adoption done.
+ */
+export async function adoptLegacyLearnedDataOnce(): Promise<void> {
+  const flags = await browser.storage.local.get(LEARNED_DATA_ADOPTED_KEY);
+  if (flags[LEARNED_DATA_ADOPTED_KEY]) return;
+
+  const { planId } = await getSettings();
+  if (planId !== null) await adoptLegacyLearnedData(planId);
+  await browser.storage.local.set({ [LEARNED_DATA_ADOPTED_KEY]: true });
+}
 
 /**
  * Switch the connected plan as one deep operation. The data layer was built

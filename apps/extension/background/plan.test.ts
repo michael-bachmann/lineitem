@@ -1,9 +1,24 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { switchPlan } from "./plan";
+import { browser } from "wxt/browser";
+import { adoptLegacyLearnedDataOnce, switchPlan } from "./plan";
 import { getCategories } from "@/lib/ynab";
 import { getSettings, saveSettings } from "@/lib/settings";
-import { putCategories } from "@/lib/db";
+import { adoptLegacyLearnedData, putCategories } from "@/lib/db";
 import { resetActiveSync } from "./sync";
+
+const storageState: Record<string, unknown> = {};
+vi.mock("wxt/browser", () => ({
+  browser: {
+    storage: {
+      local: {
+        get: vi.fn(async (key: string) => (key in storageState ? { [key]: storageState[key] } : {})),
+        set: vi.fn(async (items: Record<string, unknown>) => {
+          Object.assign(storageState, items);
+        }),
+      },
+    },
+  },
+}));
 
 vi.mock("@/lib/ynab", () => ({
   getCategories: vi.fn(async () => [{ id: "cat-1", name: "Groceries", groupName: "Everyday" }]),
@@ -15,6 +30,7 @@ vi.mock("@/lib/settings", () => ({
 }));
 
 vi.mock("@/lib/db", () => ({
+  adoptLegacyLearnedData: vi.fn(async () => {}),
   putCategories: vi.fn(async () => {}),
 }));
 
@@ -26,12 +42,14 @@ const mocked = {
   getCategories: vi.mocked(getCategories),
   getSettings: vi.mocked(getSettings),
   saveSettings: vi.mocked(saveSettings),
+  adoptLegacyLearnedData: vi.mocked(adoptLegacyLearnedData),
   putCategories: vi.mocked(putCategories),
   resetActiveSync: vi.mocked(resetActiveSync),
 };
 
 beforeEach(() => {
   vi.clearAllMocks();
+  for (const key of Object.keys(storageState)) delete storageState[key];
 });
 
 describe("switchPlan fetches before committing", () => {
@@ -114,5 +132,46 @@ describe("switchPlan stops old-plan work on an actual change", () => {
 
     expect(abortBackfill).not.toHaveBeenCalled();
     expect(mocked.saveSettings).toHaveBeenCalledWith({ planId: "plan-b", planName: "Budget B" });
+  });
+});
+
+describe("adoptLegacyLearnedDataOnce", () => {
+  it("adopts into the connected plan, then marks adoption done", async () => {
+    await adoptLegacyLearnedDataOnce();
+
+    expect(mocked.adoptLegacyLearnedData).toHaveBeenCalledWith("plan-a");
+    expect(storageState.learnedDataAdopted).toBe(true);
+    // The flag commits only after the adoption succeeded.
+    const adoptOrder = mocked.adoptLegacyLearnedData.mock.invocationCallOrder[0];
+    const setOrder = vi.mocked(browser.storage.local.set).mock.invocationCallOrder[0];
+    expect(adoptOrder).toBeLessThan(setOrder);
+  });
+
+  it("is a no-op once the flag is set", async () => {
+    storageState.learnedDataAdopted = true;
+
+    await adoptLegacyLearnedDataOnce();
+
+    expect(mocked.getSettings).not.toHaveBeenCalled();
+    expect(mocked.adoptLegacyLearnedData).not.toHaveBeenCalled();
+  });
+
+  it("skips adoption but still marks done when no plan is connected", async () => {
+    // Disconnected at migration time: the rows' plan is unknowable, and they
+    // must never be adopted into whatever plan a later reconnect picks.
+    mocked.getSettings.mockResolvedValueOnce({ planId: null, planName: null } as never);
+
+    await adoptLegacyLearnedDataOnce();
+
+    expect(mocked.adoptLegacyLearnedData).not.toHaveBeenCalled();
+    expect(storageState.learnedDataAdopted).toBe(true);
+  });
+
+  it("leaves the flag unset when adoption fails, so the next startup retries", async () => {
+    mocked.adoptLegacyLearnedData.mockRejectedValueOnce(new Error("idb unavailable"));
+
+    await expect(adoptLegacyLearnedDataOnce()).rejects.toThrow("idb unavailable");
+
+    expect(storageState.learnedDataAdopted).toBeUndefined();
   });
 });
