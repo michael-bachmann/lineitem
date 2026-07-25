@@ -6,7 +6,8 @@ export type SettingsState = "idle" | "refreshing" | "disconnecting" | "success" 
 interface SettingsViewProps {
   state: SettingsState;
   errorMsg?: string;
-  planName: string;
+  /** The budget switcher (a container) — injected so the view stays storiable. */
+  budget: ReactNode;
   /** The backfill card (a container) — injected so the view stays storiable. */
   backfill: ReactNode;
   onRefresh: () => void;
@@ -18,7 +19,7 @@ interface SettingsViewProps {
 export function SettingsView({
   state,
   errorMsg,
-  planName,
+  budget,
   backfill,
   onRefresh,
   onDisconnect,
@@ -32,10 +33,7 @@ export function SettingsView({
         <h1 className="m-0 text-[20px] font-bold tracking-[-0.018em] text-text">Settings</h1>
       </div>
 
-      <div className="flex flex-col gap-[3px]">
-        <span className="text-[12px] tracking-[0.03em] text-faint">Connected plan</span>
-        <span className="text-[15px] font-semibold text-text">{planName}</span>
-      </div>
+      {budget}
 
       <Button
         variant="secondary"

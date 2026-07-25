@@ -27,6 +27,17 @@ function isVisible(item: { hidden: boolean; deleted: boolean }): boolean {
  *  callers specialize via the generic. */
 type YnabApiResponse<T> = { data: T };
 
+/** Thrown for non-2xx YNAB responses. Carries the HTTP status so handlers can
+ *  map specific failures (e.g. 404 from /plans/default) to friendly copy. */
+export class YnabApiError extends Error {
+  constructor(
+    readonly status: number,
+    body: string,
+  ) {
+    super(`YNAB API ${status}: ${body}`);
+  }
+}
+
 async function ynabFetch<T = unknown>(path: string, options?: RequestInit): Promise<T> {
   // First attempt with the (possibly cached) access token.
   let token = await getValidAccessToken();
@@ -43,7 +54,7 @@ async function ynabFetch<T = unknown>(path: string, options?: RequestInit): Prom
 
   if (!response.ok) {
     const body = await response.text().catch(() => "");
-    throw new Error(`YNAB API ${response.status}: ${body}`);
+    throw new YnabApiError(response.status, body);
   }
   return response.json() as Promise<T>;
 }
@@ -64,6 +75,29 @@ export interface YnabPlan {
   name: string;
 }
 
+/**
+ * Resolve the single budget the user chose on YNAB's consent screen.
+ *
+ * Relies on the OAuth app having "default plan selection" enabled: YNAB then
+ * prompts the user to pick a default plan at authorization and accepts the
+ * literal `default` in place of a plan id. We must NOT list `/plans` and pick
+ * one ourselves — that endpoint returns *every* budget the token can see, in an
+ * order unrelated to the user's choice, so taking `[0]` silently connects the
+ * wrong budget for anyone with more than one. We resolve `default` to its
+ * concrete id/name and store that, pinning to the chosen budget.
+ */
+export async function getDefaultPlan(): Promise<YnabPlan> {
+  const { data } = await ynabFetch<YnabApiResponse<{ plan: YnabPlan }>>("/plans/default");
+  return { id: data.plan.id, name: data.plan.name };
+}
+
+/**
+ * Every budget the OAuth token can access. Used only by the Settings budget
+ * switcher, where the user *explicitly* picks one — unlike onboarding, which
+ * must never enumerate and auto-pick (that was the wrong-budget bug). The token
+ * spans all budgets even with default plan selection enabled, so this lets a
+ * user correct or change their connected budget in place.
+ */
 export async function getPlans(): Promise<YnabPlan[]> {
   const { data } = await ynabFetch<YnabApiResponse<{ plans: YnabPlan[] }>>("/plans");
   return data.plans.map((p) => ({ id: p.id, name: p.name }));

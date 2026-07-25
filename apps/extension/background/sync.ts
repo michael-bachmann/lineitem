@@ -26,12 +26,22 @@ let activeSyncPromise: Promise<SyncResult> | null = null;
 
 export async function performSync(): Promise<SyncResult> {
   if (activeSyncPromise) return activeSyncPromise;
-  activeSyncPromise = performSyncInner();
+  const run = performSyncInner();
+  activeSyncPromise = run;
   try {
-    return await activeSyncPromise;
+    return await run;
   } finally {
-    activeSyncPromise = null;
+    // Guarded: a plan switch may have reset the slot and a fresh sync begun
+    // while this one was in flight — only clear our own registration.
+    if (activeSyncPromise === run) activeSyncPromise = null;
   }
+}
+
+/** Forget the in-flight sync so the next SYNC starts fresh. Called on plan
+ *  switch — the running sync captured the previous plan's id at start, so its
+ *  queue must not be served to post-switch callers. */
+export function resetActiveSync(): void {
+  activeSyncPromise = null;
 }
 
 async function performSyncInner(): Promise<SyncResult> {

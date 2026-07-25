@@ -217,7 +217,8 @@ export async function approveTransaction(
 
 export async function approveBatch(
   ynabTransactionIds: string[],
-): Promise<{ ok: true; errors: string[] } | { error: string }> {
+): Promise<{ ok: true; approvedIds: string[]; errors: string[] }> {
+  const approvedIds: string[] = [];
   const errors: string[] = [];
 
   for (const ynabTxId of ynabTransactionIds) {
@@ -249,11 +250,13 @@ export async function approveBatch(
       const result = await approveTransaction(ynabTxId, items);
       if ("error" in result) {
         errors.push(`${ynabTxId}: ${result.error}`);
+      } else {
+        approvedIds.push(ynabTxId);
       }
     } catch (e) {
       errors.push(`${ynabTxId}: ${e instanceof Error ? e.message : "approval failed"}`);
     }
   }
 
-  return { ok: true, errors };
+  return { ok: true, approvedIds, errors };
 }

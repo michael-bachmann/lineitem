@@ -6,3 +6,9 @@
 
 /** Shown when an action needs a connected YNAB plan but none is configured. */
 export const NOT_CONNECTED = "Not connected to YNAB";
+
+/** Shown when the OAuth refresh token is no longer valid — the only recovery
+ *  is disconnecting and reconnecting. Shared so the UI can recognize it and
+ *  keep it verbatim instead of substituting generic retry copy. */
+export const YNAB_RECONNECT =
+  "Your YNAB connection has expired. Disconnect and reconnect to continue.";

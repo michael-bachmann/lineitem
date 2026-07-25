@@ -1,9 +1,9 @@
 import { useState } from "react";
-import { getPlans, savePlan, startOAuth } from "@/lib/messaging";
+import { getDefaultPlan, savePlan, startOAuth, type PlanInfo } from "@/lib/messaging";
 import { OnboardingView, type OnboardingPhase } from "./OnboardingView";
 
 interface OnboardingProps {
-  onComplete: (planName: string) => void;
+  onComplete: (plan: PlanInfo) => void;
 }
 
 /** Container: owns the OAuth → plans → save state machine + IO; renders the
@@ -21,25 +21,30 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
     setError(null);
     setPhase("connecting");
 
-    const oauth = await startOAuth();
-    if (oauth?.error) return fail(oauth.error);
+    try {
+      const oauth = await startOAuth();
+      if (oauth?.error) return fail(oauth.error);
 
-    const plans = await getPlans();
-    if (plans?.error) return fail(plans.error);
+      // Connect the budget the user selected on YNAB's consent screen ("default
+      // plan selection"), resolved via the `default` alias. We deliberately
+      // don't list /plans and take [0] — that returns every budget the token
+      // can see and would connect an arbitrary one for multi-budget users.
+      // (Switching later happens in Settings, no reconnect needed.)
+      const { plan, error: planError } = await getDefaultPlan();
+      if (planError) return fail(planError);
+      if (!plan) return fail("Couldn't load your budget from YNAB. Try again.");
 
-    // YNAB's "default plan selection" scopes the token to the plan the user
-    // picked at consent, so /plans returns that one plan. We don't surface
-    // multi-plan UX — to switch, the user disconnects and reconnects.
-    const plan = plans.plans[0];
-    if (!plan) {
-      return fail("No plans found in your YNAB account. Create one in YNAB, then reconnect.");
+      setPhase("saving");
+      const saved = await savePlan(plan.id, plan.name);
+      if (saved?.error) return fail(saved.error);
+
+      onComplete(plan);
+    } catch (e) {
+      // A dropped message channel (extension reloaded, service worker torn
+      // down mid-request) rejects sendMessage — surface it instead of leaving
+      // the connecting spinner up forever.
+      fail(e instanceof Error ? e.message : "Connection failed. Try again.");
     }
-
-    setPhase("saving");
-    const saved = await savePlan(plan.id, plan.name);
-    if (saved?.error) return fail(saved.error);
-
-    onComplete(plan.name);
   }
 
   return <OnboardingView phase={phase} error={error} onConnect={handleConnect} />;
