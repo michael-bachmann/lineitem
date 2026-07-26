@@ -38,11 +38,15 @@ const embeddingStore = new Map<string, import("@/lib/types").ProductEmbedding>()
 const allocatedStore = new Map<string, import("@/lib/types").AllocatedTransaction>();
 
 vi.mock("@/lib/db", () => ({
+  learnedKey: (planId: string, retailer: string, productId: string) =>
+    `${planId}:${retailer}:${productId}`,
   getLearnedProduct: vi.fn(async (id: string) => learnedStore.get(id)),
   putLearnedProduct: vi.fn(async (r: import("@/lib/types").LearnedProduct) => {
     learnedStore.set(r.id, r);
   }),
-  getAllProductEmbeddings: vi.fn(async () => [...embeddingStore.values()]),
+  getAllProductEmbeddings: vi.fn(async (planId: string) =>
+    [...embeddingStore.values()].filter((r) => r.planId === planId),
+  ),
   putProductEmbedding: vi.fn(async (r: import("@/lib/types").ProductEmbedding) => {
     embeddingStore.set(r.id, r);
   }),
@@ -189,14 +193,23 @@ describe("learnFromApproval writes both stores", () => {
 
     expect(embedBatchMock).toHaveBeenCalledWith(["Paper towels", "Trash bags"]);
 
-    // Cache rows: just id + categoryId.
-    expect(learnedStore.get("amazon:A")).toEqual({ id: "amazon:A", categoryId: "cat-household" });
-    expect(learnedStore.get("amazon:B")).toEqual({ id: "amazon:B", categoryId: "cat-household" });
+    // Cache rows: id + planId + categoryId, keyed under the connected plan.
+    expect(learnedStore.get("fake-plan:amazon:A")).toEqual({
+      id: "fake-plan:amazon:A",
+      planId: "fake-plan",
+      categoryId: "cat-household",
+    });
+    expect(learnedStore.get("fake-plan:amazon:B")).toEqual({
+      id: "fake-plan:amazon:B",
+      planId: "fake-plan",
+      categoryId: "cat-household",
+    });
 
-    // Embedding rows: id, categoryId, title, embedding, lastSeen.
-    const embA = embeddingStore.get("amazon:A");
+    // Embedding rows: id, planId, categoryId, title, embedding, lastSeen.
+    const embA = embeddingStore.get("fake-plan:amazon:A");
     expect(embA).toMatchObject({
-      id: "amazon:A",
+      id: "fake-plan:amazon:A",
+      planId: "fake-plan",
       categoryId: "cat-household",
       title: "Paper towels",
     });
@@ -220,12 +233,20 @@ describe("learnFromApproval writes both stores", () => {
     const result = await approveTransaction("txn-2", [{ productId: "X", categoryId: "cat-household" }]);
     expect(result).toEqual({ ok: true });
 
-    expect(learnedStore.get("amazon:X")).toEqual({ id: "amazon:X", categoryId: "cat-household" });
-    expect(embeddingStore.get("amazon:X")).toBeUndefined();
+    expect(learnedStore.get("fake-plan:amazon:X")).toEqual({
+      id: "fake-plan:amazon:X",
+      planId: "fake-plan",
+      categoryId: "cat-household",
+    });
+    expect(embeddingStore.get("fake-plan:amazon:X")).toBeUndefined();
   });
 
   it("overwrites the cache row when a product is re-approved with a different category", async () => {
-    learnedStore.set("amazon:Y", { id: "amazon:Y", categoryId: "cat-old" });
+    learnedStore.set("fake-plan:amazon:Y", {
+      id: "fake-plan:amazon:Y",
+      planId: "fake-plan",
+      categoryId: "cat-old",
+    });
 
     const tx: AllocatedTransaction = {
       ynabTransactionId: "txn-3", orderKey: "amazon:O3", retailer: "amazon",
@@ -237,7 +258,7 @@ describe("learnFromApproval writes both stores", () => {
     allocatedStore.set("txn-3", tx);
 
     await approveTransaction("txn-3", [{ productId: "Y", categoryId: "cat-new" }]);
-    expect(learnedStore.get("amazon:Y")?.categoryId).toBe("cat-new");
+    expect(learnedStore.get("fake-plan:amazon:Y")?.categoryId).toBe("cat-new");
   });
 
   it("emits a single progress event when entries fit in one embedding chunk", async () => {
@@ -246,7 +267,7 @@ describe("learnFromApproval writes both stores", () => {
       { productId: "B", title: "Bread", categoryId: "cat-1" },
     ];
     const events: { index: number; total: number }[] = [];
-    await learnFromApproval("amazon", entries, (e) => events.push(e));
+    await learnFromApproval("fake-plan", "amazon", entries, (e) => events.push(e));
     expect(events).toEqual([{ index: 2, total: 2 }]);
   });
 
@@ -258,7 +279,7 @@ describe("learnFromApproval writes both stores", () => {
       categoryId: "cat-1",
     }));
     const events: { index: number; total: number }[] = [];
-    await learnFromApproval("amazon", entries, (e) => events.push(e));
+    await learnFromApproval("fake-plan", "amazon", entries, (e) => events.push(e));
     expect(events).toEqual([
       { index: 25, total: 60 },
       { index: 50, total: 60 },
@@ -272,10 +293,11 @@ describe("learnFromApproval writes both stores", () => {
     // Seed exactly 50 embeddings in cat-household with increasing lastSeen.
     // Also seed their matching cache rows.
     for (let i = 0; i < 50; i++) {
-      const id = `amazon:seed${i}`;
-      learnedStore.set(id, { id, categoryId: "cat-household" });
+      const id = `fake-plan:amazon:seed${i}`;
+      learnedStore.set(id, { id, planId: "fake-plan", categoryId: "cat-household" });
       embeddingStore.set(id, {
         id,
+        planId: "fake-plan",
         categoryId: "cat-household",
         title: `seed${i}`,
         embedding: new Float32Array(384),
@@ -294,13 +316,17 @@ describe("learnFromApproval writes both stores", () => {
     await approveTransaction("txn-4", [{ productId: "NEW", categoryId: "cat-household" }]);
 
     // Embedding for seed0 is gone, NEW's embedding is in.
-    expect(embeddingStore.get("amazon:seed0")).toBeUndefined();
-    expect(embeddingStore.get("amazon:NEW")).toBeDefined();
+    expect(embeddingStore.get("fake-plan:amazon:seed0")).toBeUndefined();
+    expect(embeddingStore.get("fake-plan:amazon:NEW")).toBeDefined();
     const embeddingsInCat = [...embeddingStore.values()].filter((r) => r.categoryId === "cat-household");
     expect(embeddingsInCat).toHaveLength(50);
 
     // But the cache row for seed0 survives the embedding eviction.
-    expect(learnedStore.get("amazon:seed0")).toEqual({ id: "amazon:seed0", categoryId: "cat-household" });
+    expect(learnedStore.get("fake-plan:amazon:seed0")).toEqual({
+      id: "fake-plan:amazon:seed0",
+      planId: "fake-plan",
+      categoryId: "cat-household",
+    });
   });
 });
 
@@ -308,8 +334,16 @@ describe("approveBatch approves a fully-categorized transaction", () => {
   it("classifies via the learned-product cache, approves, and reports no errors", async () => {
     // Seed the cache so classifyItems resolves every item to a category
     // (product_cache tier) — the happy path through the loop body.
-    learnedStore.set("amazon:A", { id: "amazon:A", categoryId: "cat-household" });
-    learnedStore.set("amazon:B", { id: "amazon:B", categoryId: "cat-household" });
+    learnedStore.set("fake-plan:amazon:A", {
+      id: "fake-plan:amazon:A",
+      planId: "fake-plan",
+      categoryId: "cat-household",
+    });
+    learnedStore.set("fake-plan:amazon:B", {
+      id: "fake-plan:amazon:B",
+      planId: "fake-plan",
+      categoryId: "cat-household",
+    });
 
     const tx: AllocatedTransaction = {
       ynabTransactionId: "txn-batch-ok", orderKey: "amazon:OB", retailer: "amazon",
@@ -325,11 +359,19 @@ describe("approveBatch approves a fully-categorized transaction", () => {
 
     expect(result).toEqual({ ok: true, approvedIds: ["txn-batch-ok"], errors: [] });
     // The approval ran end-to-end: items were learned back into the cache.
-    expect(learnedStore.get("amazon:A")).toEqual({ id: "amazon:A", categoryId: "cat-household" });
+    expect(learnedStore.get("fake-plan:amazon:A")).toEqual({
+      id: "fake-plan:amazon:A",
+      planId: "fake-plan",
+      categoryId: "cat-household",
+    });
   });
 
   it("surfaces an approveTransaction error (e.g. YNAB write failure) as that tx's entry", async () => {
-    learnedStore.set("amazon:A", { id: "amazon:A", categoryId: "cat-household" });
+    learnedStore.set("fake-plan:amazon:A", {
+      id: "fake-plan:amazon:A",
+      planId: "fake-plan",
+      categoryId: "cat-household",
+    });
     vi.mocked(updateTransaction).mockRejectedValueOnce(new Error("YNAB API 500"));
 
     const tx: AllocatedTransaction = {

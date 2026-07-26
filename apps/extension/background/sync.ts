@@ -52,7 +52,7 @@ async function performSyncInner(): Promise<SyncResult> {
     // 1. IDENTIFY scrape-able charges, then split the already-cached ones (ready
     //    immediately as matched entries) from the ones that need a retailer scrape.
     const charges = await identifyScrapeCharges(settings.planId);
-    const { fastPath, needsScraping } = await triageCharges(charges);
+    const { fastPath, needsScraping } = await triageCharges(charges, settings.planId);
 
     // Debug: if `needsScraping` is 0, every matching charge was already cached
     // and NO scrape runs this sync — which is why you'd see no `[lineitem:amazon]`
@@ -75,7 +75,7 @@ async function performSyncInner(): Promise<SyncResult> {
     //    matched queue entries.
     const allocated = outcomes.flatMap((o) => o.allocated);
     await putAllocatedTransactions(allocated);
-    const matchedEntries = await classifyAllocations(allocated, entryById);
+    const matchedEntries = await classifyAllocations(allocated, entryById, settings.planId);
 
     // 5. QUEUE: cached fast-path + freshly-matched + everything that didn't
     //    allocate (auth walls, verify/distribute failures, no-matches).
@@ -114,11 +114,12 @@ async function identifyScrapeCharges(planId: string): Promise<TaggedCharge[]> {
  *  one IDB read (and, for hits, one classification) at a time. */
 async function triageCharges(
   charges: TaggedCharge[],
+  planId: string,
 ): Promise<{ fastPath: QueueEntry[]; needsScraping: TaggedCharge[] }> {
   const triaged = await mapSeries(charges, async (entry) => {
     const cached = await getAllocatedTransaction(entry.tx.id);
     return cached
-      ? { kind: "fast" as const, entry: await toMatchedEntry(cached, entry) }
+      ? { kind: "fast" as const, entry: await toMatchedEntry(cached, entry, planId) }
       : { kind: "scrape" as const, entry };
   });
   return {
@@ -129,8 +130,12 @@ async function triageCharges(
 
 /** Classify a matched order's items and wrap it as a `matched` queue entry.
  *  Shared by the cached fast path and the post-scrape allocation pass. */
-async function toMatchedEntry(order: AllocatedTransaction, entry: TaggedCharge): Promise<QueueEntry> {
-  const classifiedItems = await classifyItems(order.items, entry.retailer);
+async function toMatchedEntry(
+  order: AllocatedTransaction,
+  entry: TaggedCharge,
+  planId: string,
+): Promise<QueueEntry> {
+  const classifiedItems = await classifyItems(order.items, entry.retailer, planId);
   return {
     ynabTransaction: entry.tx,
     retailer: entry.retailer,
@@ -144,10 +149,11 @@ async function toMatchedEntry(order: AllocatedTransaction, entry: TaggedCharge):
 async function classifyAllocations(
   allocated: AllocatedTransaction[],
   entryById: Map<string, TaggedCharge>,
+  planId: string,
 ): Promise<QueueEntry[]> {
   const entries = await mapSeries(allocated, async (at): Promise<QueueEntry[]> => {
     const entry = entryById.get(at.ynabTransactionId);
-    return entry ? [await toMatchedEntry(at, entry)] : [];
+    return entry ? [await toMatchedEntry(at, entry, planId)] : [];
   });
   return entries.flat();
 }

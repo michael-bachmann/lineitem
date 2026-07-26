@@ -1,5 +1,5 @@
 import type { ClassifiedItem, ProductEmbedding } from "./types";
-import { getAllProductEmbeddings, getLearnedProduct } from "./db";
+import { getAllProductEmbeddings, getLearnedProduct, learnedKey } from "./db";
 import { embed } from "@/background/embedder";
 import { EMBEDDING_THRESHOLD, scoreEmbedding } from "./embedding-scoring";
 
@@ -15,23 +15,24 @@ interface ClassifyResult {
 }
 
 /**
- * Classify a line item into a YNAB category.
+ * Classify a line item into a YNAB category, using only what was learned on
+ * `planId` — a category id from another plan would be rejected by YNAB.
  * Tier 1: LearnedProduct cache (exact productId match from past approvals).
  * Tier 2: embedding similarity (best-effort; degrades to null on failure).
  */
 export async function classifyItem(
   item: ClassifyInput,
   retailer: string,
+  planId: string,
 ): Promise<ClassifyResult> {
-  const key = `${retailer}:${item.productId}`;
-  const entry = await getLearnedProduct(key);
+  const entry = await getLearnedProduct(learnedKey(planId, retailer, item.productId));
   if (entry) {
     return { categoryId: entry.categoryId, source: "product_cache" };
   }
 
   // Embedding tier — best-effort. Any failure degrades to null.
   try {
-    const pool = await getAllProductEmbeddings();
+    const pool = await getAllProductEmbeddings(planId);
     return await classifyViaEmbedding(item, pool);
   } catch (err) {
     console.warn("classifyItem: embedding tier failed", err);
@@ -60,12 +61,13 @@ async function classifyViaEmbedding(
 export function classifyItems<T extends { productId: string; title: string }>(
   items: T[],
   retailer: string,
+  planId: string,
 ): Promise<
   (T & Pick<ClassifiedItem, "suggestedCategoryId" | "classificationSource" | "matchedSource">)[]
 > {
   return Promise.all(
     items.map(async (item) => {
-      const { categoryId, source, matchedSource } = await classifyItem(item, retailer);
+      const { categoryId, source, matchedSource } = await classifyItem(item, retailer, planId);
       return {
         ...item,
         suggestedCategoryId: categoryId,

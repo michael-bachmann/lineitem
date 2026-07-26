@@ -1,9 +1,24 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { switchPlan } from "./plan";
+import { browser } from "wxt/browser";
+import { adoptLegacyLearnedDataOnce, switchPlan } from "./plan";
 import { getCategories } from "@/lib/ynab";
 import { getSettings, saveSettings } from "@/lib/settings";
-import { clearLearnedData, putCategories } from "@/lib/db";
+import { adoptLegacyLearnedData, putCategories } from "@/lib/db";
 import { resetActiveSync } from "./sync";
+
+const storageState: Record<string, unknown> = {};
+vi.mock("wxt/browser", () => ({
+  browser: {
+    storage: {
+      local: {
+        get: vi.fn(async (key: string) => (key in storageState ? { [key]: storageState[key] } : {})),
+        set: vi.fn(async (items: Record<string, unknown>) => {
+          Object.assign(storageState, items);
+        }),
+      },
+    },
+  },
+}));
 
 vi.mock("@/lib/ynab", () => ({
   getCategories: vi.fn(async () => [{ id: "cat-1", name: "Groceries", groupName: "Everyday" }]),
@@ -15,7 +30,7 @@ vi.mock("@/lib/settings", () => ({
 }));
 
 vi.mock("@/lib/db", () => ({
-  clearLearnedData: vi.fn(async () => {}),
+  adoptLegacyLearnedData: vi.fn(async () => {}),
   putCategories: vi.fn(async () => {}),
 }));
 
@@ -27,13 +42,14 @@ const mocked = {
   getCategories: vi.mocked(getCategories),
   getSettings: vi.mocked(getSettings),
   saveSettings: vi.mocked(saveSettings),
-  clearLearnedData: vi.mocked(clearLearnedData),
+  adoptLegacyLearnedData: vi.mocked(adoptLegacyLearnedData),
   putCategories: vi.mocked(putCategories),
   resetActiveSync: vi.mocked(resetActiveSync),
 };
 
 beforeEach(() => {
   vi.clearAllMocks();
+  for (const key of Object.keys(storageState)) delete storageState[key];
 });
 
 describe("switchPlan fetches before committing", () => {
@@ -44,7 +60,6 @@ describe("switchPlan fetches before committing", () => {
 
     expect(mocked.saveSettings).not.toHaveBeenCalled();
     expect(mocked.putCategories).not.toHaveBeenCalled();
-    expect(mocked.clearLearnedData).not.toHaveBeenCalled();
   });
 
   it("commits settings only after the categories store is replaced", async () => {
@@ -60,33 +75,34 @@ describe("switchPlan fetches before committing", () => {
   });
 });
 
-describe("switchPlan clears plan-scoped state on an actual change", () => {
-  it("aborts backfill, resets sync, and clears learned data", async () => {
+describe("switchPlan stops old-plan work on an actual change", () => {
+  // Learned data is plan-scoped in the db layer, so switching never clears
+  // it — these tests cover what a change still has to do: stop in-flight
+  // old-plan work before committing the new plan.
+
+  it("aborts backfill and resets sync", async () => {
     const abortBackfill = vi.fn();
 
     await switchPlan("plan-b", "Budget B", { abortBackfill });
 
     expect(abortBackfill).toHaveBeenCalledOnce();
     expect(mocked.resetActiveSync).toHaveBeenCalledOnce();
-    expect(mocked.clearLearnedData).toHaveBeenCalledOnce();
   });
 
-  it("waits for the aborted backfill to settle before clearing learned data", async () => {
-    // The backfill's learn phase doesn't observe the abort signal — its writes
-    // must land before the clear, or old-plan rows survive the switch.
+  it("waits for the aborted backfill to settle before committing", async () => {
     const order: string[] = [];
     const abortBackfill = vi.fn(() =>
       Promise.resolve().then(() => {
         order.push("backfill-settled");
       }),
     );
-    mocked.clearLearnedData.mockImplementationOnce(async () => {
-      order.push("clear");
+    mocked.putCategories.mockImplementationOnce(async () => {
+      order.push("commit");
     });
 
     await switchPlan("plan-b", "Budget B", { abortBackfill });
 
-    expect(order).toEqual(["backfill-settled", "clear"]);
+    expect(order).toEqual(["backfill-settled", "commit"]);
   });
 
   it("treats the aborted backfill's rejection as a normal settle", async () => {
@@ -95,27 +111,67 @@ describe("switchPlan clears plan-scoped state on an actual change", () => {
     const abortBackfill = vi.fn(() => Promise.reject(new Error("aborted")));
 
     await expect(switchPlan("plan-b", "Budget B", { abortBackfill })).resolves.toBeUndefined();
-    expect(mocked.clearLearnedData).toHaveBeenCalledOnce();
     expect(mocked.saveSettings).toHaveBeenCalledWith({ planId: "plan-b", planName: "Budget B" });
   });
 
-  it("keeps learned data when re-saving the already-connected plan", async () => {
+  it("leaves running work alone when re-saving the already-connected plan", async () => {
     const abortBackfill = vi.fn();
 
     await switchPlan("plan-a", "Budget A", { abortBackfill });
 
     expect(abortBackfill).not.toHaveBeenCalled();
     expect(mocked.resetActiveSync).not.toHaveBeenCalled();
-    expect(mocked.clearLearnedData).not.toHaveBeenCalled();
     expect(mocked.saveSettings).toHaveBeenCalledWith({ planId: "plan-a", planName: "Budget A" });
   });
 
-  it("keeps learned data on the first connect (no previous plan)", async () => {
+  it("leaves running work alone on the first connect (no previous plan)", async () => {
+    const abortBackfill = vi.fn();
     mocked.getSettings.mockResolvedValueOnce({ planId: null, planName: null } as never);
 
-    await switchPlan("plan-b", "Budget B");
+    await switchPlan("plan-b", "Budget B", { abortBackfill });
 
-    expect(mocked.clearLearnedData).not.toHaveBeenCalled();
+    expect(abortBackfill).not.toHaveBeenCalled();
     expect(mocked.saveSettings).toHaveBeenCalledWith({ planId: "plan-b", planName: "Budget B" });
+  });
+});
+
+describe("adoptLegacyLearnedDataOnce", () => {
+  it("adopts into the connected plan, then marks adoption done", async () => {
+    await adoptLegacyLearnedDataOnce();
+
+    expect(mocked.adoptLegacyLearnedData).toHaveBeenCalledWith("plan-a");
+    expect(storageState.learnedDataAdopted).toBe(true);
+    // The flag commits only after the adoption succeeded.
+    const adoptOrder = mocked.adoptLegacyLearnedData.mock.invocationCallOrder[0];
+    const setOrder = vi.mocked(browser.storage.local.set).mock.invocationCallOrder[0];
+    expect(adoptOrder).toBeLessThan(setOrder);
+  });
+
+  it("is a no-op once the flag is set", async () => {
+    storageState.learnedDataAdopted = true;
+
+    await adoptLegacyLearnedDataOnce();
+
+    expect(mocked.getSettings).not.toHaveBeenCalled();
+    expect(mocked.adoptLegacyLearnedData).not.toHaveBeenCalled();
+  });
+
+  it("skips adoption but still marks done when no plan is connected", async () => {
+    // Disconnected at migration time: the rows' plan is unknowable, and they
+    // must never be adopted into whatever plan a later reconnect picks.
+    mocked.getSettings.mockResolvedValueOnce({ planId: null, planName: null } as never);
+
+    await adoptLegacyLearnedDataOnce();
+
+    expect(mocked.adoptLegacyLearnedData).not.toHaveBeenCalled();
+    expect(storageState.learnedDataAdopted).toBe(true);
+  });
+
+  it("leaves the flag unset when adoption fails, so the next startup retries", async () => {
+    mocked.adoptLegacyLearnedData.mockRejectedValueOnce(new Error("idb unavailable"));
+
+    await expect(adoptLegacyLearnedDataOnce()).rejects.toThrow("idb unavailable");
+
+    expect(storageState.learnedDataAdopted).toBeUndefined();
   });
 });

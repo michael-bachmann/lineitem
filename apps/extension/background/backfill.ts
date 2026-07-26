@@ -80,7 +80,10 @@ export async function runBackfill(options: BackfillOptions): Promise<BackfillRes
   const runByRetailer = new Map<string, RetailerTotals>();
   for (const [retailerId, group] of targeted) {
     signal?.throwIfAborted();
-    runByRetailer.set(retailerId, await runForRetailer(retailerId, group, { signal, onProgress }));
+    runByRetailer.set(
+      retailerId,
+      await runForRetailer(retailerId, group, { planId: settings.planId, signal, onProgress }),
+    );
   }
   const aggregate = sumTotals([...runByRetailer.values()]);
 
@@ -267,6 +270,8 @@ function processMatchedOrder(
 }
 
 interface RetailerCtx {
+  /** The plan this run was started against — learned rows are scoped to it. */
+  planId: string;
   signal?: AbortSignal;
   onProgress?: (event: BackfillProgress) => void;
 }
@@ -313,7 +318,7 @@ async function runForRetailer(
     // before learn would let a learn failure leave a tx marked "processed"
     // with nothing actually learned.
     if (entries.length > 0) {
-      await learnFromApproval(retailerId, entries, ({ index, total }) =>
+      await learnFromApproval(ctx.planId, retailerId, entries, ({ index, total }) =>
         ctx.onProgress?.({ status: "learning", retailer: retailerId, index, total }),
       );
     }

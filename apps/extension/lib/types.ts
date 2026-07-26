@@ -14,11 +14,17 @@
  * only updated when the user re-approves the same product with a different
  * category.
  *
+ * Rows are scoped to the plan they were learned on — categoryId only exists
+ * in that plan — so switching plans leaves other plans' rows dormant instead
+ * of clearing them.
+ *
  * Stored in the `learnedProducts` IndexedDB store, keyed by id.
  */
 export interface LearnedProduct {
-  /** Format: "{retailer}:{productId}" e.g. "amazon:B0XXXXXXXX" */
+  /** Format: "{planId}:{retailer}:{productId}" — see learnedKey in db.ts. */
   id: string;
+  /** The plan this row was learned on. */
+  planId: string;
   /** YNAB category UUID. */
   categoryId: string;
 }
@@ -32,8 +38,11 @@ export interface LearnedProduct {
  * here does not delete the LearnedProduct cache row.
  */
 export interface ProductEmbedding {
-  /** Format: "{retailer}:{productId}" — same shape as LearnedProduct.id. */
+  /** Format: "{planId}:{retailer}:{productId}" — same shape as LearnedProduct.id. */
   id: string;
+  /** The plan this row was learned on — indexed so classify reads only the
+   *  connected plan's pool. */
+  planId: string;
   /** Denormalized from LearnedProduct so scoring can group by category
    *  without a per-row join; kept in sync because approval writes both. */
   categoryId: string;
