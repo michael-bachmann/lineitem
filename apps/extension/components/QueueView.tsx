@@ -26,7 +26,7 @@ interface QueueViewProps {
   /** Release notes for the running version, shown until dismissed. */
   whatsNew?: { version: string; notes: ReactNode[] } | null;
   /** Persist the notes as seen and hide the card. */
-  onDismissWhatsNew?: () => void;
+  onDismissWhatsNew: () => void;
   /** Show the post-approval donation ask above the queue. */
   showCoffee?: boolean;
   /** Lifetime classified-item count, for the ask copy. */
@@ -124,7 +124,7 @@ export default function QueueView({
 
       {/* Below anything actionable (error, sign-in), above the coffee ask —
           needs-action outranks news. */}
-      {whatsNew && onDismissWhatsNew && (
+      {whatsNew && (
         <WhatsNewCard
           version={whatsNew.version}
           notes={whatsNew.notes}

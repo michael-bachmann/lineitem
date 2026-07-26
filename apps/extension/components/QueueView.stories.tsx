@@ -34,6 +34,7 @@ const handlers = {
   onSelectEntry: noop,
   onSettings: noop,
   onOpenRetailer: noop,
+  onDismissWhatsNew: noop,
 };
 
 const meta = {

@@ -141,7 +141,7 @@ export default function App() {
 
   if (view === "help") {
     return (
-      <Help onBack={() => setView("settings")} version={browser.runtime.getManifest().version} />
+      <Help onBack={() => setView("settings")} version={version} />
     );
   }
 

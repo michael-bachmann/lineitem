@@ -74,7 +74,9 @@ export default defineBackground(() => {
   // compares this key to the running version — see lib/whats-new).
   browser.runtime.onInstalled.addListener((details) => {
     if (details.reason === "install") {
-      void markVersionSeen(browser.runtime.getManifest().version);
+      markVersionSeen(browser.runtime.getManifest().version).catch((err) => {
+        console.warn("What's-new seed failed; a fresh install may see release notes once", err);
+      });
     }
   });
 
