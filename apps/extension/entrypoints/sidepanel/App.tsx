@@ -6,8 +6,10 @@ import Settings from "@/components/Settings";
 import Help from "@/components/Help";
 import QueueView from "@/components/QueueView";
 import DetailView from "@/components/DetailView";
+import { WHATS_NEW } from "@/components/WhatsNewCard";
 import { isFullyClassified } from "@/lib/queue";
 import { recordClassified, retireCoffee } from "@/lib/coffee";
+import { markVersionSeen, shouldShowWhatsNew } from "@/lib/whats-new";
 import {
   approveBatch,
   approveTransaction,
@@ -33,6 +35,9 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [showCoffee, setShowCoffee] = useState(false);
   const [coffeeClassified, setCoffeeClassified] = useState(0);
+  const [showWhatsNew, setShowWhatsNew] = useState(false);
+
+  const version = browser.runtime.getManifest().version;
 
   // Bumped on plan switch. A sync that started before the bump discards its
   // result — the background's dedup slot is reset on switch, so a slow old-plan
@@ -75,6 +80,7 @@ export default function App() {
         if (response.accessToken && response.planId) {
           setPlan({ id: response.planId, name: response.planName ?? "" });
           setView("queue");
+          void shouldShowWhatsNew(version, WHATS_NEW).then(setShowWhatsNew);
           // The queue lives only in React state, so it's lost when the panel
           // closes. Restore it on open by syncing. Already-scraped transactions
           // hit the IndexedDB cache, so this is fast and only scrapes genuinely
@@ -85,7 +91,7 @@ export default function App() {
         }
       })
       .catch(() => setView("onboarding"));
-  }, [handleSync]);
+  }, [handleSync, version]);
 
   if (view === "loading") {
     return (
@@ -213,6 +219,7 @@ export default function App() {
   }
 
   // Queue view
+  const whatsNewNotes = WHATS_NEW[version];
   return (
     <QueueView
       queue={queue}
@@ -228,6 +235,11 @@ export default function App() {
       onSettings={() => setView("settings")}
       blocked={blocked}
       onOpenRetailer={handleOpenRetailer}
+      whatsNew={showWhatsNew && whatsNewNotes ? { version, notes: whatsNewNotes } : null}
+      onDismissWhatsNew={() => {
+        setShowWhatsNew(false);
+        void markVersionSeen(version);
+      }}
       showCoffee={showCoffee}
       coffeeClassified={coffeeClassified}
       onDismissCoffee={() => setShowCoffee(false)}
