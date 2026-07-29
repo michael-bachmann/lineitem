@@ -10,6 +10,7 @@ import { ensureModelLoaded } from "@/background/embedder";
 import { runBackfill } from "@/background/backfill";
 import { getAdapter } from "@/retailers/registry";
 import { openRetailerTab, initPageResultListener } from "@/background/tabs";
+import { markVersionSeen } from "@/lib/whats-new";
 import { dlog } from "@/lib/debug";
 import type { MessageBroadcast, MessageRequest } from "@/lib/types";
 
@@ -66,6 +67,17 @@ export default defineBackground(() => {
   // are invisible to classify — a missed suggestion, never a wrong one.
   adoptLegacyLearnedDataOnce().catch((err) => {
     console.warn("Learned-data adoption failed; will retry on next startup", err);
+  });
+
+  // Seed the what's-new marker on fresh install, so release notes only ever
+  // show after an update FROM a version the user actually ran (the card
+  // compares this key to the running version — see lib/whats-new).
+  browser.runtime.onInstalled.addListener((details) => {
+    if (details.reason === "install") {
+      markVersionSeen(browser.runtime.getManifest().version).catch((err) => {
+        console.warn("What's-new seed failed; a fresh install may see release notes once", err);
+      });
+    }
   });
 
   // Wire content-script page-result messages to the coordinator before any

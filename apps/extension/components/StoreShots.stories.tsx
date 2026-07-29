@@ -230,6 +230,7 @@ export const Queue: Story = {
         onSelectEntry={noop}
         onSettings={noop}
         onOpenRetailer={noop}
+        onDismissWhatsNew={noop}
       />
     </Frame>
   ),
@@ -311,6 +312,7 @@ export const PromoMarquee: Story = {
             onSelectEntry={noop}
             onSettings={noop}
             onOpenRetailer={noop}
+        onDismissWhatsNew={noop}
           />
         </div>
       </div>

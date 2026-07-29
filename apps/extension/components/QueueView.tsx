@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import type { QueueEntry, BlockedRetailer } from "@/lib/types";
 import { entryStatus, isFullyClassified, type QueueDisplayStatus } from "@/lib/queue";
 import { millunitsToCents } from "@/lib/money";
@@ -6,6 +7,7 @@ import TransactionCard, { type TransactionVM } from "@/components/TransactionCar
 import { BrandRow, IconButton, Button, SectionLabel, Icon } from "@lineitem/ui";
 import CoffeeCard from "@/components/CoffeeCard";
 import ResolutionCard from "@/components/ResolutionCard";
+import WhatsNewCard from "@/components/WhatsNewCard";
 
 interface QueueViewProps {
   queue: QueueEntry[];
@@ -21,6 +23,10 @@ interface QueueViewProps {
   /** Open/focus a retailer's tab so the user can sign in. `url` targets a
    *  specific page (a step-up block's gated page) instead of the start URL. */
   onOpenRetailer: (retailer: string, url?: string) => void;
+  /** Release notes for the running version, shown until dismissed. */
+  whatsNew?: { version: string; notes: ReactNode[] } | null;
+  /** Persist the notes as seen and hide the card. */
+  onDismissWhatsNew: () => void;
   /** Show the post-approval donation ask above the queue. */
   showCoffee?: boolean;
   /** Lifetime classified-item count, for the ask copy. */
@@ -54,6 +60,8 @@ export default function QueueView({
   onSettings,
   blocked,
   onOpenRetailer,
+  whatsNew,
+  onDismissWhatsNew,
   showCoffee,
   coffeeClassified,
   onDismissCoffee,
@@ -112,6 +120,16 @@ export default function QueueView({
 
       {blocked && blocked.length > 0 && (
         <ResolutionCard blocked={blocked} onOpenRetailer={onOpenRetailer} />
+      )}
+
+      {/* Below anything actionable (error, sign-in), above the coffee ask —
+          needs-action outranks news. */}
+      {whatsNew && (
+        <WhatsNewCard
+          version={whatsNew.version}
+          notes={whatsNew.notes}
+          onDismiss={onDismissWhatsNew}
+        />
       )}
 
       {showCoffee && (
