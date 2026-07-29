@@ -3,17 +3,18 @@ import { Icon } from "@lineitem/ui";
 
 /**
  * Release notes per store version, behavior-led — each line says what the user
- * can now do, not what changed inside. Two lines max; one semibold key phrase
- * per card. Only the entry matching the running manifest version ever shows
- * (see lib/whats-new), so old entries are history and can be pruned freely.
+ * can now do, not what changed inside. A line per change, three max; one
+ * semibold key phrase per card. Only the entry matching the running manifest
+ * version ever shows (see lib/whats-new), so old entries are history and can
+ * be pruned freely.
  */
 export const WHATS_NEW: Record<string, ReactNode[]> = {
   "1.1.0": [
     <>
-      Switching budgets no longer clears your learning —{" "}
-      <b className="font-semibold text-text">each budget keeps its own</b>, ready when you switch
-      back.
+      You can now <b className="font-semibold text-text">switch budgets</b> in Settings — and
+      each one keeps its own learning, ready when you switch back.
     </>,
+    <>Connecting now uses the budget you pick during YNAB approval, not just your first one.</>,
     <>Amazon refunds now match back to their original orders more reliably.</>,
   ],
 };
