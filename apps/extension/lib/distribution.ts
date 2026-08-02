@@ -6,6 +6,7 @@ import type {
   ScrapedOrder,
   YnabCharge,
 } from "./types";
+import { closestSubset } from "./subset-sum";
 
 /**
  * Distribute totalCents across items proportionally by their subtotals.
@@ -52,8 +53,9 @@ const MAX_ITEMS = 20;
  * Returns indices per charge in input charge order, plus the per-charge
  * distance contributed by that bucket. Returns null only when M > n
  * (structurally impossible — a charge would get no item). When M > 1 and
- * n > MAX_ITEMS the exact subset enumeration would blow up (2^n), so we fall
- * back to a best-effort greedy partition rather than failing the order — the
+ * n > MAX_ITEMS the exact subset enumeration would blow up (2^n), so we hand
+ * off to `assignItemsToChargesBySubsetSum`, which stays exact per charge at a
+ * cost that grows with the order total rather than the item count — the
  * single-charge case never enumerates and always uses the exact base case.
  */
 export function assignItemsToCharges(
@@ -69,7 +71,7 @@ export function assignItemsToCharges(
   if (m === 0) return null;
   if (m > n) return null;
   if (m > 1 && n > MAX_ITEMS) {
-    return assignItemsToChargesGreedy(
+    return assignItemsToChargesBySubsetSum(
       itemSubtotalsCents,
       chargeAmountsCents,
       orderTotalCents,
@@ -171,36 +173,57 @@ function scaledBucketCents(bucket: number[], itemSubtotalsCents: number[], ratio
 }
 
 /**
- * Greedily assign each item to the charge with the largest remaining need
- * (target − assigned so far), largest items first so they land on the big
- * charges. Returns one charge index per item, keyed by item index.
+ * Partition item indices across charges by taking, for each charge in turn, the
+ * subset of the remaining items whose subtotal sits closest to that charge's
+ * target. The charge with the largest target takes whatever is left.
  *
- * A pure fold: the running per-charge sums are threaded through the accumulator,
- * never mutated in place.
+ * Charges are claimed smallest target first. A small target admits far fewer
+ * satisfying baskets than a large one, so letting it choose early stops a big
+ * charge from consuming a basket the small one needed — without this, a $200
+ * item and twenty $10 items both hit a $200 target exactly, and picking the
+ * twenty would strand the $200 item on a $10 charge. Leaving the largest charge
+ * to absorb the remainder also puts the leftover error where it is smallest
+ * relative to the amount.
+ *
+ * A pure fold: the pool of unassigned items and the buckets built so far are
+ * threaded through the accumulator, never mutated in place.
+ *
+ * Exact per charge, but not globally optimal for m > 2 — each charge is solved
+ * against the pool its predecessors left behind, so an early charge can strand
+ * an item a later one needed. The branch-and-bound partitioner above is the
+ * m-way optimal path; this one runs where enumeration cannot.
  */
-function greedyAssignment(itemSubtotalsCents: number[], targets: number[]): number[] {
-  const largestFirst = itemSubtotalsCents
-    .map((_, i) => i)
-    .sort((a, b) => itemSubtotalsCents[b] - itemSubtotalsCents[a]);
+function partitionByClosestSubset(
+  itemSubtotalsCents: readonly number[],
+  targets: readonly number[],
+): number[][] {
+  const bySmallestTarget = targets
+    .map((target, charge) => ({ target, charge }))
+    .sort((a, b) => a.target - b.target);
 
-  const { chargeOf } = largestFirst.reduce(
-    (acc, item) => {
-      const charge = argmax(targets.map((t, j) => t - acc.sums[j]));
+  const { pool, assigned } = bySmallestTarget.slice(0, -1).reduce(
+    (acc, { target, charge }) => {
+      // closestSubset indexes into the pool-projected values, so map its answer
+      // back onto the original item indices before recording the bucket.
+      const picked = closestSubset(
+        acc.pool.map((i) => itemSubtotalsCents[i]),
+        Math.round(target),
+      ).indices.map((k) => acc.pool[k]);
+      const taken = new Set(picked);
       return {
-        sums: acc.sums.map((s, j) => (j === charge ? s + itemSubtotalsCents[item] : s)),
-        chargeOf: { ...acc.chargeOf, [item]: charge },
+        pool: acc.pool.filter((i) => !taken.has(i)),
+        assigned: { ...acc.assigned, [charge]: picked },
       };
     },
-    { sums: targets.map(() => 0), chargeOf: {} as Record<number, number> },
+    {
+      pool: itemSubtotalsCents.map((_, i) => i),
+      assigned: {} as Record<number, number[]>,
+    },
   );
 
-  return itemSubtotalsCents.map((_, item) => chargeOf[item]);
-}
-
-/** Group item indices into one ascending-order bucket per charge. */
-function bucketsFromAssignment(chargeOf: number[], chargeCount: number): number[][] {
-  return Array.from({ length: chargeCount }, (_, j) =>
-    chargeOf.flatMap((charge, item) => (charge === j ? [item] : [])),
+  const remainderCharge = bySmallestTarget[bySmallestTarget.length - 1].charge;
+  return targets.map((_, charge) =>
+    charge === remainderCharge ? pool : (assigned[charge] ?? []),
   );
 }
 
@@ -223,16 +246,19 @@ function repairEmptyBuckets(buckets: number[][], itemSubtotalsCents: number[]): 
 }
 
 /**
- * Best-effort partition for orders too large for the exact branch-and-bound
- * (m > 1 and n > MAX_ITEMS, where enumerating 2^n subsets would hang the
- * worker). Runs in O(n log n) instead, so distributeOrder can still split a
- * large multi-charge grocery order rather than surfacing it as a read failure.
+ * Partition for orders too large for the exact branch-and-bound (m > 1 and
+ * n > MAX_ITEMS, where enumerating 2^n subsets would hang the worker). Costs
+ * O(n × items subtotal) instead — pseudo-polynomial, so a 37-item grocery order
+ * resolves in under a millisecond where enumeration would not finish at all.
  *
- * The partition is approximate — only item-to-charge attribution, not totals:
- * allocateProportional still scales each charge's items to its exact amount
- * downstream.
+ * Which items land on which charge is still a guess when several baskets fit a
+ * charge equally well: retailers don't publish the per-charge split, so nothing
+ * here can recover it. What this does guarantee is that the basket it picks
+ * sums to the charge exactly whenever such a basket exists, so the per-item
+ * amounts written downstream are the retailer's real prices rather than a
+ * near-miss basket scaled to fit.
  */
-function assignItemsToChargesGreedy(
+function assignItemsToChargesBySubsetSum(
   itemSubtotalsCents: number[],
   chargeAmountsCents: number[],
   orderTotalCents: number,
@@ -243,10 +269,7 @@ function assignItemsToChargesGreedy(
   const targets = chargeAmountsCents.map((a) => a / ratio);
 
   const indicesPerCharge = repairEmptyBuckets(
-    bucketsFromAssignment(
-      greedyAssignment(itemSubtotalsCents, targets),
-      chargeAmountsCents.length,
-    ),
+    partitionByClosestSubset(itemSubtotalsCents, targets),
     itemSubtotalsCents,
   );
 

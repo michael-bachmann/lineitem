@@ -249,6 +249,48 @@ describe("distributeOrder", () => {
     expect(totalItems).toBe(30);
   });
 
+  it("large multi-charge order allocates an exact basket at the retailer's real prices", () => {
+    // Real Whole Foods order 111-5630462-3529869: 37 items, $251.43 subtotal,
+    // split by Amazon into $242.18 + $12.08. Above MAX_ITEMS, so this exercises
+    // the subset-sum path. The greedy partition it replaced picked a $12.72
+    // basket and scaled every price down ~5% to force the fit, writing amounts
+    // that appear on no receipt — the guarantee here is that when a basket sums
+    // to the charge exactly, each item keeps its real price.
+    const prices = [
+      790, 190, 369, 664, 500, 1196, 549, 472, 599, 1598, 1180, 779, 929, 599,
+      899, 469, 529, 649, 434, 1198, 379, 434, 799, 469, 699, 477, 799, 359,
+      279, 579, 699, 1070, 643, 549, 899, 719, 699,
+    ];
+    const byId = new Map(prices.map((p, i) => [`P${i}`, p]));
+    const order = mkOrder(
+      prices.map((p, i) => mkItem(`P${i}`, p)),
+      "111-5630462-3529869",
+    );
+    const result = distributeOrder(order, [mkCharge("tx-big", 24218), mkCharge("tx-small", 1208)]);
+
+    expect(result.failures).toEqual([]);
+    const small = result.allocated.find((a) => a.ynabTransactionId === "tx-small")!;
+    expect(sum(small.items.map((i) => i.allocatedCents))).toBe(1208);
+
+    // A charge covers its items plus their share of tax and fees, so the basket
+    // is matched in item-subtotal space: $12.08 / (25426/25143) = $11.9455.
+    // The basket must land within a cent of that once grossed back up — greedy
+    // picked a $12.72 basket and missed by 78.
+    const ratio = 25426 / 25143;
+    const basketSubtotal = sum(small.items.map((i) => byId.get(i.productId)!));
+    expect(Math.abs(Math.round(basketSubtotal * ratio) - 1208)).toBeLessThanOrEqual(1);
+
+    // Each item therefore keeps its listed price plus only that fee share
+    // (~1.1%), rather than being rescaled to force a near-miss basket to fit.
+    for (const item of small.items) {
+      const listed = byId.get(item.productId)!;
+      expect(Math.abs(item.allocatedCents - listed) / listed).toBeLessThan(0.015);
+    }
+
+    // Every item still lands on exactly one charge.
+    expect(result.allocated.flatMap((a) => a.items).length).toBe(prices.length);
+  });
+
   it("invariant: every charge's allocations sum to exactly amountCents", () => {
     const order = mkOrder([
       mkItem("A", 1234),
