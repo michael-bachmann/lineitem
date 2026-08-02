@@ -208,9 +208,43 @@ export function isGroceryOrder(doc: Document): boolean {
   return doc.querySelector(SELECTORS.groceryProgressTracker) !== null;
 }
 
-function parseItemmodElement(item: Element): RawItem | null {
-  const outOfStock = /Out of stock/i.test(item.textContent ?? "");
+interface ItemmodStatus {
+  /** The row reports an out-of-stock line, whether or not a credit was read. */
+  outOfStock: boolean;
+  /** Credited for units Amazon couldn't supply — never charged for. */
+  outOfStockCredit: number;
+  /** Refunded after the fact — money back on a charge. */
+  refundedCents: number;
+}
 
+/**
+ * Read a row's status boxes, keeping out-of-stock credits and refunds apart.
+ *
+ * The two look alike (both render a negative amount in the same span) but mean
+ * opposite things downstream, so each box is classified by its own label rather
+ * than by scanning the row — a row can carry both at once, and a product title
+ * mentioning either word must not be mistaken for a status.
+ */
+function readItemmodStatus(item: Element): ItemmodStatus {
+  return Array.from(item.querySelectorAll(SELECTORS.itemmodItemStatus)).reduce<ItemmodStatus>(
+    (acc, box) => {
+      const label = box.textContent ?? "";
+      const amount = parseCents(
+        box.querySelector(SELECTORS.itemmodItemStatusPrice)?.textContent ?? "0",
+      );
+      if (/Out of stock/i.test(label)) {
+        return { ...acc, outOfStock: true, outOfStockCredit: acc.outOfStockCredit + amount };
+      }
+      if (/Refunded/i.test(label)) {
+        return { ...acc, refundedCents: acc.refundedCents + amount };
+      }
+      return acc;
+    },
+    { outOfStock: false, outOfStockCredit: 0, refundedCents: 0 },
+  );
+}
+
+function parseItemmodElement(item: Element): RawItem | null {
   const productLinks = item.querySelectorAll(SELECTORS.productLink);
   let titleEl: Element | null = null;
   let title = "";
@@ -236,11 +270,13 @@ function parseItemmodElement(item: Element): RawItem | null {
   const lineTotalEl = item.querySelector(SELECTORS.itemmodLineTotal);
   const lineTotalCents = parseCents(lineTotalEl?.textContent ?? "0");
 
-  // Per-item status marker — a refund ("Refunded (3)") or an out-of-stock
-  // credit ("Out of stock (1)"). Text reads e.g. " -$15.00 "; parseCents
-  // strips the sign and returns absolute cents.
-  const markerEl = item.querySelector(SELECTORS.itemmodItemRefundPrice);
-  const markerCents = markerEl ? parseCents(markerEl.textContent ?? "0") : 0;
+  const status = readItemmodStatus(item);
+
+  // A row marked out of stock with no credit we could read is unaccountable:
+  // we can't tell how much of the line survived. Drop it rather than bank a
+  // price the customer may never have been charged — the same call the parser
+  // made for every out-of-stock row before partial fills were handled.
+  if (status.outOfStock && status.outOfStockCredit === 0) return null;
 
   // An out-of-stock credit reduces what was charged rather than refunding it —
   // Amazon never billed the missing units, and Item(s) Subtotal counts only the
@@ -250,10 +286,8 @@ function parseItemmodElement(item: Element): RawItem | null {
   // keeps the credit out of refundedAmountCents, which must mean "money came
   // back on a charge" — distribution excludes refund-marked items from purchase
   // charges, which would drop the unit the customer did pay for.
-  const priceCents = outOfStock ? lineTotalCents - markerCents : lineTotalCents;
+  const priceCents = lineTotalCents - status.outOfStockCredit;
   if (priceCents <= 0) return null;
-
-  const refundedAmountCents = outOfStock ? 0 : markerCents;
 
   return {
     productId,
@@ -261,7 +295,7 @@ function parseItemmodElement(item: Element): RawItem | null {
     priceCents,
     quantity: 1,
     imageUrl,
-    refundedAmountCents,
+    refundedAmountCents: status.refundedCents,
   };
 }
 

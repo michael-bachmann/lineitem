@@ -222,9 +222,7 @@ function partitionByClosestSubset(
   );
 
   const remainderCharge = bySmallestTarget[bySmallestTarget.length - 1].charge;
-  return targets.map((_, charge) =>
-    charge === remainderCharge ? pool : (assigned[charge] ?? []),
-  );
+  return targets.map((_, charge) => (charge === remainderCharge ? pool : assigned[charge]));
 }
 
 /**
@@ -253,10 +251,16 @@ function repairEmptyBuckets(buckets: number[][], itemSubtotalsCents: number[]): 
  *
  * Which items land on which charge is still a guess when several baskets fit a
  * charge equally well: retailers don't publish the per-charge split, so nothing
- * here can recover it. What this does guarantee is that the basket it picks
- * sums to the charge exactly whenever such a basket exists, so the per-item
- * amounts written downstream are the retailer's real prices rather than a
+ * here can recover it. What this does guarantee is that the basket it picks is
+ * the closest reachable one, so the per-item amounts written downstream stay at
+ * the retailer's real prices (plus their share of tax and fees) rather than a
  * near-miss basket scaled to fit.
+ *
+ * Matching happens against `Math.round(target)` in item-subtotal space, so an
+ * exactly-grossing basket is always found when the order total is at or above
+ * the items subtotal — the usual case, where tax and fees only add. Below it
+ * (a large promo or gift card) the rounding window widens past half a cent and
+ * a neighbouring reachable sum can win by one.
  */
 function assignItemsToChargesBySubsetSum(
   itemSubtotalsCents: number[],

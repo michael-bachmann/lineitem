@@ -99,7 +99,7 @@ describe("closestSubset", () => {
     }
   });
 
-  it("resolves a 37-item order well inside a frame budget", () => {
+  it("resolves a 37-item order without enumerating its subsets", () => {
     const values = [
       790, 190, 369, 664, 500, 1196, 549, 472, 599, 1598, 1180, 779, 929, 599,
       899, 469, 529, 649, 434, 1198, 379, 434, 799, 469, 699, 477, 799, 359,
@@ -109,8 +109,10 @@ describe("closestSubset", () => {
     const { sum } = closestSubset(values, 1208);
     const elapsed = performance.now() - started;
     expect(sum).toBe(1208);
-    // Generous: the measured cost is well under 5ms. This guards the
-    // pseudo-polynomial bound, not a specific machine.
+    // A smoke test against exponential blowup, not a proof of the bound: 2^37
+    // subsets would take hours, and the measured cost here is under a
+    // millisecond. The margin is enormous so it won't flake, but it would not
+    // notice a merely-quadratic regression.
     expect(elapsed).toBeLessThan(250);
   });
 });

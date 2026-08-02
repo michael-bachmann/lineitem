@@ -30,8 +30,7 @@ export interface ClosestSubset {
  * a given input — callers can rely on repeat runs agreeing.
  *
  * `values` are expected to be non-negative integers (cents). Zero-valued
- * entries are never selected: they cannot move a sum, and admitting one would
- * make the backtrack below unable to terminate.
+ * entries are never selected — they cannot move a sum, so no subset needs them.
  */
 export function closestSubset(values: readonly number[], target: number): ClosestSubset {
   const total = values.reduce((a, b) => a + b, 0);
@@ -47,9 +46,17 @@ export function closestSubset(values: readonly number[], target: number): Closes
   via[0] = ORIGIN;
 
   values.forEach((value, index) => {
+    // Cheap skip. A zero could never be recorded anyway — `via[s + 0]` is
+    // reachable exactly when `via[s]` is, so the write test below can't fire —
+    // and this also keeps negatives out, which would index outside the table.
     if (value <= 0) return;
-    // Descending so `index` is consumed at most once: writes during this pass
-    // land above the read cursor and are never extended again by the same item.
+    // Two rules together stop an item being used twice in one chain. Descending
+    // keeps this pass's writes above the read cursor, so `index` can't extend
+    // its own results. Writing only into an UNREACHABLE slot then freezes every
+    // entry the moment it is first filled, so `via[s − values[i]]` is always an
+    // item strictly below `i` — which is what makes traceBack's chain strictly
+    // decreasing. Dropping either rule admits repeats: without the write guard,
+    // closestSubset([434, 434, 434], 868) returns the same index twice.
     for (let s = total - value; s >= 0; s--) {
       if (via[s] !== UNREACHABLE && via[s + value] === UNREACHABLE) {
         via[s + value] = index;
@@ -80,9 +87,10 @@ function nearestReachable(via: Int32Array, target: number): number {
 /**
  * Walk the `via` chain from `sum` back to 0, collecting the items behind it.
  *
- * Each step moves to a strictly smaller sum reached by a strictly lower item
- * index, so the walk terminates and the collected indices come out descending —
- * reversed here to the ascending order callers expect.
+ * Because entries are written once and never overwritten (see closestSubset),
+ * each step moves to a strictly smaller sum reached by a strictly lower item
+ * index. The walk therefore terminates, no item repeats, and the indices come
+ * out descending — reversed here to the ascending order callers expect.
  */
 function traceBack(via: Int32Array, values: readonly number[], sum: number): number[] {
   const indices: number[] = [];

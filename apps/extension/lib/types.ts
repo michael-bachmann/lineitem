@@ -315,8 +315,10 @@ export interface ScrapedItem {
   quantity: number;
   /** Sum of refund markers in cents for this item across the order; 0 when
    *  not refunded. Same currency as unitPriceCents. For grocery, comes from
-   *  the per-item `ufpo-item-status-price` span. For regular Amazon, comes
-   *  from a shipment-level "Refunded" status (full line total). */
+   *  the per-item status boxes labelled "Refunded" — an out-of-stock credit
+   *  renders in the same span but is netted off unitPriceCents instead, since
+   *  the customer was never charged for it. For regular Amazon, comes from a
+   *  shipment-level "Refunded" status (full line total). */
   refundedAmountCents: number;
 }
 

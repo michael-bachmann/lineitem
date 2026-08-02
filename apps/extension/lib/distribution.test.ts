@@ -102,7 +102,7 @@ describe("assignItemsToCharges", () => {
     expect(sum(result!.distanceCentsPerCharge)).toBe(0);
   });
 
-  it("multi-charge: n > MAX_ITEMS falls back to a best-effort greedy partition", () => {
+  it("multi-charge: n > MAX_ITEMS hands off to the subset-sum partition", () => {
     // Past the exact-enumeration cap we no longer fail the order — every item is
     // assigned exactly once and every charge gets at least one item.
     const items = Array(21).fill(100);
@@ -115,10 +115,14 @@ describe("assignItemsToCharges", () => {
     );
   });
 
-  it("greedy fallback keeps big items off the small charge", () => {
+  it("subset-sum partition keeps big items off the small charge", () => {
     // 21 items so we cross MAX_ITEMS: twenty $10 items + one $200 item, split
     // across a big ($200) and a small ($10) charge. The $200 item must land on
     // the big charge, not the small one.
+    //
+    // This is what smallest-target-first buys: both the $200 item alone and all
+    // twenty $10 items hit the $200 target exactly, so letting the big charge
+    // choose first would strand the $200 item on the $10 charge.
     const items = [...Array(20).fill(1000), 20000];
     const result = assignItemsToCharges(items, [20000, 1000], 21000, 21000);
     expect(result).not.toBeNull();
@@ -127,12 +131,12 @@ describe("assignItemsToCharges", () => {
     expect(bigChargeBucket).toContain(bigItemIdx);
   });
 
-  it("greedy fallback repairs an empty bucket so every charge gets an item", () => {
+  it("subset-sum partition repairs an empty bucket so every charge gets an item", () => {
     // Skewed targets that force the repair branch: 21 equal $10 items with a
-    // near-all-consuming charge ($209.99) beside a $0.01 charge. Underfilled-
-    // first assignment piles all 21 items onto the big charge (its slack never
-    // drops below the tiny charge's target), leaving the small charge empty —
-    // repair must then move one item over so it isn't left with zero.
+    // near-all-consuming charge ($209.99) beside a $0.01 charge. The $0.01
+    // charge is claimed first and the nearest sum it can reach is 0 — no item
+    // is closer to a cent than nothing at all — so it comes back empty and
+    // repair must move one item over so it isn't left with zero.
     const items = Array(21).fill(1000);
     const result = assignItemsToCharges(items, [20999, 1], 21000, 21000);
     expect(result).not.toBeNull();
@@ -249,13 +253,14 @@ describe("distributeOrder", () => {
     expect(totalItems).toBe(30);
   });
 
-  it("large multi-charge order allocates an exact basket at the retailer's real prices", () => {
+  it("large multi-charge order keeps the retailer's real prices on the closest basket", () => {
     // Real Whole Foods order 111-5630462-3529869: 37 items, $251.43 subtotal,
     // split by Amazon into $242.18 + $12.08. Above MAX_ITEMS, so this exercises
-    // the subset-sum path. The greedy partition it replaced picked a $12.72
-    // basket and scaled every price down ~5% to force the fit, writing amounts
-    // that appear on no receipt — the guarantee here is that when a basket sums
-    // to the charge exactly, each item keeps its real price.
+    // the subset-sum path. No basket of these 37 prices grosses to exactly
+    // $12.08 — the closest reachable is a cent away — so what's asserted is the
+    // reachable optimum, not an exact hit. The greedy partition this replaced
+    // picked a $12.72 basket 78 cents out and scaled every price down ~6% to
+    // force it, writing per-item amounts that appear on no receipt.
     const prices = [
       790, 190, 369, 664, 500, 1196, 549, 472, 599, 1598, 1180, 779, 929, 599,
       899, 469, 529, 649, 434, 1198, 379, 434, 799, 469, 699, 477, 799, 359,
@@ -270,12 +275,10 @@ describe("distributeOrder", () => {
 
     expect(result.failures).toEqual([]);
     const small = result.allocated.find((a) => a.ynabTransactionId === "tx-small")!;
-    expect(sum(small.items.map((i) => i.allocatedCents))).toBe(1208);
 
     // A charge covers its items plus their share of tax and fees, so the basket
     // is matched in item-subtotal space: $12.08 / (25426/25143) = $11.9455.
-    // The basket must land within a cent of that once grossed back up — greedy
-    // picked a $12.72 basket and missed by 78.
+    // Grossed back up it must land within a cent of the charge.
     const ratio = 25426 / 25143;
     const basketSubtotal = sum(small.items.map((i) => byId.get(i.productId)!));
     expect(Math.abs(Math.round(basketSubtotal * ratio) - 1208)).toBeLessThanOrEqual(1);

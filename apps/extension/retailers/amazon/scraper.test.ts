@@ -148,6 +148,93 @@ describe("parseItemmodFromDocument", () => {
     expect(parseItemmodFromDocument(document)).toEqual([]);
   });
 
+  it("skips an out-of-stock item whose credit sits outside the price span", () => {
+    // Markup as originally captured, with the credit in a bare bold span rather
+    // than a .ufpo-item-status-price column. The credit can't be read, so how
+    // much of the line survived is unknowable — drop it rather than bank a
+    // price that would overshoot Item(s) Subtotal and fail the whole order.
+    document.body.innerHTML = `
+      <div id="B01N1T6F3P-item-grid-row" role="row">
+        <div class="a-column a-span11 a-span-last">
+          <div class="a-row">
+            <div class="a-column a-span6">
+              <a href="/gp/product/B01N1T6F3P?ref_=uff_od_product"><span>Frozen Dessert Bars</span></a>
+            </div>
+            <div class="a-column a-span2 a-text-left a-span-last">
+              <span id="B01N1T6F3P-item-total-price"> $15.78 </span>
+            </div>
+          </div>
+          <div class="a-row">
+            <div class="a-box ufpo-item-status">
+              <div class="a-box-inner">
+                <div class="a-row">
+                  <span class="a-size-small a-text-bold">Out of stock (2)</span>
+                  <span class="a-size-small a-text-bold">-$15.78</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+    expect(parseItemmodFromDocument(document)).toEqual([]);
+  });
+
+  it("keeps an out-of-stock credit and a refund on the same row apart", () => {
+    // 3 ordered: one never supplied (credited, never charged) and one refunded
+    // after the fact. The credit nets off the line; the refund has to survive as
+    // refundedAmountCents or the refund charge can't be matched to it.
+    document.body.innerHTML = `
+      <div id="B0AAA00001-item-grid-row" role="row">
+        <a href="/gp/product/B0AAA00001?ref_=x"><span>Three Pack Thing</span></a>
+        <span id="B0AAA00001-item-total-price"> $20.97 </span>
+        <div class="a-box ufpo-item-status">
+          <div class="a-row">
+            <span class="a-size-small a-text-bold">Out of stock (1)</span>
+            <span class="ufpo-item-status-price">-$6.99</span>
+          </div>
+        </div>
+        <div class="a-box ufpo-item-status">
+          <div class="a-row">
+            <span class="a-size-small a-text-bold">Refunded (1)</span>
+            <span class="ufpo-item-status-price">-$6.99</span>
+          </div>
+        </div>
+      </div>
+    `;
+    const items = parseItemmodFromDocument(document);
+    expect(items).toHaveLength(1);
+    expect(items[0].priceCents).toBe(1398);
+    expect(items[0].refundedAmountCents).toBe(699);
+  });
+
+  it("does not read a status out of a product title that happens to name one", () => {
+    // "Out of stock" in the title, a real refund marker in the only status box.
+    // Classifying by row text would net the refund off the line and lose it.
+    document.body.innerHTML = `
+      <div id="B0BOOK0001-item-grid-row" role="row">
+        <a href="/gp/product/B0BOOK0001?ref_=x"><span>Out of Stock: A Novel</span></a>
+        <span id="B0BOOK0001-item-total-price"> $20.00 </span>
+        <div class="a-box ufpo-item-status">
+          <div class="a-row">
+            <span class="a-size-small a-text-bold">Refunded (1)</span>
+            <span class="ufpo-item-status-price">-$20.00</span>
+          </div>
+        </div>
+      </div>
+    `;
+    expect(parseItemmodFromDocument(document)).toEqual([
+      {
+        productId: "B0BOOK0001",
+        title: "Out of Stock: A Novel",
+        priceCents: 2000,
+        quantity: 1,
+        imageUrl: "",
+        refundedAmountCents: 2000,
+      },
+    ]);
+  });
+
   it("keeps a PARTIALLY out-of-stock item at the price actually charged", () => {
     // Real Whole Foods row (order 111-5630462-3529869): 2 ordered at $6.99 each,
     // one unavailable. Amazon credited $6.99 and charged for the other, so
