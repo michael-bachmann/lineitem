@@ -7,6 +7,7 @@ import {
   extractItemsSubtotal,
   parseRefundSummary,
 } from "./scraper";
+import { verifyScrape } from "@/lib/verify-scrape";
 
 beforeEach(() => {
   document.body.innerHTML = "";
@@ -115,7 +116,7 @@ describe("parseItemmodFromDocument", () => {
     expect(parseItemmodFromDocument(document)).toEqual([]);
   });
 
-  it("skips out-of-stock items (status row carries a matching credit, line nets to zero)", () => {
+  it("skips a fully out-of-stock item (credit cancels the line total)", () => {
     document.body.innerHTML = `
       <div id="B01N1T6F3P-item-grid-row" role="row">
         <div class="a-column a-span11 a-span-last">
@@ -131,8 +132,12 @@ describe("parseItemmodFromDocument", () => {
             <div class="a-box ufpo-item-status">
               <div class="a-box-inner">
                 <div class="a-row">
-                  <span class="a-size-small a-text-bold">Out of stock (2)</span>
-                  <span class="a-size-small a-text-bold">-$15.78</span>
+                  <div class="a-column a-span8">
+                    <span class="a-size-small a-text-bold">Out of stock (2)</span>
+                  </div>
+                  <div class="a-column a-span3 ufpo-item-status-price a-span-last">
+                    <span class="a-size-small a-text-bold">-$15.78</span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -141,6 +146,58 @@ describe("parseItemmodFromDocument", () => {
       </div>
     `;
     expect(parseItemmodFromDocument(document)).toEqual([]);
+  });
+
+  it("keeps a PARTIALLY out-of-stock item at the price actually charged", () => {
+    // Real Whole Foods row (order 111-5630462-3529869): 2 ordered at $6.99 each,
+    // one unavailable. Amazon credited $6.99 and charged for the other, so
+    // Item(s) Subtotal counts $6.99 — dropping the whole row left the scrape
+    // $6.99 short and failed verify as "Couldn't read order".
+    document.body.innerHTML = `
+      <div id="B01MQD4ZZM-item-grid-row" role="row">
+        <div class="a-column a-span1"><img src="https://example.com/rice.jpg" /></div>
+        <div class="a-column a-span11 a-span-last">
+          <div class="a-row">
+            <div class="a-column a-span6">
+              <a class="a-link-normal a-text-normal" href="/gp/product/B01MQD4ZZM?ref_=uff_od_product">
+                <span> Grain Trust, Rice Thai Jasmine Organic, 30 Ounce </span>
+              </a>
+            </div>
+            <div class="a-column a-span1 a-text-center">2</div>
+            <div class="a-column a-span2 a-text-left a-span-last">
+              <span id="B01MQD4ZZM-item-total-price"> $13.98 </span>
+            </div>
+          </div>
+          <div class="a-row">
+            <div class="a-column a-span4 ufpo-item-status-column a-span-last">
+              <div class="a-box ufpo-item-status"><div class="a-box-inner">
+                <div class="a-row">
+                  <div class="a-column a-span8">
+                    <span class="a-size-small a-text-bold"> Out of stock (1) </span>
+                  </div>
+                  <div class="a-column a-span3 a-text-left ufpo-item-status-price a-span-last">
+                    <span class="a-size-small a-text-bold"> -$6.99 </span>
+                  </div>
+                </div>
+              </div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+    expect(parseItemmodFromDocument(document)).toEqual([
+      {
+        productId: "B01MQD4ZZM",
+        title: "Grain Trust, Rice Thai Jasmine Organic, 30 Ounce",
+        priceCents: 699,
+        quantity: 1,
+        imageUrl: "https://example.com/rice.jpg",
+        // An out-of-stock credit is not a refund: the customer was never
+        // charged for the missing unit, so it must not look refundable to
+        // distribution (which excludes refund-marked items from purchases).
+        refundedAmountCents: 0,
+      },
+    ]);
   });
 
   it("sets refundedAmountCents from the per-item refund marker", () => {
@@ -213,6 +270,46 @@ describe("parseItemmodFromDocument", () => {
         refundedAmountCents: 0,
       },
     ]);
+  });
+
+  it("reconciles a partially out-of-stock order against Item(s) Subtotal", () => {
+    // The failure this guards is only visible end-to-end: each row parses fine
+    // on its own, but a dropped partial out-of-stock line leaves the scrape
+    // short of Amazon's subtotal, and verifyScrape then errors every charge on
+    // the order.
+    document.body.innerHTML = `
+      <div id="B0YOGURT00-item-grid-row" role="row">
+        <a href="/gp/product/B0YOGURT00?ref_=x"><span>Greek Yogurt</span></a>
+        <span id="B0YOGURT00-item-total-price">$6.99</span>
+      </div>
+      <div id="B01MQD4ZZM-item-grid-row" role="row">
+        <a href="/gp/product/B01MQD4ZZM?ref_=x"><span>Jasmine Rice</span></a>
+        <span id="B01MQD4ZZM-item-total-price">$13.98</span>
+        <div class="a-box ufpo-item-status">
+          <div class="a-row">
+            <span class="a-size-small a-text-bold">Out of stock (1)</span>
+            <span class="ufpo-item-status-price"><span>-$6.99</span></span>
+          </div>
+        </div>
+      </div>
+    `;
+    const items = parseItemmodFromDocument(document);
+    const order = {
+      retailer: "amazon",
+      orderId: "111-5630462-3529869",
+      items: items.map((i) => ({
+        productId: i.productId,
+        title: i.title,
+        imageUrl: i.imageUrl,
+        unitPriceCents: i.priceCents,
+        quantity: i.quantity,
+        refundedAmountCents: i.refundedAmountCents,
+      })),
+      // $6.99 delivered + $6.99 kept from the partially-filled line.
+      displayedItemsSubtotalCents: 1398,
+      refund: null,
+    };
+    expect(verifyScrape(order)).toEqual({ ok: true });
   });
 });
 

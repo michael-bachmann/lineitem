@@ -209,11 +209,7 @@ export function isGroceryOrder(doc: Document): boolean {
 }
 
 function parseItemmodElement(item: Element): RawItem | null {
-  // Skip out-of-stock items. The row still shows a line price but Amazon
-  // includes a matching negative credit in the same container, so the
-  // customer wasn't charged and Item(s) Subtotal excludes it. Counting it
-  // would inflate our sum past Amazon's and trip verify-scrape.
-  if (/Out of stock/i.test(item.textContent ?? "")) return null;
+  const outOfStock = /Out of stock/i.test(item.textContent ?? "");
 
   const productLinks = item.querySelectorAll(SELECTORS.productLink);
   let titleEl: Element | null = null;
@@ -238,15 +234,26 @@ function parseItemmodElement(item: Element): RawItem | null {
 
   // Itemmod shows the line total directly, not per-unit price.
   const lineTotalEl = item.querySelector(SELECTORS.itemmodLineTotal);
-  const priceCents = parseCents(lineTotalEl?.textContent ?? "0");
-  if (priceCents === 0) return null;
+  const lineTotalCents = parseCents(lineTotalEl?.textContent ?? "0");
 
-  // Per-item refund marker. Text reads e.g. " -$15.00 ". parseCents strips
-  // the sign and returns absolute cents, which is what we store.
-  const refundEl = item.querySelector(SELECTORS.itemmodItemRefundPrice);
-  const refundedAmountCents = refundEl
-    ? parseCents(refundEl.textContent ?? "0")
-    : 0;
+  // Per-item status marker — a refund ("Refunded (3)") or an out-of-stock
+  // credit ("Out of stock (1)"). Text reads e.g. " -$15.00 "; parseCents
+  // strips the sign and returns absolute cents.
+  const markerEl = item.querySelector(SELECTORS.itemmodItemRefundPrice);
+  const markerCents = markerEl ? parseCents(markerEl.textContent ?? "0") : 0;
+
+  // An out-of-stock credit reduces what was charged rather than refunding it —
+  // Amazon never billed the missing units, and Item(s) Subtotal counts only the
+  // delivered remainder. So net it off the line: a line that was PARTIALLY
+  // filled (2 ordered, 1 unavailable) stays in the scrape at the price actually
+  // paid, and a fully unavailable line nets to zero and drops out. Netting also
+  // keeps the credit out of refundedAmountCents, which must mean "money came
+  // back on a charge" — distribution excludes refund-marked items from purchase
+  // charges, which would drop the unit the customer did pay for.
+  const priceCents = outOfStock ? lineTotalCents - markerCents : lineTotalCents;
+  if (priceCents <= 0) return null;
+
+  const refundedAmountCents = outOfStock ? 0 : markerCents;
 
   return {
     productId,
