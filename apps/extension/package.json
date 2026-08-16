@@ -30,22 +30,22 @@
     "remeda": "^2.39.0"
   },
   "devDependencies": {
-    "@storybook/addon-a11y": "^10.5.4",
-    "@storybook/react-vite": "^10.5.4",
+    "@storybook/addon-a11y": "^10.5.7",
+    "@storybook/react-vite": "^10.5.7",
     "@tailwindcss/vite": "^4.3.3",
-    "@types/chrome": "^0.2.2",
-    "@types/react": "^19.2.17",
-    "@types/react-dom": "^19.2.3",
+    "@types/chrome": "^0.2.5",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
     "@vitest/coverage-v8": "^4.1.10",
-    "@wxt-dev/auto-icons": "^1.1.1",
+    "@wxt-dev/auto-icons": "^1.1.2",
     "@wxt-dev/module-react": "^1.1.5",
     "fake-indexeddb": "^6.2.5",
-    "happy-dom": "^20.11.1",
-    "storybook": "^10.5.4",
+    "happy-dom": "^20.11.2",
+    "storybook": "^10.5.7",
     "tailwindcss": "^4.3.3",
     "typescript": "^7.0.2",
     "vite-plugin-svgr": "^5.2.0",
     "vitest": "^4.1.10",
-    "wxt": "^0.20.27"
+    "wxt": "^0.21.4"
   }
 }
