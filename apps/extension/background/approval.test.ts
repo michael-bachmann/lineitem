@@ -170,6 +170,73 @@ describe("buildSubtransactions", () => {
     expect(sub.memo!.length).toBeLessThanOrEqual(200);
     expect(sub.memo!.endsWith("+2 more")).toBe(true);
   });
+
+  it("shortens a title over 40 chars at the nearest word boundary", () => {
+    const tx = makeTx({
+      items: [
+        {
+          productId: "A",
+          title: "Bounty Paper Towels 12 Family Rolls Absorbent White",
+          imageUrl: "",
+          unitPriceCents: 100,
+          quantity: 1,
+          refundedAmountCents: 0,
+          allocatedCents: 100,
+        },
+      ],
+    });
+
+    const [sub] = buildSubtransactions(tx, [{ productId: "A", categoryId: "cat-groceries" }]);
+    expect(sub.memo).toBe("Bounty Paper Towels 12 Family Rolls…");
+  });
+
+  it("hard-cuts a title with no word boundary before the limit", () => {
+    const tx = makeTx({
+      items: [
+        {
+          productId: "A",
+          title: "X".repeat(50),
+          imageUrl: "",
+          unitPriceCents: 100,
+          quantity: 1,
+          refundedAmountCents: 0,
+          allocatedCents: 100,
+        },
+      ],
+    });
+
+    const [sub] = buildSubtransactions(tx, [{ productId: "A", categoryId: "cat-groceries" }]);
+    expect(sub.memo).toBe("X".repeat(40) + "…");
+  });
+});
+
+describe("approveTransaction — memo", () => {
+  it("writes an item-list memo even when every item shares one category (no subtransactions)", async () => {
+    const tx: AllocatedTransaction = {
+      ynabTransactionId: "txn-solo",
+      orderKey: "amazon:O-solo",
+      retailer: "amazon",
+      date: "2026-05-20",
+      amountCents: 3000,
+      isRefund: false,
+      items: [
+        { productId: "A", title: "Apple", imageUrl: "", unitPriceCents: 1500, quantity: 1, refundedAmountCents: 0, allocatedCents: 1500 },
+        { productId: "B", title: "Bread", imageUrl: "", unitPriceCents: 1500, quantity: 1, refundedAmountCents: 0, allocatedCents: 1500 },
+      ],
+    };
+    allocatedStore.set("txn-solo", tx);
+
+    await approveTransaction("txn-solo", [
+      { productId: "A", categoryId: "cat-groceries" },
+      { productId: "B", categoryId: "cat-groceries" },
+    ]);
+
+    expect(updateTransaction).toHaveBeenCalledWith("fake-plan", "txn-solo", {
+      category_id: "cat-groceries",
+      approved: true,
+      memo: "Apple, Bread",
+    });
+  });
 });
 
 describe("learnFromApproval writes both stores", () => {

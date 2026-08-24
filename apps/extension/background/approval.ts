@@ -27,20 +27,33 @@ function isSingleCategory(items: ApprovalItem[]): boolean {
 }
 
 const MEMO_MAX = 200;
+const TITLE_MAX = 40;
 
 function truncate(s: string, max: number): string {
   if (s.length <= max) return s;
   return s.slice(0, Math.max(0, max - 1)) + "…";
 }
 
+/** Shorten one item title to a memo-friendly length, cutting at the nearest
+ *  word boundary within TITLE_MAX rather than mid-word. Amazon titles in
+ *  particular run long, so this keeps memos scannable without an LLM call. */
+function shortenTitle(title: string): string {
+  const trimmed = title.trim();
+  if (trimmed.length <= TITLE_MAX) return trimmed;
+  const cut = trimmed.slice(0, TITLE_MAX);
+  const lastSpace = cut.lastIndexOf(" ");
+  return (lastSpace > 0 ? cut.slice(0, lastSpace) : cut) + "…";
+}
+
 function buildMemo(titles: string[]): string {
   if (titles.length === 0) return "";
-  if (titles.length <= 3) {
-    return truncate(titles.join(", "), MEMO_MAX);
+  const shortened = titles.map(shortenTitle);
+  if (shortened.length <= 3) {
+    return truncate(shortened.join(", "), MEMO_MAX);
   }
-  const remainder = titles.length - 3;
+  const remainder = shortened.length - 3;
   const suffix = ` +${remainder} more`;
-  const head = truncate(titles.slice(0, 3).join(", "), MEMO_MAX - suffix.length);
+  const head = truncate(shortened.slice(0, 3).join(", "), MEMO_MAX - suffix.length);
   return head + suffix;
 }
 
@@ -199,7 +212,11 @@ export async function approveTransaction(
     }
 
     const update = isSingleCategory(items)
-      ? { category_id: items[0].categoryId, approved: true }
+      ? {
+          category_id: items[0].categoryId,
+          approved: true,
+          memo: buildMemo(tx.items.map((it) => it.title)),
+        }
       : { subtransactions: buildSubtransactions(tx, items), approved: true };
 
     await updateTransaction(settings.planId, ynabTransactionId, update);
