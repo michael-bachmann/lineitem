@@ -1,8 +1,11 @@
 // apps/extension/retailers/target/builders.test.ts
 import { describe, expect, it } from "vitest";
-import { buildPurchaseOrder, buildRefundOrder, cardPaymentCandidates } from "./builders";
+import {
+  buildPurchaseOrder, buildRefundOrder, toInvoiceDetail, toMixedPurchaseDetail, toReturnSectionDetail,
+  cardPaymentCandidates,
+} from "./builders";
 import { distributeOrder } from "@/lib/distribution";
-import type { RawTargetInvoiceDetail } from "./scraper";
+import type { RawTargetInvoiceDetail, RawTargetStoreDetail, RawTargetStoreSection } from "./scraper";
 import type { YnabCharge } from "@/lib/types";
 
 const charge = (over: Partial<YnabCharge>): YnabCharge => ({
@@ -101,6 +104,105 @@ describe("buildRefundOrder", () => {
     const result = distributeOrder(order, [refundCharge]);
     expect(result.failures).toEqual([]);
     expect(result.allocated[0].items[0].allocatedCents).toBe(2890);
+  });
+});
+
+describe("toInvoiceDetail", () => {
+  it("passes a pure (single-section) receipt through unchanged", () => {
+    const detail: RawTargetStoreDetail = {
+      sections: [
+        {
+          isRefund: false,
+          date: "2026-08-21",
+          items: [{ productId: "aaa", title: "Item A", unitPriceCents: 500, quantity: 2, amountCents: 1000 }],
+          itemSubtotalCents: 1000,
+        },
+      ],
+      invoiceTotalCents: 1000,
+      paymentLines: [{ cardLabel: "Visa*1234", isGiftCard: false, amountCents: 1000 }],
+    };
+    expect(toInvoiceDetail(detail)).toEqual({
+      isRefund: false,
+      items: detail.sections[0].items,
+      itemSubtotalCents: 1000,
+      invoiceTotalCents: 1000,
+      paymentLines: detail.paymentLines,
+    });
+  });
+});
+
+describe("toMixedPurchaseDetail and toReturnSectionDetail", () => {
+  // Real numbers from receipt /orders/stores/6097-1430-0171-4403, corrected
+  // after live testing: the ORIGINAL card charge was $100.65 (full receipt,
+  // both sections combined) — Target does not net out the later return — and
+  // a SEPARATE $67.65 refund posted weeks later for just the returned items
+  // (their $62.50 list price plus their own $5.15 tax).
+  const purchaseSection: RawTargetStoreSection = {
+    isRefund: false,
+    date: "2026-04-07",
+    items: [
+      { productId: "p1", title: "Plush", unitPriceCents: 250, quantity: 1, amountCents: 250 },
+      { productId: "p2", title: "T-Shirt", unitPriceCents: 1400, quantity: 1, amountCents: 1400 },
+    ],
+    itemSubtotalCents: 1650,
+  };
+  const returnSection: RawTargetStoreSection = {
+    isRefund: true,
+    date: "2026-05-03",
+    items: [
+      { productId: "r1", title: "Returned Widget", unitPriceCents: 6250, quantity: 1, amountCents: 6250 },
+    ],
+    itemSubtotalCents: 6250,
+  };
+  const detail: RawTargetStoreDetail = {
+    sections: [purchaseSection, returnSection],
+    invoiceTotalCents: 10065,
+    paymentLines: [{ cardLabel: "Visa*4434", isGiftCard: false, amountCents: 10065 }],
+  };
+
+  it("toMixedPurchaseDetail combines every section's items unmarked, using the receipt's real full total", () => {
+    const invoiceDetail = toMixedPurchaseDetail(detail);
+    expect(invoiceDetail).toEqual({
+      isRefund: false,
+      items: [...purchaseSection.items, ...returnSection.items],
+      itemSubtotalCents: 1650 + 6250,
+      invoiceTotalCents: 10065,
+      paymentLines: detail.paymentLines,
+    });
+
+    const order = buildPurchaseOrder("instore-r1", invoiceDetail, { p1: "p1.jpg", r1: "r1.jpg" });
+    expect(order.items).toHaveLength(3);
+    expect(order.items.every((i) => i.refundedAmountCents === 0)).toBe(true);
+
+    const purchaseCharge = charge({ ynabTransactionId: "yt-purchase", amountCents: 10065, isRefund: false });
+    const result = distributeOrder(order, [purchaseCharge]);
+    expect(result.failures).toEqual([]);
+    // The full $100.65 charge reconciles against all 3 items, not just the
+    // "Purchased"-section pair.
+    expect(result.allocated[0].items.reduce((s, i) => s + i.allocatedCents, 0)).toBe(10065);
+  });
+
+  it("toReturnSectionDetail builds a standalone refund order from just the return section", () => {
+    const refundCharge = charge({ ynabTransactionId: "yt-refund", amountCents: 6765, isRefund: true });
+    const returnDetail = toReturnSectionDetail(returnSection, refundCharge);
+    expect(returnDetail).toEqual({
+      isRefund: true,
+      items: returnSection.items,
+      itemSubtotalCents: 6250,
+      invoiceTotalCents: 6765,
+      paymentLines: [],
+    });
+
+    const order = buildRefundOrder("instore-r1", returnDetail, refundCharge, { r1: "r1.jpg" });
+    expect(order.items).toEqual([
+      expect.objectContaining({ productId: "r1", imageUrl: "r1.jpg", refundedAmountCents: 6250 }),
+    ]);
+    // taxCents derives from the REAL matched charge, not an estimate.
+    expect(order.refund).toEqual({ itemCents: 6250, taxCents: 515, totalCents: 6765 });
+
+    const result = distributeOrder(order, [refundCharge]);
+    expect(result.failures).toEqual([]);
+    expect(result.allocated[0].items[0].allocatedCents).toBe(6765);
   });
 });
 

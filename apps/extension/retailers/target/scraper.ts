@@ -218,3 +218,176 @@ export function parseOrderImageMap(doc: Document): Record<string, string> {
   }
   return map;
 }
+
+// ----------------------------------------------------------------------------
+// In-store purchases (/orders, "In-store" tab; /orders/stores/{receiptId})
+// ----------------------------------------------------------------------------
+
+const STORE_RECEIPT_ID_RE = /\/orders\/stores\/([\w-]+)(?:[/?#]|$)/;
+// Used for a SECTION's own heading on the detail page (e.g. "Return complete").
+// Broader than the online path's `\brefund\b` (which wouldn't match "Refunded").
+const STORE_REFUND_RE = /refund|return/i;
+// Live-verified: EVERY in-store list card says "Purchased" — even one for a
+// receipt that was later partially returned, whose card also says "Return
+// complete" (see `RawTargetStoreDetail`'s mixed-receipt case). The card's own
+// total is the FULL original purchase amount in that case too, not a netted
+// figure. So "Purchased" present is the reliable purchase/refund signal for
+// the LIST level — unlike STORE_REFUND_RE above, "return" text alone doesn't
+// mean this list entry is itself a refund. No standalone refund-only list
+// entry has been observed live; this only matters if one ever exists.
+const STORE_LIST_PURCHASED_RE = /purchased/i;
+
+export interface RawTargetStoreOrder {
+  receiptId: string;
+  /** ISO YYYY-MM-DD. */
+  date: string;
+  /** Absolute cents from the list card, or null if not shown. For a receipt
+   *  that was later partially returned, this is still the full ORIGINAL
+   *  purchase amount — Target doesn't net the two together. */
+  totalCents: number | null;
+  isRefund: boolean;
+}
+
+/** Parse the in-store tab of /orders into one entry per purchase (deduped by
+ *  receiptId). Same card shape as `parseOrdersFromDocument`: a
+ *  `[data-test="store-order-details-link"]` div wraps the real
+ *  `<a href="/orders/stores/{receiptId}">` anchor. */
+export function parseStoreOrdersFromDocument(doc: Document): RawTargetStoreOrder[] {
+  const out: RawTargetStoreOrder[] = [];
+  const seen = new Set<string>();
+  for (const card of doc.querySelectorAll<HTMLElement>(SELECTORS.storeOrderCard)) {
+    const link = card.querySelector<HTMLAnchorElement>(SELECTORS.storeOrderCardLink);
+    const idMatch = link?.getAttribute("href")?.match(STORE_RECEIPT_ID_RE);
+    if (!idMatch) continue;
+    const receiptId = idMatch[1];
+    if (seen.has(receiptId)) continue;
+
+    const text = card.textContent ?? "";
+    const date = parseTargetDate(text);
+    const money = text.match(MONEY_RE);
+    const totalCents = money ? parseCents(money[0]) : null;
+    const isRefund = !STORE_LIST_PURCHASED_RE.test(text);
+    seen.add(receiptId);
+    out.push({ receiptId, date, totalCents, isRefund });
+  }
+  return out;
+}
+
+const QTY_RE = /^qty\.?\s*(\d+)/i;
+
+/** Labels for the page-level "Purchased on {date}" / "Refund issued on {date}"
+ *  lines — live-verified to always carry the full date INCLUDING YEAR (e.g.
+ *  "Purchased on April 7, 2026 6:23 PM"), unlike each section's own heading
+ *  block (e.g. "Apr 7, 6:21 PM", no year). These lines sit outside the section
+ *  markup itself (found via a document-wide scan, same as `fieldAfter`
+ *  elsewhere), so they're read once per document and paired to a section by
+ *  that section's own direction (isRefund), not by DOM containment. */
+const STORE_PURCHASED_ON_LABEL = "Purchased on";
+const STORE_REFUND_ISSUED_ON_LABEL = "Refund issued on";
+
+export interface RawTargetStoreSection {
+  isRefund: boolean;
+  /** ISO YYYY-MM-DD — this section's own timestamp. Distinct per section on a
+   *  mixed receipt (a return can post weeks after the original purchase), so
+   *  this — not the list card's one date — is what matching must use. */
+  date: string;
+  items: RawTargetItem[];
+  /** Sum of absolute item line amounts (gross, pre-promo) for this section. */
+  itemSubtotalCents: number;
+}
+
+export interface RawTargetStoreDetail {
+  /** One entry per direction section. Length 1 for an ordinary (pure)
+   *  receipt; 2 for a mixed purchase+return receipt — the only mixed shape
+   *  seen live (one "Purchased" section, one "Return complete" section). */
+  sections: RawTargetStoreSection[];
+  /** The one blended Subtotal/Tax/Total block Target renders for the whole
+   *  receipt, even when it covers two unrelated real transactions summed
+   *  together (not netted). */
+  invoiceTotalCents: number;
+  paymentLines: RawTargetPaymentLine[];
+}
+
+function parseStoreSectionItems(section: Element): { items: RawTargetItem[]; itemSubtotalCents: number } {
+  const items: RawTargetItem[] = [];
+  for (const wrapper of section.querySelectorAll<HTMLElement>(SELECTORS.storeItemWrapper)) {
+    const title = wrapper.querySelector<HTMLElement>(SELECTORS.orderItemTitle);
+    const idMatch = title?.id.match(ITEM_ID_RE);
+    if (!title || !idMatch) continue;
+    const priceText = wrapper.querySelector<HTMLElement>(SELECTORS.storeItemPrice)?.textContent ?? "";
+    const unitPriceCents = parseCents(priceText);
+    // Skip $0 stub cards, same as the online invoice-detail path.
+    if (unitPriceCents === 0) continue;
+    const qtyText = [...wrapper.querySelectorAll("p")]
+      .map((p) => (p.textContent ?? "").trim())
+      .find((t) => QTY_RE.test(t));
+    const quantity = qtyText ? parseInt(qtyText.match(QTY_RE)![1], 10) : 1;
+    items.push({
+      productId: idMatch[1],
+      title: (title.textContent ?? "").trim(),
+      unitPriceCents,
+      quantity,
+      amountCents: unitPriceCents * quantity,
+    });
+  }
+  const itemSubtotalCents = items.reduce((s, it) => s + it.amountCents, 0);
+  return { items, itemSubtotalCents };
+}
+
+/**
+ * Parse a single in-store receipt page (/orders/stores/{receiptId}). Unlike an
+ * online order — which splits into per-shipment invoices fetched from separate
+ * pages — an in-store purchase is one register transaction: items, totals, and
+ * payment tender all render on this one page. A receipt can also be *mixed*: a
+ * return bundled with a purchase under the same URL, each in its own
+ * `storePackageSection` with its own `<h2>` and items, but sharing the page's
+ * one blended total. The item cards reuse the same component as the online
+ * order-detail image map (`orderItemTitle`), so `productId` stays consistent
+ * across channels for the same product.
+ */
+export function parseStorePurchaseDetailFromDocument(doc: Document): RawTargetStoreDetail {
+  const purchasedOnDate = parseTargetDate(fieldAfter(doc.body, STORE_PURCHASED_ON_LABEL));
+  const refundIssuedOnDate = parseTargetDate(fieldAfter(doc.body, STORE_REFUND_ISSUED_ON_LABEL));
+
+  const sections: RawTargetStoreSection[] = [
+    ...doc.querySelectorAll<HTMLElement>(SELECTORS.storePackageSection),
+  ].map((sectionEl) => {
+    const headingText = sectionEl.querySelector("h2")?.textContent ?? "";
+    const isRefund = STORE_REFUND_RE.test(headingText);
+    return {
+      isRefund,
+      date: isRefund ? refundIssuedOnDate : purchasedOnDate,
+      ...parseStoreSectionItems(sectionEl),
+    };
+  });
+
+  const invoiceTotalCents = parseCents(
+    doc.querySelector<HTMLElement>(SELECTORS.storeGrandTotal)?.textContent ?? "",
+  );
+
+  // Payment lines: each child of the card-list container is one tender row
+  // (card label + amount). Structural (by position, not a guessed hashed
+  // class) since only the container's class was confirmed live.
+  const paymentLines: RawTargetPaymentLine[] = [];
+  const cardList = doc.querySelector<HTMLElement>(SELECTORS.storePaymentCardList);
+  if (cardList) {
+    for (const row of cardList.children) {
+      const text = (row.textContent ?? "").trim();
+      if (!text) continue;
+      const m = text.match(MONEY_RE);
+      const cardLabel = m ? text.slice(0, text.indexOf(m[0])).trim() : text;
+      if (!cardLabel) continue;
+      paymentLines.push({
+        cardLabel,
+        isGiftCard: /gift\s*card/i.test(cardLabel),
+        amountCents: m ? parseCents(m[0]) : 0,
+      });
+    }
+  }
+  // Single payment line with no explicit amount bills the whole total.
+  if (paymentLines.length === 1 && paymentLines[0].amountCents === 0) {
+    paymentLines[0].amountCents = invoiceTotalCents;
+  }
+
+  return { sections, invoiceTotalCents, paymentLines };
+}

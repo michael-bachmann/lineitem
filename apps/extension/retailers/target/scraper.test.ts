@@ -42,7 +42,10 @@ describe("isLoginUrl", () => {
   });
 });
 
-import { parseOrdersFromDocument, parseInvoicesListFromDocument, parseInvoiceDetailFromDocument, parseOrderImageMap } from "./scraper";
+import {
+  parseOrdersFromDocument, parseInvoicesListFromDocument, parseInvoiceDetailFromDocument, parseOrderImageMap,
+  parseStoreOrdersFromDocument, parseStorePurchaseDetailFromDocument,
+} from "./scraper";
 
 describe("parseOrdersFromDocument", () => {
   // Mirrors the REAL Target /orders markup: `order-details-link` is a <div>
@@ -317,5 +320,306 @@ describe("parseOrderImageMap", () => {
       "90571485": "https://target.scene7.com/is/image/Target/GUEST_AAA?wid=160",
       "83710567": "https://target.scene7.com/is/image/Target/GUEST_BBB?wid=160",
     });
+  });
+});
+
+describe("parseStoreOrdersFromDocument", () => {
+  // Mirrors the REAL Target /orders in-store-tab markup: `store-order-details-link`
+  // is a <div> card wrapper (not an <a>), same shape as the online orders list.
+  it("extracts receiptId, date, and total for each in-store purchase card", () => {
+    document.body.innerHTML = `
+      <div class="styles_orderCard__AT6kC">
+        <div data-test="store-order-details-link">
+          <div class="h-display-flex h-flex-justify-space-between">
+            <p class="h-text-bold h-text-lg">Aug 23, 2026</p>
+            <a href="/orders/stores/6235-0067-0161-8120">View purchase</a>
+          </div>
+          <p>$302.11</p>
+          <p>Purchased</p>
+          <p>Store trip at Plano</p>
+        </div>
+      </div>
+      <div class="styles_orderCard__AT6kC">
+        <div data-test="store-order-details-link">
+          <div class="h-display-flex h-flex-justify-space-between">
+            <p class="h-text-bold h-text-lg">Aug 21, 2026</p>
+            <a href="/orders/stores/6235-0065-0138-4471">View purchase</a>
+          </div>
+          <p>$59.74</p>
+          <p>Purchased</p>
+          <p>Store trip at North Dallas Colt Road</p>
+        </div>
+      </div>
+    `;
+    expect(parseStoreOrdersFromDocument(document)).toEqual([
+      { receiptId: "6235-0067-0161-8120", date: "2026-08-23", totalCents: 30211, isRefund: false },
+      { receiptId: "6235-0065-0138-4471", date: "2026-08-21", totalCents: 5974, isRefund: false },
+    ]);
+  });
+
+  it("dedupes if the same card appears twice; null total when none shown", () => {
+    document.body.innerHTML = `
+      <div class="styles_orderCard__AT6kC">
+        <div data-test="store-order-details-link">
+          <p class="h-text-bold h-text-lg">Aug 23, 2026</p>
+          <a href="/orders/stores/6235-0067-0161-8120">View purchase</a>
+        </div>
+        <p>Purchased</p>
+      </div>
+      <div class="styles_orderCard__AT6kC">
+        <div data-test="store-order-details-link">
+          <p class="h-text-bold h-text-lg">Aug 23, 2026</p>
+          <a href="/orders/stores/6235-0067-0161-8120">View purchase</a>
+        </div>
+        <p>Purchased</p>
+      </div>
+    `;
+    expect(parseStoreOrdersFromDocument(document)).toEqual([
+      { receiptId: "6235-0067-0161-8120", date: "2026-08-23", totalCents: null, isRefund: false },
+    ]);
+  });
+
+  it("keeps isRefund false for a receipt later partially returned (card shows both 'Purchased' and 'Return complete')", () => {
+    // Live-verified on /orders/stores/6097-1430-0171-4403: the list card's
+    // total is still the FULL original purchase, not netted against the
+    // return, so this card must stay on the purchase side for list-total
+    // matching — "Return complete" text alone doesn't make the list entry a
+    // refund (see STORE_LIST_PURCHASED_RE's comment in scraper.ts).
+    document.body.innerHTML = `
+      <div class="styles_orderCard__AT6kC">
+        <div data-test="store-order-details-link">
+          <p class="h-text-bold h-text-lg">Apr 7, 2026</p>
+          <a href="/orders/stores/6097-1430-0171-4403">View purchase</a>
+        </div>
+        <p>$100.65</p>
+        <p>Return complete</p>
+        <p>Purchased</p>
+        <p>Store trip at Richardson Sq Mall</p>
+      </div>
+    `;
+    expect(parseStoreOrdersFromDocument(document)).toEqual([
+      { receiptId: "6097-1430-0171-4403", date: "2026-04-07", totalCents: 10065, isRefund: false },
+    ]);
+  });
+});
+
+describe("parseStorePurchaseDetailFromDocument", () => {
+  // Real structure confirmed live: an in-store receipt's item cards reuse the
+  // exact same "package item" component as the online order-detail image map
+  // (`h3[id^="item-"]`), plus an `[data-test="order-price"]` price and a plain
+  // "Qty {n}" text line, all inside a `.styles_packageCardItemsSection__wnwnv`
+  // section with its own `<h2>` — one section for a pure receipt, two for a
+  // mixed purchase+return receipt. A page-level "Purchased on {date, with
+  // year}" / "Refund issued on {date, with year}" line (live-verified;
+  // outside the section markup) is each section's own date — the section's
+  // own heading block never includes a year.
+  it("parses a single-item purchase with items, total, one payment line, and its own date", () => {
+    document.body.innerHTML = `
+      <div class="styles_packageCardItemsSection__wnwnv">
+        <h2><span>Purchased</span></h2>
+        <div class="styles_styledPackageItem__Uez2M">
+          <div class="styles_pictureWrapper__nFVTN">
+            <picture><img src="https://target.scene7.com/is/image/Target/GUEST_AAA?wid=160" /></picture>
+          </div>
+          <h3 id="item-16291865">40ct Tissue Paper White - Spritz&#8482;</h3>
+          <p class="h-text-md"><span data-test="order-price">$4.00</span></p>
+          <p class="h-text-sm">Qty 1</p>
+        </div>
+      </div>
+      <div class="h-text-sm">Purchased on April 7, 2026 6:23 PM</div>
+      <span data-test="grand-total">$4.00</span>
+      <div class="styles_cardListWrapper__3Z6EW">
+        <div class="h-display-flex">Visa *9961</div>
+      </div>
+    `;
+    expect(parseStorePurchaseDetailFromDocument(document)).toEqual({
+      sections: [
+        {
+          isRefund: false,
+          date: "2026-04-07",
+          items: [
+            { productId: "16291865", title: "40ct Tissue Paper White - Spritz™",
+              unitPriceCents: 400, quantity: 1, amountCents: 400 },
+          ],
+          itemSubtotalCents: 400,
+        },
+      ],
+      invoiceTotalCents: 400,
+      paymentLines: [
+        { cardLabel: "Visa *9961", isGiftCard: false, amountCents: 400 },
+      ],
+    });
+  });
+
+  it("parses multiple items and multiplies unit price by quantity", () => {
+    document.body.innerHTML = `
+      <div class="styles_packageCardItemsSection__wnwnv">
+        <h2><span>Purchased</span></h2>
+        <div class="styles_styledPackageItem__Uez2M">
+          <h3 id="item-11111111">Item One</h3>
+          <p><span data-test="order-price">$3.00</span></p>
+          <p class="h-text-sm">Qty 2</p>
+        </div>
+        <div class="styles_styledPackageItem__Uez2M">
+          <h3 id="item-22222222">Item Two</h3>
+          <p><span data-test="order-price">$5.00</span></p>
+          <p class="h-text-sm">Qty 1</p>
+        </div>
+      </div>
+      <span data-test="grand-total">$11.00</span>
+      <div class="styles_cardListWrapper__3Z6EW">
+        <div class="h-display-flex">Visa *9961$11.00</div>
+      </div>
+    `;
+    const result = parseStorePurchaseDetailFromDocument(document);
+    expect(result.sections[0].items).toEqual([
+      { productId: "11111111", title: "Item One", unitPriceCents: 300, quantity: 2, amountCents: 600 },
+      { productId: "22222222", title: "Item Two", unitPriceCents: 500, quantity: 1, amountCents: 500 },
+    ]);
+    expect(result.sections[0].itemSubtotalCents).toBe(1100);
+    expect(result.invoiceTotalCents).toBe(1100);
+    expect(result.paymentLines).toEqual([
+      { cardLabel: "Visa *9961", isGiftCard: false, amountCents: 1100 },
+    ]);
+  });
+
+  it("parses a receipt split across a card and a gift card", () => {
+    document.body.innerHTML = `
+      <div class="styles_packageCardItemsSection__wnwnv">
+        <h2><span>Purchased</span></h2>
+        <div class="styles_styledPackageItem__Uez2M">
+          <h3 id="item-33333333">Split Item</h3>
+          <p><span data-test="order-price">$20.00</span></p>
+          <p class="h-text-sm">Qty 1</p>
+        </div>
+      </div>
+      <span data-test="grand-total">$20.00</span>
+      <div class="styles_cardListWrapper__3Z6EW">
+        <div class="h-display-flex">Visa *9961$15.00</div>
+        <div class="h-display-flex">Target GiftCard$5.00</div>
+      </div>
+    `;
+    const result = parseStorePurchaseDetailFromDocument(document);
+    expect(result.paymentLines).toEqual([
+      { cardLabel: "Visa *9961", isGiftCard: false, amountCents: 1500 },
+      { cardLabel: "Target GiftCard", isGiftCard: true, amountCents: 500 },
+    ]);
+  });
+
+  it("skips a $0 stub item card", () => {
+    document.body.innerHTML = `
+      <div class="styles_packageCardItemsSection__wnwnv">
+        <h2><span>Purchased</span></h2>
+        <div class="styles_styledPackageItem__Uez2M">
+          <h3 id="item-44444444">Real Item</h3>
+          <p><span data-test="order-price">$8.89</span></p>
+          <p class="h-text-sm">Qty 1</p>
+        </div>
+        <div class="styles_styledPackageItem__Uez2M">
+          <h3 id="item-55555555">Free Bag</h3>
+          <p><span data-test="order-price">$0.00</span></p>
+          <p class="h-text-sm">Qty 1</p>
+        </div>
+      </div>
+      <span data-test="grand-total">$8.89</span>
+    `;
+    const result = parseStorePurchaseDetailFromDocument(document);
+    expect(result.sections[0].items).toEqual([
+      { productId: "44444444", title: "Real Item", unitPriceCents: 889, quantity: 1, amountCents: 889 },
+    ]);
+  });
+
+  it("marks a refund from the heading (literal 'Refunded')", () => {
+    document.body.innerHTML = `
+      <div class="styles_packageCardItemsSection__wnwnv">
+        <h2><span>Refunded</span></h2>
+        <div class="styles_styledPackageItem__Uez2M">
+          <h3 id="item-66666666">Returned Item</h3>
+          <p><span data-test="order-price">$12.00</span></p>
+          <p class="h-text-sm">Qty 1</p>
+        </div>
+      </div>
+      <span data-test="grand-total">$12.00</span>
+    `;
+    expect(parseStorePurchaseDetailFromDocument(document).sections[0].isRefund).toBe(true);
+  });
+
+  it("marks a pure return from the live heading text ('Return complete') and its own dated line", () => {
+    document.body.innerHTML = `
+      <div class="styles_packageCardItemsSection__wnwnv">
+        <h2><span>Return complete</span></h2>
+        <div class="styles_styledPackageItem__Uez2M">
+          <h3 id="item-77777777">Returned Item</h3>
+          <p><span data-test="order-price">$12.00</span></p>
+          <p class="h-text-sm">Qty 1</p>
+        </div>
+      </div>
+      <div class="h-text-bold">Refund issued on May 3, 2026</div>
+      <span data-test="grand-total">$12.00</span>
+    `;
+    const result = parseStorePurchaseDetailFromDocument(document);
+    expect(result.sections).toEqual([
+      {
+        isRefund: true,
+        date: "2026-05-03",
+        items: [
+          { productId: "77777777", title: "Returned Item", unitPriceCents: 1200, quantity: 1, amountCents: 1200 },
+        ],
+        itemSubtotalCents: 1200,
+      },
+    ]);
+  });
+
+  it("parses a MIXED receipt: two sections, own items/dates/directions, one blended total", () => {
+    // Shape confirmed live on receipt /orders/stores/6097-1430-0171-4403: a
+    // purchase and a later return bundled under one receipt URL, with only
+    // one blended Subtotal/Tax/Total for both.
+    document.body.innerHTML = `
+      <div class="styles_packageCardItemsSection__wnwnv">
+        <h2><span>Purchased</span></h2>
+        <div class="styles_styledPackageItem__Uez2M">
+          <h3 id="item-94854166">6'' Bagel and Lox Plush</h3>
+          <p><span data-test="order-price">$2.50</span></p>
+          <p class="h-text-sm">Qty 1</p>
+        </div>
+        <div class="styles_styledPackageItem__Uez2M">
+          <h3 id="item-94226156">Graphic T-Shirt</h3>
+          <p><span data-test="order-price">$14.00</span></p>
+          <p class="h-text-sm">Qty 1</p>
+        </div>
+      </div>
+      <div class="h-text-sm">Purchased on April 7, 2026 6:23 PM</div>
+      <div class="styles_packageCardItemsSection__wnwnv">
+        <h2><span>Return complete</span></h2>
+        <div class="styles_styledPackageItem__Uez2M">
+          <h3 id="item-11223344">Returned Widget</h3>
+          <p><span data-test="order-price">$62.50</span></p>
+          <p class="h-text-sm">Qty 1</p>
+        </div>
+        <div class="h-text-bold">Refund issued on May 3, 2026</div>
+      </div>
+      <span data-test="grand-total">$100.65</span>
+    `;
+    const result = parseStorePurchaseDetailFromDocument(document);
+    expect(result.sections).toEqual([
+      {
+        isRefund: false,
+        date: "2026-04-07",
+        items: [
+          { productId: "94854166", title: "6'' Bagel and Lox Plush", unitPriceCents: 250, quantity: 1, amountCents: 250 },
+          { productId: "94226156", title: "Graphic T-Shirt", unitPriceCents: 1400, quantity: 1, amountCents: 1400 },
+        ],
+        itemSubtotalCents: 1650,
+      },
+      {
+        isRefund: true,
+        date: "2026-05-03",
+        items: [
+          { productId: "11223344", title: "Returned Widget", unitPriceCents: 6250, quantity: 1, amountCents: 6250 },
+        ],
+        itemSubtotalCents: 6250,
+      },
+    ]);
+    expect(result.invoiceTotalCents).toBe(10065);
   });
 });

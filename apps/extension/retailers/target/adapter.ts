@@ -7,13 +7,14 @@ import {
 } from "@/lib/matcher";
 import { openRetailerTab, awaitPageResult, clearBufferedPageResult } from "@/background/tabs";
 import {
-  ordersUrl, orderInvoicesUrl, invoiceDetailUrl, orderDetailUrl,
+  ordersUrl, orderInvoicesUrl, invoiceDetailUrl, orderDetailUrl, storeOrderDetailUrl,
 } from "@/retailers/target/selectors";
 import {
-  buildPurchaseOrder, buildRefundOrder, cardPaymentCandidates, type TargetCandidate,
+  buildPurchaseOrder, buildRefundOrder, toInvoiceDetail, toMixedPurchaseDetail, toReturnSectionDetail,
+  cardPaymentCandidates, type TargetCandidate,
 } from "@/retailers/target/builders";
 import type {
-  RawTargetOrder, RawTargetInvoice, RawTargetInvoiceDetail,
+  RawTargetOrder, RawTargetInvoice, RawTargetInvoiceDetail, RawTargetStoreOrder, RawTargetStoreDetail,
 } from "@/retailers/target/scraper";
 import type { TargetPageResult } from "@/retailers/target/page";
 
@@ -29,6 +30,16 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 // (backordered/late shipments are billed when they ship).
 const PREFILTER_BEFORE_MS = 7 * DAY_MS;
 const PREFILTER_AFTER_MS = 45 * DAY_MS;
+
+// A mixed in-store receipt's return section has no independently displayed
+// total (only item prices — see RawTargetStoreDetail). A real refund charge
+// must cover at least the pre-tax item value; this caps how much tax it can
+// plausibly add on top (well above any real US sales tax rate) so an
+// unrelated charge that happens to be near in date and above the item value
+// doesn't get treated as a match. Uniqueness among remaining charges (not
+// this bound) is the actual safety net — same "ambiguous → don't guess" rule
+// used everywhere else in this file.
+const RETURN_SECTION_MAX_TAX_RATE = 0.25;
 
 /** Thrown when a gated page (orders list mid-walk, invoices, invoice detail, or
  *  order detail) redirected to Target's step-up sign-in — surfaced to the content
@@ -262,11 +273,164 @@ export const targetAdapter: RetailerAdapter = {
         matched.push({ order, charges: [mi.charge] });
       }
 
+      // Phase 5: a charge still unmatched may be an in-store purchase — a
+      // separate tab on the same /orders page the walk above never reads. An
+      // in-store receipt is one register transaction, so it's matched directly
+      // by its list-card total/date (no invoice indirection), then its one
+      // detail page gives items, totals, AND payment tender together.
+      const storeDetailFailures: { charge: YnabCharge; reason: string }[] = [];
+      if (remaining.length > 0) {
+        // Phase 4 leaves the tab wherever its last invoice-detail/order-detail
+        // read landed — the in-store tab only exists as client-side state on
+        // /orders itself, so get back there (and let the fresh load's own
+        // auto-describe land) before switching tabs.
+        navigate(tabId, ordersUrl());
+        const backOnOrders = await awaitOrders(tabId, null);
+        if (backOnOrders?.pageKind === "login") throw new StepUpRequired(ordersUrl());
+
+        describeStoreOrders(tabId);
+        const firstStore = await awaitStoreOrders(tabId, null);
+        if (firstStore?.pageKind === "login") throw new StepUpRequired(ordersUrl());
+
+        if (firstStore && firstStore.pageKind === "store-orders") {
+          const storeOrders = await collectStoreOrders(
+            tabId, firstStore, remaining, maxPages, signal, onScrapeProgress,
+          );
+          console.info(`[target] phase 5: ${storeOrders.length} in-store purchases in the window`);
+
+          const storeMatches: { receiptId: string; charge: YnabCharge }[] = [];
+          const consumedReceipts = new Set<string>();
+          const stillRemaining: YnabCharge[] = [];
+          for (const charge of remaining) {
+            const cand = storeOrders
+              .filter((o) => o.totalCents !== null && o.isRefund === charge.isRefund && !consumedReceipts.has(o.receiptId))
+              .map((o) => ({ receiptId: o.receiptId, amountCents: o.totalCents!, date: o.date }));
+            const hit = matchByAmountAndDate(charge.amountCents, charge.date, cand);
+            if (hit) {
+              consumedReceipts.add(hit.receiptId);
+              storeMatches.push({ receiptId: hit.receiptId, charge });
+            } else {
+              stillRemaining.push(charge);
+            }
+          }
+          remaining = stillRemaining;
+          onScrapeProgress?.({ phase: "matching", count: matchedInvoices.length + storeMatches.length });
+
+          for (let i = 0; i < storeMatches.length; i++) {
+            signal?.throwIfAborted();
+            onScrapeProgress?.({
+              phase: "scraping",
+              index: matchedInvoices.length + i + 1,
+              total: matchedInvoices.length + storeMatches.length,
+            });
+            const sm = storeMatches[i];
+
+            let read: { detail: RawTargetStoreDetail; imageMap: Record<string, string> };
+            try {
+              read = await readWithRetry(`store purchase ${sm.receiptId}`, () =>
+                readStorePurchaseDetail(tabId, sm.receiptId));
+            } catch (err) {
+              if (err instanceof StepUpRequired) throw err;
+              console.warn(`[target] couldn't read in-store purchase ${sm.receiptId}`, err);
+              storeDetailFailures.push({ charge: sm.charge, reason: READ_FAILED_REASON });
+              continue;
+            }
+            const { detail, imageMap } = read;
+            if (detail.sections.length === 0) {
+              storeDetailFailures.push({ charge: sm.charge, reason: "Target in-store purchase had no parseable items" });
+              continue;
+            }
+            if (detail.sections.length === 1) {
+              const [section] = detail.sections;
+              if (section.items.length === 0) {
+                storeDetailFailures.push({ charge: sm.charge, reason: "Target in-store purchase had no parseable items" });
+                continue;
+              }
+              const invoiceDetail = toInvoiceDetail(detail);
+              const orderId = `instore-${sm.receiptId}`;
+              const order = invoiceDetail.isRefund
+                ? buildRefundOrder(orderId, invoiceDetail, sm.charge, imageMap)
+                : buildPurchaseOrder(orderId, invoiceDetail, imageMap);
+              matched.push({ order, charges: [sm.charge] });
+              continue;
+            }
+            // Mixed receipt (purchase + return under one URL): the list card's
+            // total is the FULL original purchase — live-verified it is NOT
+            // netted against the later return — so `sm.charge` (matched against
+            // that total) is genuinely the purchase side, and its order must
+            // reconcile against EVERY item on the receipt, not just the
+            // "Purchased" section: Target's per-section labels describe an
+            // item's current status, not what was originally billed.
+            if (detail.sections.some((s) => s.items.length === 0)) {
+              storeDetailFailures.push({ charge: sm.charge, reason: "Target in-store purchase had no parseable items" });
+              continue;
+            }
+            const orderId = `instore-${sm.receiptId}`;
+            const order = buildPurchaseOrder(orderId, toMixedPurchaseDetail(detail), imageMap);
+            matched.push({ order, charges: [sm.charge] });
+          }
+
+          // Phase 5b: a still-remaining REFUND charge may be the later, separate
+          // return half of a mixed in-store receipt (see toMixedPurchaseDetail's
+          // note) — its purchase side may not even be in this batch (e.g.
+          // already approved in an earlier sync), so this doesn't depend on
+          // Phase 5a having matched anything. There's no independently displayed
+          // total for just the return section (only item prices), so this can't
+          // match by exact total the way everything else does — instead it opens
+          // every still-plausible receipt and requires the return section to be
+          // the ONE unambiguous candidate for a given remaining refund charge
+          // (date window + a generous plausible-tax bound); zero or multiple
+          // candidates fails closed, same as everywhere else in this file.
+          const consumedForReturn = new Set<string>();
+          for (const storeOrder of storeOrders) {
+            if (!remaining.some((c) => c.isRefund)) break;
+            signal?.throwIfAborted();
+            if (consumedForReturn.has(storeOrder.receiptId)) continue;
+            // A refund can't exceed the receipt's own total.
+            if (!remaining.some((c) => c.isRefund && c.amountCents <= (storeOrder.totalCents ?? Infinity))) continue;
+
+            let read: { detail: RawTargetStoreDetail; imageMap: Record<string, string> };
+            try {
+              read = await readWithRetry(`store purchase ${storeOrder.receiptId}`, () =>
+                readStorePurchaseDetail(tabId, storeOrder.receiptId));
+            } catch (err) {
+              if (err instanceof StepUpRequired) throw err;
+              console.warn(`[target] skipping in-store receipt ${storeOrder.receiptId}: unreadable`, err);
+              continue;
+            }
+            const { detail, imageMap } = read;
+            if (detail.sections.length !== 2) continue; // not a mixed receipt
+            const returnSection = detail.sections.find((s) => s.isRefund);
+            if (!returnSection || returnSection.items.length === 0) continue;
+
+            const candidates = remaining.filter(
+              (c) =>
+                c.isRefund
+                && c.amountCents >= returnSection.itemSubtotalCents
+                && c.amountCents <= returnSection.itemSubtotalCents * (1 + RETURN_SECTION_MAX_TAX_RATE)
+                && Math.abs(new Date(c.date).getTime() - new Date(returnSection.date).getTime()) <= THREE_DAYS_MS,
+            );
+            if (candidates.length !== 1) continue; // zero or ambiguous — fail closed
+
+            const [refundCharge] = candidates;
+            remaining = remaining.filter((c) => c !== refundCharge);
+            consumedForReturn.add(storeOrder.receiptId);
+
+            const orderId = `instore-${storeOrder.receiptId}`;
+            const returnDetail = toReturnSectionDetail(returnSection, refundCharge);
+            const order = buildRefundOrder(orderId, returnDetail, refundCharge, imageMap);
+            matched.push({ order, charges: [refundCharge] });
+            onScrapeProgress?.({ phase: "matching", count: matchedInvoices.length + storeMatches.length + matched.length });
+          }
+        }
+      }
+
       const unmatched = [
         ...remaining.map((c) => ({ charge: c, reason: NO_MATCH_REASON })),
         ...detailFailures,
+        ...storeDetailFailures,
       ];
-      console.info(`[target] done: ${matched.length} matched, ${detailFailures.length} read-failed of ${matchedInvoices.length} matched invoices`);
+      console.info(`[target] done: ${matched.length} matched, ${detailFailures.length + storeDetailFailures.length} read-failed of ${matchedInvoices.length} matched invoices`);
       return { matched, unmatched };
     } catch (err) {
       if (err instanceof StepUpRequired) {
@@ -360,6 +524,20 @@ async function readOrderImages(tabId: number, orderId: string): Promise<Record<s
   return r.imageMap;
 }
 
+async function readStorePurchaseDetail(
+  tabId: number, receiptId: string,
+): Promise<{ detail: RawTargetStoreDetail; imageMap: Record<string, string> }> {
+  const url = storeOrderDetailUrl(receiptId);
+  navigate(tabId, url);
+  const r = await awaitPageResult<TargetPageResult>(
+    tabId,
+    (x) => x.pageKind === "login" || (x.pageKind === "store-purchase-detail" && x.receiptId === receiptId),
+  );
+  if (r.pageKind === "login") throw new StepUpRequired(url);
+  if (r.pageKind !== "store-purchase-detail") throw new Error(`Target store purchase ${receiptId}: got ${r.pageKind}`);
+  return { detail: r.detail, imageMap: r.imageMap };
+}
+
 // ----------------------------------------------------------------------------
 // Internal: orders-list pagination (Load more, in-page)
 // ----------------------------------------------------------------------------
@@ -438,6 +616,72 @@ async function awaitOrders(
   }
 }
 
+/** Walk the in-store tab's list (Load more) until past cutoff — mirrors
+ *  `collectOrders`, one level simpler: a store order's own total/date is
+ *  matched directly, with no per-order invoices fetch in between. */
+async function collectStoreOrders(
+  tabId: number,
+  first: TargetPageResult & { pageKind: "store-orders" },
+  charges: YnabCharge[],
+  maxPages: number,
+  signal?: AbortSignal,
+  onProgress?: (event: ScrapeProgress) => void,
+): Promise<RawTargetStoreOrder[]> {
+  const cutoff = cutoffDateFor(charges);
+  let result: TargetPageResult | null = first;
+  let orders: RawTargetStoreOrder[] = first.orders;
+
+  for (let page = 0; page < maxPages; page++) {
+    signal?.throwIfAborted();
+    if (!result) {
+      console.warn(`[target] phase 5 stop: Load more produced no new in-store purchases (timeout) at ${orders.length}`);
+      break;
+    }
+    if (result.pageKind !== "store-orders") break;
+    orders = result.orders;
+
+    onProgress?.({ phase: "listing", count: orders.length });
+
+    const oldest = orders.reduce(
+      (min, o) => (o.date && o.date < min ? o.date : min),
+      "9999-12-31",
+    );
+    if (oldest < cutoff) {
+      console.info(`[target] phase 5 stop: reached date cutoff at ${orders.length} in-store purchases`);
+      break;
+    }
+    if (!result.hasMore) {
+      console.info(`[target] phase 5 stop: no Load-more button at ${orders.length} in-store purchases`);
+      break;
+    }
+
+    const prevFingerprint = result.fingerprint;
+    console.info(`[target] Load more in-store (have ${orders.length})`);
+    loadMore(tabId);
+    result = await awaitStoreOrders(tabId, prevFingerprint);
+    if (result?.pageKind === "login") throw new StepUpRequired(ordersUrl());
+  }
+
+  return orders;
+}
+
+/** Same idea as `awaitOrders`, for the in-store tab's list. */
+async function awaitStoreOrders(
+  tabId: number,
+  prevFingerprint: string | null,
+): Promise<TargetPageResult | null> {
+  try {
+    return await awaitPageResult<TargetPageResult>(
+      tabId,
+      (r) =>
+        r.pageKind === "login" ||
+        (r.pageKind === "store-orders" && (prevFingerprint === null || r.fingerprint !== prevFingerprint)),
+    );
+  } catch {
+    return null;
+  }
+}
+
 // ----------------------------------------------------------------------------
 // Internal: fire-and-forget triggers — the page answers with a PAGE_RESULT.
 // ----------------------------------------------------------------------------
@@ -447,6 +691,9 @@ function navigate(tabId: number, url: string): void {
 }
 function describe(tabId: number): void {
   browser.tabs.sendMessage(tabId, { type: "DESCRIBE" }).catch(() => {});
+}
+function describeStoreOrders(tabId: number): void {
+  browser.tabs.sendMessage(tabId, { type: "DESCRIBE_STORE_ORDERS" }).catch(() => {});
 }
 function loadMore(tabId: number): void {
   browser.tabs.sendMessage(tabId, { type: "LOAD_MORE" }).catch(() => {});

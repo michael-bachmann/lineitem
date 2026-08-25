@@ -3,9 +3,11 @@ import {
   detectTargetPageKind,
   targetOrderIdFromUrl,
   targetInvoiceIdFromUrl,
+  targetReceiptIdFromUrl,
   ordersFingerprint,
+  storeOrdersFingerprint,
 } from "./page";
-import type { RawTargetOrder } from "./scraper";
+import type { RawTargetOrder, RawTargetStoreOrder } from "./scraper";
 
 const B = "https://www.target.com";
 
@@ -24,6 +26,10 @@ describe("detectTargetPageKind", () => {
 
   it("classifies the invoice detail page", () => {
     expect(detectTargetPageKind(`${B}/orders/123/invoices/456`)).toBe("invoice-detail");
+  });
+
+  it("classifies an in-store purchase detail page", () => {
+    expect(detectTargetPageKind(`${B}/orders/stores/6235-0067-0161-8120`)).toBe("store-purchase-detail");
   });
 
   it("classifies any sign-in page as login (so a step-up surfaces as a result)", () => {
@@ -54,6 +60,17 @@ describe("targetOrderIdFromUrl / targetInvoiceIdFromUrl", () => {
   });
 });
 
+describe("targetReceiptIdFromUrl", () => {
+  it("extracts the receipt id from an in-store purchase detail URL", () => {
+    expect(targetReceiptIdFromUrl(`${B}/orders/stores/6235-0067-0161-8120`)).toBe("6235-0067-0161-8120");
+  });
+
+  it("returns empty string for online-order or non-order URLs", () => {
+    expect(targetReceiptIdFromUrl(`${B}/orders/123`)).toBe("");
+    expect(targetReceiptIdFromUrl(`${B}/cart`)).toBe("");
+  });
+});
+
 describe("ordersFingerprint", () => {
   const order = (id: string): RawTargetOrder => ({ orderId: id, date: "2026-06-01", orderTotalCents: 1000 });
 
@@ -66,5 +83,21 @@ describe("ordersFingerprint", () => {
   it("is stable for the same cumulative list (a re-render isn't mistaken for growth)", () => {
     const list = [order("A"), order("B")];
     expect(ordersFingerprint(list)).toBe(ordersFingerprint([...list]));
+  });
+});
+
+describe("storeOrdersFingerprint", () => {
+  const storeOrder = (id: string): RawTargetStoreOrder =>
+    ({ receiptId: id, date: "2026-06-01", totalCents: 1000, isRefund: false });
+
+  it("changes when Load more appends in-store purchases", () => {
+    const before = [storeOrder("A"), storeOrder("B")];
+    const after = [storeOrder("A"), storeOrder("B"), storeOrder("C")];
+    expect(storeOrdersFingerprint(before)).not.toBe(storeOrdersFingerprint(after));
+  });
+
+  it("is stable for the same cumulative list", () => {
+    const list = [storeOrder("A"), storeOrder("B")];
+    expect(storeOrdersFingerprint(list)).toBe(storeOrdersFingerprint([...list]));
   });
 });

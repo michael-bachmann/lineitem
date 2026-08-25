@@ -20,6 +20,26 @@ export const SELECTORS = {
 
   // Order detail (/orders/{id}) — image map only
   orderItemTitle: "h3[id^='item-']",
+
+  // Orders list, in-store tab (same /orders URL — switching tabs is client-side,
+  // no navigation). "Load more" is covered by loadMoreButton above.
+  tabInstore: "[data-test='tabInstore']",
+  storeOrderCard: ".styles_orderCard__AT6kC",
+  storeOrderCardLink: "a[href*='/orders/stores/']",
+
+  // In-store purchase detail (/orders/stores/{receiptId}) — a single page with
+  // items, totals, AND payment tender (unlike an online order, which splits
+  // across separate invoices/invoice-detail/order-detail pages). Item cards
+  // reuse the same component as the online order-detail image map, so
+  // `orderItemTitle` above applies here too, scoped per item via storeItemWrapper.
+  storeItemWrapper: ".styles_styledPackageItem__Uez2M",
+  storeItemPrice: "[data-test='order-price']",
+  storeGrandTotal: "[data-test='grand-total']",
+  storePaymentCardList: ".styles_cardListWrapper__3Z6EW",
+  // A mixed receipt (purchase + return under one URL) renders each direction in
+  // its own section, each with its own <h2> ("Purchased" / "Return complete")
+  // and its own items — see parseStorePurchaseDetailFromDocument.
+  storePackageSection: ".styles_packageCardItemsSection__wnwnv",
 } as const;
 
 const BASE = "https://www.target.com";
@@ -35,6 +55,9 @@ export function invoiceDetailUrl(orderId: string, invoiceId: string): string {
 }
 export function orderDetailUrl(orderId: string): string {
   return `${BASE}/orders/${encodeURIComponent(orderId)}`;
+}
+export function storeOrderDetailUrl(receiptId: string): string {
+  return `${BASE}/orders/stores/${encodeURIComponent(receiptId)}`;
 }
 
 /** Signed-out Target redirects /orders to /login?... — detect by path prefix. */
