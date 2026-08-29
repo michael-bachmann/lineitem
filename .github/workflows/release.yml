@@ -1,0 +1,125 @@
+name: Release
+
+# Ship a store release: verify, build, submit to both stores, then tag.
+#
+# Deliberately `workflow_dispatch` — not tag-push, not release-please. A store
+# submission can't be unsent, so the trigger is a human pressing a button after
+# the version-bump PR has merged. The version itself is NOT an input: it's read
+# from apps/extension/package.json (the same field WXT compiles into the
+# manifest), so there's exactly one place to bump and no way to tag a number
+# that differs from what shipped.
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Validate store auth without uploading, tagging, or submitting"
+        type: boolean
+        default: false
+
+# Tagging + creating the GitHub release needs write; the default is read.
+permissions:
+  contents: write
+
+# Never let two releases interleave, and never cancel one midway — a submission
+# that's already in flight to a store can't be rolled back by cancelling the job.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      # fetch-depth: 0 so the tag-exists check below sees existing tags.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      # Read the version first and bail immediately if it already shipped —
+      # catches the "forgot to bump" case before spending a build on it, and
+      # before a duplicate submission reaches either store.
+      - name: Resolve version
+        id: version
+        run: |
+          version=$(node -p "require('./apps/extension/package.json').version")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+          echo "Releasing v$version"
+          if git rev-parse -q --verify "refs/tags/v$version" >/dev/null; then
+            echo "::error::Tag v$version already exists — bump the version in apps/extension/package.json"
+            exit 1
+          fi
+
+      # Same gates as CI. They run before anything leaves the runner, so a
+      # failing test can't produce a tag or a store submission.
+      - name: Typecheck
+        run: pnpm --filter extension compile
+      - name: Unit tests
+        run: pnpm --filter extension test:run
+
+      # A fresh checkout has no untracked files, so the Firefox sources zip
+      # (which sweeps the working tree, not the git tree) can only ever contain
+      # committed code. That property is the reason this job exists.
+      - name: Build Chrome zip
+        run: pnpm --filter extension zip
+      # The AMO sources zip is emitted by the Firefox build, not the Chrome one.
+      - name: Build Firefox zip + AMO sources zip
+        run: pnpm --filter extension zip:firefox
+
+      - name: Collect artifacts
+        id: zips
+        run: |
+          cd apps/extension/.output
+          ls -la *.zip
+          {
+            echo "chrome=$PWD/$(ls *-chrome.zip)"
+            echo "firefox=$PWD/$(ls *-firefox.zip)"
+            echo "sources=$PWD/$(ls *-sources.zip)"
+          } >> "$GITHUB_OUTPUT"
+
+      # Keep the built zips even when a later step fails, so a submission that
+      # errored can be finished by hand from the exact artifacts CI produced.
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-${{ steps.version.outputs.tag }}
+          path: apps/extension/.output/*.zip
+          retention-days: 30
+
+      # Credentials come from env (publish-browser-extension reads these names
+      # directly) rather than flags, so nothing sensitive lands in the command
+      # line. --dry-run authenticates against both stores and stops there.
+      - name: Submit to Chrome Web Store + Firefox AMO
+        run: |
+          pnpm --filter extension exec wxt submit \
+            ${{ inputs.dry_run && '--dry-run' || '' }} \
+            --chrome-zip "${{ steps.zips.outputs.chrome }}" \
+            --firefox-zip "${{ steps.zips.outputs.firefox }}" \
+            --firefox-sources-zip "${{ steps.zips.outputs.sources }}"
+        env:
+          CHROME_EXTENSION_ID: ${{ secrets.CHROME_EXTENSION_ID }}
+          CHROME_CLIENT_ID: ${{ secrets.CHROME_CLIENT_ID }}
+          CHROME_CLIENT_SECRET: ${{ secrets.CHROME_CLIENT_SECRET }}
+          CHROME_REFRESH_TOKEN: ${{ secrets.CHROME_REFRESH_TOKEN }}
+          FIREFOX_EXTENSION_ID: ${{ secrets.FIREFOX_EXTENSION_ID }}
+          FIREFOX_JWT_ISSUER: ${{ secrets.FIREFOX_JWT_ISSUER }}
+          FIREFOX_JWT_SECRET: ${{ secrets.FIREFOX_JWT_SECRET }}
+
+      # Tag last, and only on a real run: the tag means "this is what shipped".
+      # If the submit failed, no tag is written, so re-running after a fix isn't
+      # blocked by the tag-exists check above.
+      - name: Tag + GitHub release
+        if: ${{ !inputs.dry_run }}
+        run: |
+          gh release create "${{ steps.version.outputs.tag }}" \
+            --target "$GITHUB_SHA" \
+            --title "${{ steps.version.outputs.tag }}" \
+            --generate-notes \
+            apps/extension/.output/*.zip
+        env:
+          GH_TOKEN: ${{ github.token }}
