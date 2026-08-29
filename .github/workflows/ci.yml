@@ -74,6 +74,9 @@ jobs:
           name: extension-zip
           path: apps/extension/.output/*.zip
           retention-days: 7
+          # .output is a dot-directory, and upload-artifact skips hidden
+          # paths unless told not to — without this it silently uploads nothing.
+          include-hidden-files: true
 
   worker:
     needs: changes

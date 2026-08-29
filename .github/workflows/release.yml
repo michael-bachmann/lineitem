@@ -110,6 +110,9 @@ jobs:
           name: release-${{ steps.version.outputs.tag }}
           path: apps/extension/.output/*.zip
           retention-days: 30
+          # .output is a dot-directory, and upload-artifact skips hidden
+          # paths unless told not to — without this it silently uploads nothing.
+          include-hidden-files: true
 
       # Credentials come from env (publish-browser-extension reads these names
       # directly) rather than flags, so nothing sensitive lands in the command
