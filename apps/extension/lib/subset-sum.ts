@@ -96,9 +96,11 @@ function traceBack(via: Int32Array, values: readonly number[], sum: number): num
   const indices: number[] = [];
   let s = sum;
   while (s > 0) {
-    const index = via[s];
+    // `via` has an entry for every reachable sum > 0 (see the note above),
+    // and each entry is an index into `values`.
+    const index = via[s]!;
     indices.push(index);
-    s -= values[index];
+    s -= values[index]!;
   }
   return indices.reverse();
 }

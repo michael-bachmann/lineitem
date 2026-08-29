@@ -204,8 +204,8 @@ describe("parseItemmodFromDocument", () => {
     `;
     const items = parseItemmodFromDocument(document);
     expect(items).toHaveLength(1);
-    expect(items[0].priceCents).toBe(1398);
-    expect(items[0].refundedAmountCents).toBe(699);
+    expect(items[0]!.priceCents).toBe(1398);
+    expect(items[0]!.refundedAmountCents).toBe(699);
   });
 
   it("does not read a status out of a product title that happens to name one", () => {
@@ -323,7 +323,7 @@ describe("parseItemmodFromDocument", () => {
     `;
     const items = parseItemmodFromDocument(document);
     expect(items).toHaveLength(1);
-    expect(items[0].refundedAmountCents).toBe(0);
+    expect(items[0]!.refundedAmountCents).toBe(0);
   });
 
   it("parses a substituted item as the delivered replacement, not the out-of-stock original", () => {
@@ -448,7 +448,7 @@ describe("parseItemsFromDocument refund detection", () => {
     `;
     const items = parseItemsFromDocument(document);
     expect(items).toHaveLength(1);
-    expect(items[0].refundedAmountCents).toBe(0);
+    expect(items[0]!.refundedAmountCents).toBe(0);
   });
 
   it("does not mark items as refunded when no shipment ancestor exists", () => {
@@ -461,7 +461,7 @@ describe("parseItemsFromDocument refund detection", () => {
     `;
     const items = parseItemsFromDocument(document);
     expect(items).toHaveLength(1);
-    expect(items[0].refundedAmountCents).toBe(0);
+    expect(items[0]!.refundedAmountCents).toBe(0);
   });
 });
 

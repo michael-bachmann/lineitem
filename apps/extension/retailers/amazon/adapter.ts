@@ -62,7 +62,7 @@ export const amazonAdapter: RetailerAdapter = {
 
       for (let i = 0; i < totalOrders; i++) {
         signal?.throwIfAborted();
-        const [orderId, pairs] = orderEntries[i];
+        const [orderId, pairs] = orderEntries[i]!;
         // Emit progress BEFORE the scrape so the UI shows "Scraping order N of T"
         // while N is in flight, not after it lands.
         onScrapeProgress?.({ phase: "scraping", index: i + 1, total: totalOrders });
@@ -183,9 +183,9 @@ async function paginateAndMatch(
     const stillUnmatched: YnabCharge[] = [];
     const matchedRaws = new Set<RawTransaction>();
     remaining.forEach((charge, idx) => {
-      const j = assignments[idx];
+      const j = assignments[idx]!;
       if (j !== null) {
-        const raw = eligible[j];
+        const raw = eligible[j]!;
         matchedThisPage.push([charge, raw]);
         matchedRaws.add(raw);
       } else {
@@ -228,7 +228,7 @@ async function paginateAndMatch(
     if (page.transactions.length === 0) break;
     const oldestOnPage = page.transactions.reduce(
       (min, t) => (t.date < min ? t.date : min),
-      page.transactions[0].date,
+      page.transactions[0]!.date,
     );
     if (oldestOnPage < cutoffIso) break;
     if (!page.hasNext) break;

@@ -8,7 +8,7 @@ const withinWindow = (a: string, b: string): boolean =>
 
 /** Charge/candidate indices sorted by their date (ascending). */
 const sortByDate = (idxs: number[], src: { date: string }[]): number[] =>
-  [...idxs].sort((a, b) => src[a].date.localeCompare(src[b].date));
+  [...idxs].sort((a, b) => src[a]!.date.localeCompare(src[b]!.date));
 
 /**
  * Match a YNAB transaction to a scraped retailer transaction by exact amount
@@ -23,7 +23,7 @@ export function matchByAmountAndDate<T extends { date: string; amountCents: numb
   const matches = candidates.filter(
     (c) => c.amountCents === amountCents && withinWindow(ynabDate, c.date),
   );
-  return matches.length === 1 ? matches[0] : null;
+  return matches.length === 1 ? matches[0]! : null;
 }
 
 /**
@@ -47,8 +47,8 @@ export function assignByAmountAndDate(
   // pair each amount's group 1:1, then scatter the accepted pairs back onto a
   // charge-aligned result. Group iteration order doesn't matter — every charge
   // belongs to exactly one amount, so the pairs are disjoint.
-  const candIdxByAmount = groupBy(indicesOf(candidates), (j) => candidates[j].amountCents);
-  const chargeIdxByAmount = groupBy(indicesOf(charges), (i) => charges[i].amountCents);
+  const candIdxByAmount = groupBy(indicesOf(candidates), (j) => candidates[j]!.amountCents);
+  const chargeIdxByAmount = groupBy(indicesOf(charges), (i) => charges[i]!.amountCents);
 
   const pairs = Object.entries(chargeIdxByAmount).flatMap(([amount, chargeIdxs]) =>
     // Object.entries stringifies the numeric amount key; convert back to look up
@@ -77,8 +77,8 @@ function cleanPairs(
 ): (readonly [number, number])[] {
   if (chargeIdxs.length !== candIdxs.length) return [];
   const sortedCands = sortByDate(candIdxs, candidates);
-  const pairs = sortByDate(chargeIdxs, charges).map((ci, k) => [ci, sortedCands[k]] as const);
-  return pairs.every(([ci, dj]) => withinWindow(charges[ci].date, candidates[dj].date))
+  const pairs = sortByDate(chargeIdxs, charges).map((ci, k) => [ci, sortedCands[k]!] as const);
+  return pairs.every(([ci, dj]) => withinWindow(charges[ci]!.date, candidates[dj]!.date))
     ? pairs
     : [];
 }
@@ -88,7 +88,7 @@ export function cutoffDateFor(items: { date: string }[]): string {
   if (items.length === 0) return "1970-01-01";
   const earliest = items.reduce(
     (min, item) => (item.date < min ? item.date : min),
-    items[0].date,
+    items[0]!.date,
   );
   const cutoff = new Date(earliest);
   cutoff.setDate(cutoff.getDate() - 3);

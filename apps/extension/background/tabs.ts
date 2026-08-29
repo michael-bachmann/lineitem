@@ -43,7 +43,7 @@ export function deliverPageResult(tabId: number, result: unknown): void {
     const i = queue.findIndex((w) => w.predicate(result));
     if (i !== -1) {
       const [waiter] = queue.splice(i, 1);
-      waiter.resolve(result);
+      waiter!.resolve(result);
       return;
     }
   }

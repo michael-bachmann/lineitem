@@ -23,7 +23,7 @@ import { mapSeries } from "@/lib/async";
 
 /** Check whether all items share the same category. */
 function isSingleCategory(items: ApprovalItem[]): boolean {
-  return items.length > 0 && items.every((item) => item.categoryId === items[0].categoryId);
+  return items.length > 0 && items.every((item) => item.categoryId === items[0]!.categoryId);
 }
 
 const MEMO_MAX = 200;
@@ -213,7 +213,7 @@ export async function approveTransaction(
 
     const update = isSingleCategory(items)
       ? {
-          category_id: items[0].categoryId,
+          category_id: items[0]!.categoryId,
           approved: true,
           memo: buildMemo(tx.items.map((it) => it.title)),
         }

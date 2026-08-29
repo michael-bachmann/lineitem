@@ -145,7 +145,7 @@ describe("buildSubtransactions", () => {
       categoryId: "cat-groceries",
     }));
 
-    const [sub] = buildSubtransactions(tx, choices);
+    const sub = buildSubtransactions(tx, choices)[0]!;
     expect(sub.memo).toBe("Apple, Bread, Carrots +2 more");
   });
 
@@ -166,7 +166,7 @@ describe("buildSubtransactions", () => {
       categoryId: "cat-groceries",
     }));
 
-    const [sub] = buildSubtransactions(tx, choices);
+    const sub = buildSubtransactions(tx, choices)[0]!;
     expect(sub.memo!.length).toBeLessThanOrEqual(200);
     expect(sub.memo!.endsWith("+2 more")).toBe(true);
   });
@@ -186,7 +186,7 @@ describe("buildSubtransactions", () => {
       ],
     });
 
-    const [sub] = buildSubtransactions(tx, [{ productId: "A", categoryId: "cat-groceries" }]);
+    const sub = buildSubtransactions(tx, [{ productId: "A", categoryId: "cat-groceries" }])[0]!;
     expect(sub.memo).toBe("Bounty Paper Towels 12 Family Rolls…");
   });
 
@@ -205,7 +205,7 @@ describe("buildSubtransactions", () => {
       ],
     });
 
-    const [sub] = buildSubtransactions(tx, [{ productId: "A", categoryId: "cat-groceries" }]);
+    const sub = buildSubtransactions(tx, [{ productId: "A", categoryId: "cat-groceries" }])[0]!;
     expect(sub.memo).toBe("X".repeat(40) + "…");
   });
 });

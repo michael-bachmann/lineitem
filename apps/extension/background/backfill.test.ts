@@ -194,7 +194,7 @@ describe("runBackfill — filtering", () => {
 
     // Only Target was scraped; Amazon's pending order was left untouched.
     expect(scrapeMatchedOrdersMock).toHaveBeenCalledTimes(1);
-    const [scrapedCharges] = scrapeMatchedOrdersMock.mock.calls[0];
+    const [scrapedCharges] = scrapeMatchedOrdersMock.mock.calls[0]!;
     expect(scrapedCharges.map((c: YnabCharge) => c.ynabTransactionId)).toEqual(["tgt-1"]);
   });
 
@@ -224,7 +224,7 @@ describe("runBackfill — idempotency via AllocatedTransaction", () => {
     await runBackfill({ fromDate: "2025-01-01" });
 
     expect(putAllocatedTransactionsMock).toHaveBeenCalledTimes(1);
-    const [rows] = putAllocatedTransactionsMock.mock.calls[0];
+    const [rows] = putAllocatedTransactionsMock.mock.calls[0]!;
     expect(rows.map((r) => r.ynabTransactionId).sort()).toEqual(["tx-1", "tx-2"]);
     // Learn happens before persist — items committed even if persist fails.
     expect(learnFromApprovalMock).toHaveBeenCalledTimes(1);
@@ -239,7 +239,7 @@ describe("runBackfill — idempotency via AllocatedTransaction", () => {
 
     await runBackfill({ fromDate: "2025-01-01" });
 
-    const [rows] = putAllocatedTransactionsMock.mock.calls[0];
+    const [rows] = putAllocatedTransactionsMock.mock.calls[0]!;
     expect(rows.map((r) => r.ynabTransactionId)).toEqual(["tx-1"]);
   });
 
@@ -296,7 +296,7 @@ describe("runBackfill — happy path", () => {
     expect(result.hasUnbackfilled).toBe(false);
     expect(result.failed).toBe(0);
     expect(learnFromApprovalMock).toHaveBeenCalledTimes(1);
-    const [planIdArg, retailerArg, entriesArg] = learnFromApprovalMock.mock.calls[0];
+    const [planIdArg, retailerArg, entriesArg] = learnFromApprovalMock.mock.calls[0]!;
     expect(planIdArg).toBe("plan");
     expect(retailerArg).toBe("amazon");
     expect(entriesArg).toHaveLength(4);

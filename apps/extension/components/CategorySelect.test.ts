@@ -12,14 +12,14 @@ describe("groupCategories", () => {
   it("groups by groupName, preserving first-seen order", () => {
     const g = groupCategories(cats, "");
     expect(g.map((x) => x.group)).toEqual(["Frequent", "Monthly"]);
-    expect(g[0].items.map((c) => c.name)).toEqual(["Groceries", "Dining Out"]);
+    expect(g[0]!.items.map((c) => c.name)).toEqual(["Groceries", "Dining Out"]);
   });
 
   it("filters by name case-insensitively and drops now-empty groups", () => {
     const g = groupCategories(cats, "REN");
     expect(g).toHaveLength(1);
-    expect(g[0].group).toBe("Monthly");
-    expect(g[0].items[0].name).toBe("Rent");
+    expect(g[0]!.group).toBe("Monthly");
+    expect(g[0]!.items[0]!.name).toBe("Rent");
   });
 
   it("matches on substring, not just prefix", () => {

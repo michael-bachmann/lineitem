@@ -183,8 +183,8 @@ describe("targetAdapter.scrapeMatchedOrders (coordinator)", () => {
     expect(res.blocked).toBeUndefined();
     expect(res.unmatched).toEqual([]);
     expect(res.matched).toHaveLength(1);
-    expect(res.matched[0].order.orderId).toBe("O1");
-    expect(res.matched[0].order.items[0]).toMatchObject({ productId: "P1", imageUrl: "img-url" });
-    expect(res.matched[0].charges).toEqual([c]);
+    expect(res.matched[0]!.order.orderId).toBe("O1");
+    expect(res.matched[0]!.order.items[0]).toMatchObject({ productId: "P1", imageUrl: "img-url" });
+    expect(res.matched[0]!.charges).toEqual([c]);
   });
 });
