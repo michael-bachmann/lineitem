@@ -46,7 +46,7 @@ const GROUPS: { key: string; label: string; has: (s: QueueDisplayStatus) => bool
 /** ISO date (YYYY-MM-DD) → compact "May 20". */
 function formatDate(iso: string): string {
   const [y, m, d] = iso.split("-").map(Number);
-  return new Date(y, m - 1, d).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  return new Date(y!, m! - 1, d!).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
 export default function QueueView({

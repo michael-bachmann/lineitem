@@ -37,7 +37,7 @@ export function parseInvoicesListFromDocument(doc: Document): RawTargetInvoice[]
     const moneyMatch = text.match(MONEY_RE);
     const amountCents = moneyMatch ? parseCents(moneyMatch[0]) : 0;
 
-    out.push({ invoiceId: idMatch[1], date, amountCents, isRefund });
+    out.push({ invoiceId: idMatch[1]!, date, amountCents, isRefund });
   }
   return out;
 }
@@ -106,8 +106,8 @@ export function parseInvoiceDetailFromDocument(doc: Document): RawTargetInvoiceD
     // transaction still balances; the stub would only add a $0 line to categorize.
     if (lineAmountCents === 0) continue;
     items.push({
-      productId: labelMatch[1],
-      title: labelMatch[2],
+      productId: labelMatch[1]!,
+      title: labelMatch[2]!,
       unitPriceCents,
       quantity,
       amountCents: lineAmountCents,
@@ -144,8 +144,8 @@ export function parseInvoiceDetailFromDocument(doc: Document): RawTargetInvoiceD
     });
   }
   // Single payment line with no explicit amount bills the whole invoice total.
-  if (paymentLines.length === 1 && paymentLines[0].amountCents === 0) {
-    paymentLines[0].amountCents = invoiceTotalCents;
+  if (paymentLines.length === 1 && paymentLines[0]!.amountCents === 0) {
+    paymentLines[0]!.amountCents = invoiceTotalCents;
   }
 
   return { isRefund, items, itemSubtotalCents, invoiceTotalCents, paymentLines };
@@ -163,7 +163,7 @@ export function parseOrdersFromDocument(doc: Document): RawTargetOrder[] {
     const link = card.querySelector<HTMLAnchorElement>(SELECTORS.orderCardLink);
     const idMatch = link?.getAttribute("href")?.match(ORDER_ID_RE);
     if (!idMatch) continue;
-    const orderId = idMatch[1];
+    const orderId = idMatch[1]!;
     if (seen.has(orderId)) continue;
 
     // parseTargetDate extracts the first date-shaped substring from the card
@@ -214,7 +214,7 @@ export function parseOrderImageMap(doc: Document): Record<string, string> {
     const idMatch = title.id.match(ITEM_ID_RE);
     if (!idMatch) continue;
     const src = precedingImg(title, imgs)?.getAttribute("src") ?? "";
-    if (src) map[idMatch[1]] = src;
+    if (src) map[idMatch[1]!] = src;
   }
   return map;
 }

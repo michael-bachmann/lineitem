@@ -48,9 +48,9 @@ const MONTHS: Record<string, string> = {
 export function parseNaturalDate(dateStr: string): string | null {
   const m = dateStr.trim().match(/^(\w+)\s+(\d{1,2}),?\s+(\d{4})$/);
   if (!m) return null;
-  const month = MONTHS[m[1]];
+  const month = MONTHS[m[1]!];
   if (!month) return null;
-  const day = m[2].padStart(2, "0");
+  const day = m[2]!.padStart(2, "0");
   return `${m[3]}-${month}-${day}`;
 }
 
@@ -100,7 +100,7 @@ export function parseTransactionsFromDocument(
         const orderMatch = (orderLink.getAttribute("href") ?? "").match(
           /orderID=([^&]+)/,
         );
-        if (orderMatch) orderId = orderMatch[1];
+        if (orderMatch) orderId = orderMatch[1]!;
       }
 
       results.push({
@@ -136,7 +136,7 @@ function parseItemFromElement(item: Element): RawItem | null {
   let productId = "";
   const href = titleEl?.getAttribute("href") ?? "";
   const asinMatch = href.match(ASIN_REGEX);
-  if (asinMatch) productId = asinMatch[1];
+  if (asinMatch) productId = asinMatch[1]!;
   if (!productId) return null;
 
   const imgEl = item.querySelector("img");
@@ -156,7 +156,7 @@ function parseItemFromElement(item: Element): RawItem | null {
   let quantity = 1;
   const qtyMatch = (item.textContent ?? "").match(/Qty:\s*(\d+)/i);
   if (qtyMatch) {
-    quantity = parseInt(qtyMatch[1], 10);
+    quantity = parseInt(qtyMatch[1]!, 10);
   } else {
     const qtyEl = item.querySelector(SELECTORS.quantityFallback);
     if (qtyEl) {
@@ -261,7 +261,7 @@ function parseItemmodElement(item: Element): RawItem | null {
   const href = titleEl?.getAttribute("href") ?? "";
   const asinMatch = href.match(ASIN_REGEX);
   if (!asinMatch) return null;
-  const productId = asinMatch[1];
+  const productId = asinMatch[1]!;
 
   const imgEl = item.querySelector("img");
   const imageUrl = imgEl?.getAttribute("src") ?? "";
@@ -377,9 +377,9 @@ export function parseRefundSummary(
     const itemMatch = body.match(REFUND_ITEM_REGEX);
     const taxMatch = body.match(REFUND_TAX_REGEX);
     return {
-      itemCents: itemMatch ? parseCents(itemMatch[1]) : 0,
-      taxCents: taxMatch ? parseCents(taxMatch[1]) : 0,
-      totalCents: parseCents(totalMatch[1]),
+      itemCents: itemMatch ? parseCents(itemMatch[1]!) : 0,
+      taxCents: taxMatch ? parseCents(taxMatch[1]!) : 0,
+      totalCents: parseCents(totalMatch[1]!),
     };
   }
   return null;

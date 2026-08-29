@@ -3,7 +3,7 @@ import { closestSubset } from "./subset-sum";
 
 /** Sum the values the returned indices point at. */
 const sumOf = (values: number[], indices: number[]) =>
-  indices.reduce((s, i) => s + values[i], 0);
+  indices.reduce((s, i) => s + values[i]!, 0);
 
 describe("closestSubset", () => {
   it("finds an exact hit", () => {

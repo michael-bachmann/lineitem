@@ -82,9 +82,9 @@ describe("amazonAdapter.scrapeMatchedOrders", () => {
     );
     const res = await amazonAdapter.scrapeMatchedOrders([c]);
     expect(res.matched).toHaveLength(1);
-    expect(res.matched[0].order.orderId).toBe("111-A");
-    expect(res.matched[0].order.items[0].unitPriceCents).toBe(1000);
-    expect(res.matched[0].charges).toEqual([c]);
+    expect(res.matched[0]!.order.orderId).toBe("111-A");
+    expect(res.matched[0]!.order.items[0]!.unitPriceCents).toBe(1000);
+    expect(res.matched[0]!.charges).toEqual([c]);
     expect(res.unmatched).toEqual([]);
   });
 
@@ -111,7 +111,7 @@ describe("amazonAdapter.scrapeMatchedOrders", () => {
     const res = await amazonAdapter.scrapeMatchedOrders([c]);
     expect(res.matched).toEqual([]);
     expect(res.unmatched).toHaveLength(1);
-    expect(res.unmatched[0].charge).toEqual(c);
+    expect(res.unmatched[0]!.charge).toEqual(c);
   });
 
   it("retries a detail page whose first read is unverifiable (no subtotal), then succeeds", async () => {
@@ -130,7 +130,7 @@ describe("amazonAdapter.scrapeMatchedOrders", () => {
     );
     const res = await amazonAdapter.scrapeMatchedOrders([c]);
     expect(res.matched).toHaveLength(1);
-    expect(res.matched[0].order.orderId).toBe("111-A");
+    expect(res.matched[0]!.order.orderId).toBe("111-A");
     expect(res.unmatched).toEqual([]);
   });
 

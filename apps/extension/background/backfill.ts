@@ -245,7 +245,7 @@ function processMatchedOrder(
   if (orderCharges.length !== 1) {
     return { kind: "ambiguous", chargeCount: orderCharges.length };
   }
-  const charge = orderCharges[0];
+  const charge = orderCharges[0]!;
   const tx = txById.get(charge.ynabTransactionId);
   if (!tx || tx.category_id === null) return { kind: "skip" };
 
@@ -257,7 +257,7 @@ function processMatchedOrder(
   const distribution = distributeOrder(order, [charge]);
   if (distribution.allocated.length === 0) return { kind: "skip" };
 
-  const allocated = distribution.allocated[0];
+  const allocated = distribution.allocated[0]!;
   const categoryId = tx.category_id;
   // Learn from items that landed on THIS allocated tx, not all order items.
   // For a refund whose allocation only covers a subset, the other items
