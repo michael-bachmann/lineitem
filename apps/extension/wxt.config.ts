@@ -113,6 +113,7 @@ export default defineConfig({
       "**/storybook-static/**",
       "apps/extension/store-assets/**",
       "**/dist/**",
+      "**/coverage/**",
     ],
   },
   // Copy the ONNX runtime files into the build at /ort/ for BOTH browsers.
