@@ -72,19 +72,30 @@ jobs:
       - name: Build Firefox zip + AMO sources zip
         run: pnpm --filter extension zip:firefox
 
+      # Assign each path to its own variable before echoing it. `echo "$(ls …)"`
+      # swallows a glob miss — echo returns 0, set -e never fires, and the step
+      # emits a bare directory path. That gets past the submit tool too, whose
+      # existence check is an lstat that succeeds on a directory, so a --dry-run
+      # would pass with bogus paths and only the real upload would break. An
+      # assignment does inherit the substitution's exit status, so this fails.
       - name: Collect artifacts
         id: zips
         run: |
           cd apps/extension/.output
           ls -la *.zip
+          chrome=$(ls *-chrome.zip)
+          firefox=$(ls *-firefox.zip)
+          sources=$(ls *-sources.zip)
           {
-            echo "chrome=$PWD/$(ls *-chrome.zip)"
-            echo "firefox=$PWD/$(ls *-firefox.zip)"
-            echo "sources=$PWD/$(ls *-sources.zip)"
+            echo "chrome=$PWD/$chrome"
+            echo "firefox=$PWD/$firefox"
+            echo "sources=$PWD/$sources"
           } >> "$GITHUB_OUTPUT"
 
-      # Keep the built zips even when a later step fails, so a submission that
-      # errored can be finished by hand from the exact artifacts CI produced.
+      # Keep the built zips when a later step fails, so a submission that errored
+      # can be finished by hand from the exact artifacts CI produced. Download
+      # them BEFORE pressing re-run — GitHub deletes a run's earlier attempts'
+      # artifacts as soon as a new attempt starts.
       - uses: actions/upload-artifact@v7
         with:
           name: release-${{ steps.version.outputs.tag }}
@@ -93,7 +104,12 @@ jobs:
 
       # Credentials come from env (publish-browser-extension reads these names
       # directly) rather than flags, so nothing sensitive lands in the command
-      # line. --dry-run authenticates against both stores and stops there.
+      # line.
+      #
+      # --dry-run checks credentials only: a real OAuth exchange for Chrome, an
+      # authenticated add-on GET for Firefox. It does NOT verify upload
+      # permission, read the zips, or touch CHROME_EXTENSION_ID at all — a wrong
+      # Chrome extension ID passes a dry run and fails the real submit.
       - name: Submit to Chrome Web Store + Firefox AMO
         run: |
           pnpm --filter extension exec wxt submit \
@@ -113,11 +129,23 @@ jobs:
       # Tag last, and only on a real run: the tag means "this is what shipped".
       # If the submit failed, no tag is written, so re-running after a fix isn't
       # blocked by the tag-exists check above.
-      - name: Tag + GitHub release
+      #
+      # Pushing the tag is its own step, immediately after the submit, and is
+      # deliberately the cheapest thing that can follow it. The dangerous window
+      # is "submitted but unrecorded" — a re-run in that state sails past the
+      # tag-exists check and submits to both stores a second time. Keeping the
+      # tag push separate from the release API call shrinks that window to a
+      # single git push, and leaves the release step independently retryable.
+      - name: Tag the released commit
+        if: ${{ !inputs.dry_run }}
+        run: |
+          git tag "${{ steps.version.outputs.tag }}" "$GITHUB_SHA"
+          git push origin "${{ steps.version.outputs.tag }}"
+
+      - name: GitHub release
         if: ${{ !inputs.dry_run }}
         run: |
           gh release create "${{ steps.version.outputs.tag }}" \
-            --target "$GITHUB_SHA" \
             --title "${{ steps.version.outputs.tag }}" \
             --generate-notes \
             apps/extension/.output/*.zip
