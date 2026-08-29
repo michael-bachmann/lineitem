@@ -9,6 +9,14 @@ import { Icon } from "@lineitem/ui";
  * be pruned freely.
  */
 export const WHATS_NEW: Record<string, ReactNode[]> = {
+  "1.2.0": [
+    <>
+      Your queue now also picks up <b className="font-semibold text-text">approved transactions</b>{" "}
+      that never got a category.
+    </>,
+    <>Approving everything to one category now writes the item-list memo that splits already got.</>,
+    <>Amazon grocery orders with partly out-of-stock items now read without erroring.</>,
+  ],
   "1.1.0": [
     <>
       You can now <b className="font-semibold text-text">switch budgets</b> in Settings — and
