@@ -11,8 +11,8 @@ node_modules
 .output
 dist
 coverage
-.env
-.env.local
+# Covers .env.local and the .env.submit that `wxt submit init` writes.
+.env*
 stats.html
 stats-*.json
 .wxt

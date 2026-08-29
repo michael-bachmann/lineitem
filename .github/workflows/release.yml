@@ -15,6 +15,15 @@ on:
         description: "Validate store auth without uploading, tagging, or submitting"
         type: boolean
         default: false
+      # Recovery hatch. A store submission can't be undone, so once Chrome has
+      # accepted v1.2.0 it will reject a second upload of it forever — leaving a
+      # re-run of "both" permanently red and unable to reach the tag step. Pick
+      # the store that still needs submitting instead.
+      stores:
+        description: "Which stores to submit to (pick one to retry after a partial failure)"
+        type: choice
+        options: [both, chrome, firefox]
+        default: both
 
 # Tagging + creating the GitHub release needs write; the default is read.
 permissions:
@@ -110,18 +119,35 @@ jobs:
       # authenticated add-on GET for Firefox. It does NOT verify upload
       # permission, read the zips, or touch CHROME_EXTENSION_ID at all — a wrong
       # Chrome extension ID passes a dry run and fails the real submit.
-      - name: Submit to Chrome Web Store + Firefox AMO
+      # One step per store rather than a single two-store call. `wxt submit`
+      # fans out concurrently with exitOnError: false, so a half-failure leaves
+      # one store submitted and the run red — and every re-run of both stays red
+      # on the duplicate upload, so the tag step is never reachable. Split, these
+      # are independently re-runnable via the `stores` input. The tool skips any
+      # store whose zip it wasn't given, so each step only ever talks to one.
+      #
+      # Each step gets only its own store's credentials, so a Chrome failure
+      # can't surface a Firefox secret and vice versa.
+      - name: Submit to Chrome Web Store
+        if: ${{ inputs.stores == 'both' || inputs.stores == 'chrome' }}
         run: |
           pnpm --filter extension exec wxt submit \
             ${{ inputs.dry_run && '--dry-run' || '' }} \
-            --chrome-zip "${{ steps.zips.outputs.chrome }}" \
-            --firefox-zip "${{ steps.zips.outputs.firefox }}" \
-            --firefox-sources-zip "${{ steps.zips.outputs.sources }}"
+            --chrome-zip "${{ steps.zips.outputs.chrome }}"
         env:
           CHROME_EXTENSION_ID: ${{ secrets.CHROME_EXTENSION_ID }}
           CHROME_CLIENT_ID: ${{ secrets.CHROME_CLIENT_ID }}
           CHROME_CLIENT_SECRET: ${{ secrets.CHROME_CLIENT_SECRET }}
           CHROME_REFRESH_TOKEN: ${{ secrets.CHROME_REFRESH_TOKEN }}
+
+      - name: Submit to Firefox AMO
+        if: ${{ inputs.stores == 'both' || inputs.stores == 'firefox' }}
+        run: |
+          pnpm --filter extension exec wxt submit \
+            ${{ inputs.dry_run && '--dry-run' || '' }} \
+            --firefox-zip "${{ steps.zips.outputs.firefox }}" \
+            --firefox-sources-zip "${{ steps.zips.outputs.sources }}"
+        env:
           FIREFOX_EXTENSION_ID: ${{ secrets.FIREFOX_EXTENSION_ID }}
           FIREFOX_JWT_ISSUER: ${{ secrets.FIREFOX_JWT_ISSUER }}
           FIREFOX_JWT_SECRET: ${{ secrets.FIREFOX_JWT_SECRET }}
@@ -136,14 +162,19 @@ jobs:
       # tag-exists check and submits to both stores a second time. Keeping the
       # tag push separate from the release API call shrinks that window to a
       # single git push, and leaves the release step independently retryable.
+      #
+      # Only a full `both` run tags: after a single-store retry the other half
+      # shipped in a previous run, which this job can't verify, and a tag that
+      # claims a release that only reached one store is worse than no tag. Tag
+      # by hand once the retry lands — see "Releasing" in the README.
       - name: Tag the released commit
-        if: ${{ !inputs.dry_run }}
+        if: ${{ !inputs.dry_run && inputs.stores == 'both' }}
         run: |
           git tag "${{ steps.version.outputs.tag }}" "$GITHUB_SHA"
           git push origin "${{ steps.version.outputs.tag }}"
 
       - name: GitHub release
-        if: ${{ !inputs.dry_run }}
+        if: ${{ !inputs.dry_run && inputs.stores == 'both' }}
         run: |
           gh release create "${{ steps.version.outputs.tag }}" \
             --title "${{ steps.version.outputs.tag }}" \
