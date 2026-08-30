@@ -40,7 +40,7 @@
     "@wxt-dev/auto-icons": "^1.1.2",
     "@wxt-dev/module-react": "^1.1.5",
     "fake-indexeddb": "^6.2.5",
-    "happy-dom": "^20.11.6",
+    "happy-dom": "^20.11.8",
     "storybook": "^10.5.10",
     "tailwindcss": "^4.3.3",
     "typescript": "^7.0.2",
