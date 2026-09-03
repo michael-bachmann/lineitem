@@ -37,6 +37,8 @@ interface QueueViewProps {
   onCoffeeClick?: () => void;
 }
 
+// This ordering is mirrored by nextReviewableEntry (lib/queue.ts), which walks
+// entries in display order — keep the two in sync.
 const GROUPS: { key: string; label: string; has: (s: QueueDisplayStatus) => boolean }[] = [
   { key: "review", label: "Needs review", has: (s) => s === "partial" },
   { key: "ready", label: "Ready to approve", has: (s) => s === "classified" },

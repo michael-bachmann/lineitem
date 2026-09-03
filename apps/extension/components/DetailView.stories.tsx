@@ -88,7 +88,7 @@ const meta = {
       </div>
     ),
   ],
-  args: { categories: CATEGORIES, onBack: () => {}, onApprove: async () => {} },
+  args: { categories: CATEGORIES, hasNext: false, onBack: () => {}, onApprove: async () => {} },
 } satisfies Meta<typeof DetailView>;
 
 export default meta;
@@ -96,6 +96,11 @@ type Story = StoryObj<typeof DetailView>;
 
 export const MatchedPartial: Story = { args: { entry: entry(matched(PARTIAL)) } };
 export const MatchedReady: Story = { args: { entry: entry(matched(READY)) } };
+// More reviewable transactions in the queue — approving advances to the next
+// one, and the button says so.
+export const MatchedReadyMoreInQueue: Story = {
+  args: { entry: entry(matched(READY)), hasNext: true },
+};
 export const MatchedRefund: Story = { args: { entry: entry(matched(READY), 42990) } };
 
 // One Target invoice ($79.69) whose payment was split into two Amex charges. This

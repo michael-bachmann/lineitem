@@ -7,7 +7,7 @@ import Help from "@/components/Help";
 import QueueView from "@/components/QueueView";
 import DetailView from "@/components/DetailView";
 import { WHATS_NEW } from "@/components/WhatsNewCard";
-import { isFullyClassified } from "@/lib/queue";
+import { isFullyClassified, nextReviewableEntry } from "@/lib/queue";
 import { recordClassified, retireCoffee } from "@/lib/coffee";
 import { markVersionSeen, shouldShowWhatsNew } from "@/lib/whats-new";
 import {
@@ -196,6 +196,11 @@ export default function App() {
 
   // Detail view
   if (view === "detail" && selectedEntry !== null) {
+    // Where approving this entry lands: the next reviewable transaction, or
+    // back to the queue when this is the last one. Also drives the button
+    // label, so what it says and what happens can't disagree.
+    const next = nextReviewableEntry(queue, selectedEntry.ynabTransaction.id);
+
     const handleApprove = async (ynabTransactionId: string, items: ApprovalItem[]) => {
       const result = await approveTransaction(ynabTransactionId, items);
       if (result?.error) throw new Error(result.error);
@@ -203,12 +208,26 @@ export default function App() {
       setCoffeeClassified(cumulativeClassified);
       setShowCoffee(show);
       setQueue((prev) => prev.filter((e) => e.ynabTransaction.id !== ynabTransactionId));
+      if (next) {
+        setSelectedEntry(next);
+        // The remount resets React state but not document scroll; start the
+        // next transaction at the top.
+        window.scrollTo(0, 0);
+      } else {
+        setSelectedEntry(null);
+        setView("queue");
+      }
     };
 
     return (
       <DetailView
+        // Remount per transaction — DetailView seeds its category selections
+        // from the entry in a useState initializer, which doesn't re-run when
+        // only the prop changes.
+        key={selectedEntry.ynabTransaction.id}
         entry={selectedEntry}
         categories={categories}
+        hasNext={next !== null}
         onBack={() => {
           setSelectedEntry(null);
           setView("queue");
