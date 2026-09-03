@@ -203,7 +203,7 @@ export const Hero: Story = {
       sub="lineitem reads the real items in your Amazon and Target orders and splits each YNAB transaction to match — line by line."
       scale={0.82}
     >
-      <DetailView entry={heroEntry} categories={CATEGORIES} onBack={noop} onApprove={async () => {}} />
+      <DetailView entry={heroEntry} categories={CATEGORIES} hasNext={false} onBack={noop} onApprove={async () => {}} />
     </Frame>
   ),
 };
