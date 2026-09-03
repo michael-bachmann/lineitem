@@ -9,6 +9,13 @@ import { Icon } from "@lineitem/ui";
  * be pruned freely.
  */
 export const WHATS_NEW: Record<string, ReactNode[]> = {
+  "1.3.0": [
+    <>
+      Approving a split now takes you{" "}
+      <b className="font-semibold text-text">straight to the next transaction</b> — no trip back
+      to the queue between reviews.
+    </>,
+  ],
   "1.2.0": [
     <>
       Your queue now also picks up <b className="font-semibold text-text">approved transactions</b>{" "}
