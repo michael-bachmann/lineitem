@@ -93,7 +93,7 @@ export function buildRefundOrder(
  * already built and tested. Only valid when `detail.sections.length === 1`.
  */
 export function toInvoiceDetail(detail: RawTargetStoreDetail): RawTargetInvoiceDetail {
-  const [section] = detail.sections;
+  const section = detail.sections[0]!;
   return {
     isRefund: section.isRefund,
     items: section.items,

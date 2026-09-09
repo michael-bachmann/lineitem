@@ -229,9 +229,9 @@ describe("targetAdapter.scrapeMatchedOrders (coordinator)", () => {
       const res = await targetAdapter.scrapeMatchedOrders([c]);
       expect(res.unmatched).toEqual([]);
       expect(res.matched).toHaveLength(1);
-      expect(res.matched[0].order.orderId).toBe("instore-R1");
-      expect(res.matched[0].order.refund).toBeNull();
-      expect(res.matched[0].charges).toEqual([c]);
+      expect(res.matched[0]!.order.orderId).toBe("instore-R1");
+      expect(res.matched[0]!.order.refund).toBeNull();
+      expect(res.matched[0]!.charges).toEqual([c]);
     });
 
     it("matches a pure in-store refund by list-card total and builds the refund order", async () => {
@@ -265,9 +265,9 @@ describe("targetAdapter.scrapeMatchedOrders (coordinator)", () => {
       const res = await targetAdapter.scrapeMatchedOrders([c]);
       expect(res.unmatched).toEqual([]);
       expect(res.matched).toHaveLength(1);
-      expect(res.matched[0].order.orderId).toBe("instore-R2");
-      expect(res.matched[0].order.refund).toEqual({ itemCents: 1200, taxCents: 0, totalCents: 1200 });
-      expect(res.matched[0].charges).toEqual([c]);
+      expect(res.matched[0]!.order.orderId).toBe("instore-R2");
+      expect(res.matched[0]!.order.refund).toEqual({ itemCents: 1200, taxCents: 0, totalCents: 1200 });
+      expect(res.matched[0]!.charges).toEqual([c]);
     });
 
     it("leaves a charge with no matching in-store receipt unmatched", async () => {
@@ -342,7 +342,7 @@ describe("targetAdapter.scrapeMatchedOrders (coordinator)", () => {
       expect(res.unmatched).toEqual([]);
       expect(res.matched).toHaveLength(2);
 
-      const byTx = new Map(res.matched.map((m) => [m.charges[0].ynabTransactionId, m]));
+      const byTx = new Map(res.matched.map((m) => [m.charges[0]!.ynabTransactionId, m]));
       const purchaseMatch = byTx.get("yt-p")!;
       expect(purchaseMatch.order.orderId).toBe("instore-R4");
       expect(purchaseMatch.order.refund).toBeNull();
@@ -366,8 +366,8 @@ describe("targetAdapter.scrapeMatchedOrders (coordinator)", () => {
       const res = await targetAdapter.scrapeMatchedOrders([refund]);
       expect(res.unmatched).toEqual([]);
       expect(res.matched).toHaveLength(1);
-      expect(res.matched[0].charges).toEqual([refund]);
-      expect(res.matched[0].order.refund).toEqual({ itemCents: 6250, taxCents: 515, totalCents: 6765 });
+      expect(res.matched[0]!.charges).toEqual([refund]);
+      expect(res.matched[0]!.order.refund).toEqual({ itemCents: 6250, taxCents: 515, totalCents: 6765 });
     });
 
     it("fails safe (no guess) when more than one remaining charge plausibly matches the return section", async () => {
@@ -421,7 +421,7 @@ describe("targetAdapter.scrapeMatchedOrders (coordinator)", () => {
       expect(res.unmatched).toEqual([]);
       expect(res.matched).toHaveLength(2);
 
-      const byTx = new Map(res.matched.map((m) => [m.charges[0].ynabTransactionId, m]));
+      const byTx = new Map(res.matched.map((m) => [m.charges[0]!.ynabTransactionId, m]));
       const purchaseMatch = byTx.get("yt-p")!;
       expect(purchaseMatch.order.orderId).toBe("instore-R5");
       // The core regression: a purchase charge must build a purchase order,
@@ -442,7 +442,7 @@ describe("targetAdapter.scrapeMatchedOrders (coordinator)", () => {
       const res = await targetAdapter.scrapeMatchedOrders([purchase]);
       expect(res.unmatched).toEqual([]);
       expect(res.matched).toHaveLength(1);
-      expect(res.matched[0].order.refund).toBeNull();
+      expect(res.matched[0]!.order.refund).toBeNull();
     });
   });
 });

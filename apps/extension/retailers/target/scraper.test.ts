@@ -472,11 +472,11 @@ describe("parseStorePurchaseDetailFromDocument", () => {
       </div>
     `;
     const result = parseStorePurchaseDetailFromDocument(document);
-    expect(result.sections[0].items).toEqual([
+    expect(result.sections[0]!.items).toEqual([
       { productId: "11111111", title: "Item One", unitPriceCents: 300, quantity: 2, amountCents: 600 },
       { productId: "22222222", title: "Item Two", unitPriceCents: 500, quantity: 1, amountCents: 500 },
     ]);
-    expect(result.sections[0].itemSubtotalCents).toBe(1100);
+    expect(result.sections[0]!.itemSubtotalCents).toBe(1100);
     expect(result.invoiceTotalCents).toBe(1100);
     expect(result.paymentLines).toEqual([
       { cardLabel: "Visa *9961", isGiftCard: false, amountCents: 1100 },
@@ -524,7 +524,7 @@ describe("parseStorePurchaseDetailFromDocument", () => {
       <span data-test="grand-total">$8.89</span>
     `;
     const result = parseStorePurchaseDetailFromDocument(document);
-    expect(result.sections[0].items).toEqual([
+    expect(result.sections[0]!.items).toEqual([
       { productId: "44444444", title: "Real Item", unitPriceCents: 889, quantity: 1, amountCents: 889 },
     ]);
   });
@@ -541,7 +541,7 @@ describe("parseStorePurchaseDetailFromDocument", () => {
       </div>
       <span data-test="grand-total">$12.00</span>
     `;
-    expect(parseStorePurchaseDetailFromDocument(document).sections[0].isRefund).toBe(true);
+    expect(parseStorePurchaseDetailFromDocument(document).sections[0]!.isRefund).toBe(true);
   });
 
   it("marks a pure return from the live heading text ('Return complete') and its own dated line", () => {

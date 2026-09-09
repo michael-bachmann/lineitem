@@ -327,7 +327,7 @@ export const targetAdapter: RetailerAdapter = {
               index: matchedInvoices.length + i + 1,
               total: matchedInvoices.length + storeMatches.length,
             });
-            const sm = storeMatches[i];
+            const sm = storeMatches[i]!;
 
             let read: { detail: RawTargetStoreDetail; imageMap: Record<string, string> };
             try {
@@ -416,7 +416,7 @@ export const targetAdapter: RetailerAdapter = {
             );
             if (candidates.length !== 1) continue; // zero or ambiguous — fail closed
 
-            const [refundCharge] = candidates;
+            const refundCharge = candidates[0]!;
             remaining = remaining.filter((c) => c !== refundCharge);
             consumedForReturn.add(storeOrder.receiptId);
 

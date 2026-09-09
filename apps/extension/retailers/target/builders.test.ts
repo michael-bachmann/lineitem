@@ -123,7 +123,7 @@ describe("toInvoiceDetail", () => {
     };
     expect(toInvoiceDetail(detail)).toEqual({
       isRefund: false,
-      items: detail.sections[0].items,
+      items: detail.sections[0]!.items,
       itemSubtotalCents: 1000,
       invoiceTotalCents: 1000,
       paymentLines: detail.paymentLines,
@@ -179,7 +179,7 @@ describe("toMixedPurchaseDetail and toReturnSectionDetail", () => {
     expect(result.failures).toEqual([]);
     // The full $100.65 charge reconciles against all 3 items, not just the
     // "Purchased"-section pair.
-    expect(result.allocated[0].items.reduce((s, i) => s + i.allocatedCents, 0)).toBe(10065);
+    expect(result.allocated[0]!.items.reduce((s, i) => s + i.allocatedCents, 0)).toBe(10065);
   });
 
   it("toReturnSectionDetail builds a standalone refund order from just the return section", () => {
@@ -202,7 +202,7 @@ describe("toMixedPurchaseDetail and toReturnSectionDetail", () => {
 
     const result = distributeOrder(order, [refundCharge]);
     expect(result.failures).toEqual([]);
-    expect(result.allocated[0].items[0].allocatedCents).toBe(6765);
+    expect(result.allocated[0]!.items[0]!.allocatedCents).toBe(6765);
   });
 });
 

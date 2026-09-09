@@ -259,7 +259,7 @@ export function parseStoreOrdersFromDocument(doc: Document): RawTargetStoreOrder
     const link = card.querySelector<HTMLAnchorElement>(SELECTORS.storeOrderCardLink);
     const idMatch = link?.getAttribute("href")?.match(STORE_RECEIPT_ID_RE);
     if (!idMatch) continue;
-    const receiptId = idMatch[1];
+    const receiptId = idMatch[1]!;
     if (seen.has(receiptId)) continue;
 
     const text = card.textContent ?? "";
@@ -321,9 +321,9 @@ function parseStoreSectionItems(section: Element): { items: RawTargetItem[]; ite
     const qtyText = [...wrapper.querySelectorAll("p")]
       .map((p) => (p.textContent ?? "").trim())
       .find((t) => QTY_RE.test(t));
-    const quantity = qtyText ? parseInt(qtyText.match(QTY_RE)![1], 10) : 1;
+    const quantity = qtyText ? parseInt(qtyText.match(QTY_RE)![1]!, 10) : 1;
     items.push({
-      productId: idMatch[1],
+      productId: idMatch[1]!,
       title: (title.textContent ?? "").trim(),
       unitPriceCents,
       quantity,
@@ -385,8 +385,8 @@ export function parseStorePurchaseDetailFromDocument(doc: Document): RawTargetSt
     }
   }
   // Single payment line with no explicit amount bills the whole total.
-  if (paymentLines.length === 1 && paymentLines[0].amountCents === 0) {
-    paymentLines[0].amountCents = invoiceTotalCents;
+  if (paymentLines.length === 1 && paymentLines[0]!.amountCents === 0) {
+    paymentLines[0]!.amountCents = invoiceTotalCents;
   }
 
   return { sections, invoiceTotalCents, paymentLines };
