@@ -381,4 +381,68 @@ describe("targetAdapter.scrapeMatchedOrders (coordinator)", () => {
       expect(res.unmatched.map((u) => u.charge.ynabTransactionId).sort()).toEqual(["yt-ra", "yt-rb"]);
     });
   });
+
+  describe("Phase 5a/5b — fully-returned in-store receipt (single 'Return complete' section)", () => {
+    // A receipt whose items were ALL later returned renders as one section
+    // (heading "Return complete", section.isRefund true) rather than two — but
+    // the list card still says "Purchased" with the full original total (same
+    // as the mixed case above). The bug this guards: Phase 5a used to key off
+    // the section's own isRefund (true here) instead of the charge it actually
+    // matched (a purchase charge, since list-level isRefund is always false),
+    // sending a purchase charge into buildRefundOrder.
+    const fullyReturnedStoreOrder: TargetPageResult = {
+      pageKind: "store-orders",
+      orders: [{ receiptId: "R5", date: "2026-06-01", totalCents: 5000, isRefund: false }],
+      hasMore: false,
+      fingerprint: "s1",
+    };
+    const fullyReturnedDetail: TargetPageResult = {
+      pageKind: "store-purchase-detail",
+      receiptId: "R5",
+      detail: {
+        sections: [{
+          isRefund: true,
+          date: "2026-06-15",
+          items: [{ productId: "P1", title: "Returned Everything", unitPriceCents: 4500, quantity: 1, amountCents: 4500 }],
+          itemSubtotalCents: 4500,
+        }],
+        invoiceTotalCents: 5000,
+        paymentLines: [{ cardLabel: "Visa", isGiftCard: false, amountCents: 5000 }],
+      },
+      imageMap: {},
+    };
+
+    it("matches the purchase charge to the receipt as a PURCHASE (not a refund) via Phase 5a, and the separate refund via Phase 5b", async () => {
+      const purchase = charge({ ynabTransactionId: "yt-p", amountCents: 5000, date: "2026-06-01", isRefund: false });
+      const refund = charge({ ynabTransactionId: "yt-r", amountCents: 4700, date: "2026-06-16", isRefund: true });
+      queueResults(emptyOnlineOrders, emptyOnlineOrders, fullyReturnedStoreOrder, fullyReturnedDetail, fullyReturnedDetail);
+
+      const res = await targetAdapter.scrapeMatchedOrders([purchase, refund]);
+      expect(res.unmatched).toEqual([]);
+      expect(res.matched).toHaveLength(2);
+
+      const byTx = new Map(res.matched.map((m) => [m.charges[0].ynabTransactionId, m]));
+      const purchaseMatch = byTx.get("yt-p")!;
+      expect(purchaseMatch.order.orderId).toBe("instore-R5");
+      // The core regression: a purchase charge must build a purchase order,
+      // never buildRefundOrder, regardless of the section's own heading.
+      expect(purchaseMatch.order.refund).toBeNull();
+      expect(purchaseMatch.order.items).toHaveLength(1);
+      expect(purchaseMatch.order.displayedItemsSubtotalCents).toBe(4500);
+
+      const refundMatch = byTx.get("yt-r")!;
+      expect(refundMatch.order.orderId).toBe("instore-R5");
+      expect(refundMatch.order.refund).toEqual({ itemCents: 4500, taxCents: 200, totalCents: 4700 });
+    });
+
+    it("still matches the purchase charge alone when no refund charge is in this batch (return stays unmatched)", async () => {
+      const purchase = charge({ ynabTransactionId: "yt-p", amountCents: 5000, date: "2026-06-01", isRefund: false });
+      queueResults(emptyOnlineOrders, emptyOnlineOrders, fullyReturnedStoreOrder, fullyReturnedDetail);
+
+      const res = await targetAdapter.scrapeMatchedOrders([purchase]);
+      expect(res.unmatched).toEqual([]);
+      expect(res.matched).toHaveLength(1);
+      expect(res.matched[0].order.refund).toBeNull();
+    });
+  });
 });

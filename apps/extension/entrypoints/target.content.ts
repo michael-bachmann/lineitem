@@ -28,11 +28,11 @@ type ContentMessage =
   | { type: "LOAD_MORE" };
 
 /** The "orders" URL (/orders) covers both tabs — switching is client-side, no
- *  navigation — so `describe()` can't tell them apart from the URL alone.
- *  Set once by `describeStoreOrders()` and read by `describe()`/`loadMore()`
- *  for as long as this content-script instance lives (i.e. until a real
- *  navigation reinjects it back to "online"). */
-let listMode: "online" | "store" = "online";
+ *  navigation — so which list is showing has to be read from the DOM itself
+ *  rather than tracked as content-script state. */
+function isStoreTabActive(): boolean {
+  return document.querySelector(SELECTORS.tabInstore)?.getAttribute("aria-selected") === "true";
+}
 
 export default defineContentScript({
   matches: ["*://*.target.com/*"],
@@ -62,8 +62,13 @@ async function describe(): Promise<void> {
       return post({ pageKind: "login" });
 
     case "orders": {
-      if (listMode === "store") {
-        await waitForElement(SELECTORS.storeOrderCard);
+      if (isStoreTabActive()) {
+        // storeOrderCard's wrapper class is shared with the online list (see
+        // scraper.test.ts's online fixture), so waiting on it alone can resolve
+        // against online cards still mounted mid-tab-switch and report zero
+        // in-store receipts. storeOrderCardLink's href pattern is unique to the
+        // in-store list, so it can't resolve early like that.
+        await waitForElement(SELECTORS.storeOrderCardLink);
         const orders = parseStoreOrdersFromDocument(document);
         return post({
           pageKind: "store-orders",
@@ -127,11 +132,10 @@ async function describe(): Promise<void> {
 }
 
 /** Switch to the in-store tab (if not already there), wait for its list to
- *  render, and describe it. `listMode` then stays "store" for as long as this
- *  content-script instance lives, so a subsequent LOAD_MORE/DESCRIBE on this
- *  same /orders page keeps reading the in-store list. */
+ *  render, and describe it. A subsequent LOAD_MORE/DESCRIBE on this same
+ *  /orders page reads `isStoreTabActive()` fresh each time, so it keeps
+ *  reading the in-store list without any state of its own. */
 async function describeStoreOrders(): Promise<void> {
-  listMode = "store";
   const tab = document.querySelector<HTMLElement>(SELECTORS.tabInstore);
   if (tab && tab.getAttribute("aria-selected") !== "true") tab.click();
   return describe();
@@ -144,7 +148,10 @@ async function describeStoreOrders(): Promise<void> {
 async function loadMore(): Promise<void> {
   const btn = loadMoreButton();
   if (!btn) return describe(); // no more pages — re-describe shows hasMore:false
-  const cardSelector = listMode === "store" ? SELECTORS.storeOrderCard : SELECTORS.orderCard;
+  // storeOrderCardLink, not storeOrderCard, for the same reason as describe()'s
+  // wait above — its wrapper class is shared with the online list, so counting
+  // it here could count online cards as in-store ones.
+  const cardSelector = isStoreTabActive() ? SELECTORS.storeOrderCardLink : SELECTORS.orderCard;
   const before = document.querySelectorAll(cardSelector).length;
   btn.click();
   // Wait for the append to actually land (generously — Firefox's append can lag

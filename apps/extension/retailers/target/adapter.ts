@@ -300,6 +300,10 @@ export const targetAdapter: RetailerAdapter = {
 
           const storeMatches: { receiptId: string; charge: YnabCharge }[] = [];
           const consumedReceipts = new Set<string>();
+          // Receipts 5a already fully accounted for via the (theoretical,
+          // unobserved) standalone-refund-only branch — 5b must not also try
+          // to match their return section to a different charge.
+          const pureRefundReceiptIds = new Set<string>();
           const stillRemaining: YnabCharge[] = [];
           for (const charge of remaining) {
             const cand = storeOrders
@@ -336,38 +340,28 @@ export const targetAdapter: RetailerAdapter = {
               continue;
             }
             const { detail, imageMap } = read;
-            if (detail.sections.length === 0) {
+            if (detail.sections.length === 0 || detail.sections.some((s) => s.items.length === 0)) {
               storeDetailFailures.push({ charge: sm.charge, reason: "Target in-store purchase had no parseable items" });
               continue;
             }
-            if (detail.sections.length === 1) {
-              const [section] = detail.sections;
-              if (section.items.length === 0) {
-                storeDetailFailures.push({ charge: sm.charge, reason: "Target in-store purchase had no parseable items" });
-                continue;
-              }
-              const invoiceDetail = toInvoiceDetail(detail);
-              const orderId = `instore-${sm.receiptId}`;
-              const order = invoiceDetail.isRefund
-                ? buildRefundOrder(orderId, invoiceDetail, sm.charge, imageMap)
-                : buildPurchaseOrder(orderId, invoiceDetail, imageMap);
-              matched.push({ order, charges: [sm.charge] });
-              continue;
-            }
-            // Mixed receipt (purchase + return under one URL): the list card's
-            // total is the FULL original purchase — live-verified it is NOT
-            // netted against the later return — so `sm.charge` (matched against
-            // that total) is genuinely the purchase side, and its order must
-            // reconcile against EVERY item on the receipt, not just the
-            // "Purchased" section: Target's per-section labels describe an
-            // item's current status, not what was originally billed.
-            if (detail.sections.some((s) => s.items.length === 0)) {
-              storeDetailFailures.push({ charge: sm.charge, reason: "Target in-store purchase had no parseable items" });
-              continue;
-            }
+            // The list card always says "Purchased" (even for a receipt whose
+            // items were all later returned), so `sm.charge` here is a purchase
+            // charge in every case seen live — `buildRefundOrder` below only
+            // covers the (unobserved) theoretical case of a standalone
+            // refund-only list entry. For a purchase charge, its order must
+            // reconcile against EVERY item on the receipt regardless of section
+            // count: Target's per-section labels ("Purchased"/"Return complete")
+            // describe an item's current status, not what was originally
+            // billed — a fully-returned receipt still renders as one
+            // "Return complete" section, and toMixedPurchaseDetail generalizes
+            // to that (and to the single ordinary-purchase section) the same
+            // way it does to a genuine 2-section mixed receipt.
             const orderId = `instore-${sm.receiptId}`;
-            const order = buildPurchaseOrder(orderId, toMixedPurchaseDetail(detail), imageMap);
+            const order = sm.charge.isRefund
+              ? buildRefundOrder(orderId, toInvoiceDetail(detail), sm.charge, imageMap)
+              : buildPurchaseOrder(orderId, toMixedPurchaseDetail(detail), imageMap);
             matched.push({ order, charges: [sm.charge] });
+            if (sm.charge.isRefund) pureRefundReceiptIds.add(sm.receiptId);
           }
 
           // Phase 5b: a still-remaining REFUND charge may be the later, separate
@@ -385,9 +379,20 @@ export const targetAdapter: RetailerAdapter = {
           for (const storeOrder of storeOrders) {
             if (!remaining.some((c) => c.isRefund)) break;
             signal?.throwIfAborted();
-            if (consumedForReturn.has(storeOrder.receiptId)) continue;
-            // A refund can't exceed the receipt's own total.
-            if (!remaining.some((c) => c.isRefund && c.amountCents <= (storeOrder.totalCents ?? Infinity))) continue;
+            if (consumedForReturn.has(storeOrder.receiptId) || pureRefundReceiptIds.has(storeOrder.receiptId)) continue;
+            // A refund can't exceed the receipt's own total, and — like
+            // orderMightMatch's refund rule — can't post before the receipt's
+            // own (purchase) date, though it may post arbitrarily long after.
+            // The date bound is what actually prunes a busy account down from
+            // "every receipt at or above the amount" to a plausible few.
+            if (
+              !remaining.some(
+                (c) =>
+                  c.isRefund
+                  && c.amountCents <= (storeOrder.totalCents ?? Infinity)
+                  && new Date(c.date).getTime() - new Date(storeOrder.date).getTime() >= -PREFILTER_BEFORE_MS,
+              )
+            ) continue;
 
             let read: { detail: RawTargetStoreDetail; imageMap: Record<string, string> };
             try {
@@ -399,7 +404,6 @@ export const targetAdapter: RetailerAdapter = {
               continue;
             }
             const { detail, imageMap } = read;
-            if (detail.sections.length !== 2) continue; // not a mixed receipt
             const returnSection = detail.sections.find((s) => s.isRefund);
             if (!returnSection || returnSection.items.length === 0) continue;
 
@@ -420,7 +424,7 @@ export const targetAdapter: RetailerAdapter = {
             const returnDetail = toReturnSectionDetail(returnSection, refundCharge);
             const order = buildRefundOrder(orderId, returnDetail, refundCharge, imageMap);
             matched.push({ order, charges: [refundCharge] });
-            onScrapeProgress?.({ phase: "matching", count: matchedInvoices.length + storeMatches.length + matched.length });
+            onScrapeProgress?.({ phase: "matching", count: matched.length });
           }
         }
       }
