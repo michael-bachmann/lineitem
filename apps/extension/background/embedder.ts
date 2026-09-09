@@ -84,7 +84,7 @@ export async function ensureModelLoaded(): Promise<void> {
 
 export async function embed(text: string): Promise<Float32Array> {
   const [vec] = await embedBatch([text]);
-  return vec;
+  return vec!;
 }
 
 export async function embedBatch(texts: string[]): Promise<Float32Array[]> {

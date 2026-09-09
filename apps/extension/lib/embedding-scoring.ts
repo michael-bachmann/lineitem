@@ -44,7 +44,9 @@ export function scoreEmbedding(
     groupBy(scored, (s) => s.categoryId),
     (group) => sortBy(group, [(s) => s.cosine, "desc"])[0],
   );
-  const [top] = sortBy(Object.values(bestPerCategory), [(s) => s.cosine, "desc"]);
+  // scored is non-empty (checked above), so grouping it yields at least one
+  // category and therefore at least one best-per-category entry.
+  const top = sortBy(Object.values(bestPerCategory), [(s) => s.cosine, "desc"])[0]!;
 
   if (top.cosine < threshold) return null;
   return {

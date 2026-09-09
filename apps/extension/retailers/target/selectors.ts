@@ -89,9 +89,9 @@ export function parseTargetDate(input: string): string {
   const cleaned = input.replace(/invoice date\s*:?/i, "").trim();
   const m = cleaned.match(/([A-Za-z]+)\.?\s+(\d{1,2}),?\s+(\d{4})/);
   if (!m) return "";
-  const month = MONTHS[m[1].toLowerCase()];
+  const month = MONTHS[m[1]!.toLowerCase()];
   if (!month) return "";
-  return `${m[3]}-${month}-${m[2].padStart(2, "0")}`;
+  return `${m[3]}-${month}-${m[2]!.padStart(2, "0")}`;
 }
 
 /** Parse "$18.59" / "$-40.00" / "-$3.00" to ABSOLUTE integer cents (1859, 4000, 300). */

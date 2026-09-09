@@ -232,7 +232,7 @@ export const targetAdapter: RetailerAdapter = {
       for (let i = 0; i < matchedInvoices.length; i++) {
         signal?.throwIfAborted();
         onScrapeProgress?.({ phase: "scraping", index: i + 1, total: matchedInvoices.length });
-        const mi = matchedInvoices[i];
+        const mi = matchedInvoices[i]!;
 
         let detail: RawTargetInvoiceDetail;
         try {

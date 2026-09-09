@@ -163,6 +163,83 @@ Register the redirect URI `https://<extension-id>.chromiumapp.org/` on the YNAB
 OAuth app. The extension ID is pinned via `manifest.key` in `wxt.config.ts`, so it
 stays stable across machines.
 
+## Releasing
+
+Releases run through the **Release** workflow
+(`.github/workflows/release.yml`) — verify → build → submit to both stores →
+tag. To ship:
+
+1. Open a PR bumping `version` in `apps/extension/package.json` and adding the
+   matching entry to `WHATS_NEW` in `components/WhatsNewCard.tsx` (keyed by
+   version — a version with no entry simply shows no card).
+2. Merge it.
+3. **Actions → Release → Run workflow.**
+
+That single version field is the only thing to bump: WXT compiles it into the
+manifest, and the workflow reads it back for the tag name, so a release can't
+tag a number different from the one that shipped.
+
+The trigger is a manual button rather than a tag push — a store submission
+can't be unsent, so a human decides when it happens. Store review and
+publish-on-approval stay automatic once submitted.
+
+**Run with `dry_run` checked first.** It authenticates against both stores and
+stops. Note what it does *not* check: upload permission, the contents of the
+zips, or `CHROME_EXTENSION_ID` (unused until a real upload) — so a wrong Chrome
+extension ID passes a dry run and fails the real submit.
+
+### After a partial failure
+
+`stores` (`both` / `chrome` / `firefox`) exists because store uploads are
+one-way. If Chrome accepts v1.2.0 and Firefox errors, re-running `both` is
+permanently red — Chrome rejects the duplicate — so the tag step is never
+reached. Re-run with `stores: firefox` instead.
+
+A single-store run deliberately does not tag, since it can't verify the other
+half shipped. Once the retry lands, tag by hand:
+
+```bash
+git tag v1.2.0 && git push origin v1.2.0
+```
+
+Download the run's zip artifacts *before* pressing re-run — GitHub deletes a
+run's earlier attempts' artifacts as soon as a new attempt starts.
+
+### Store credentials
+
+Seven repo secrets: `CHROME_EXTENSION_ID`, `CHROME_CLIENT_ID`,
+`CHROME_CLIENT_SECRET`, `CHROME_REFRESH_TOKEN`, `FIREFOX_EXTENSION_ID`,
+`FIREFOX_JWT_ISSUER`, `FIREFOX_JWT_SECRET`.
+
+Firefox's JWT issuer and secret come from the
+[AMO API key page](https://addons.mozilla.org/developers/addon/api/key/).
+
+Chrome needs a Google Cloud OAuth client, because the Chrome Web Store
+publishing API is an ordinary Google API and the store dashboard has no
+token UI of its own. In a GCP project: enable the **Chrome Web Store API**,
+then under **Google Auth Platform** create a **Desktop app** client and set
+**Audience → Publish app** to move the app out of Testing — in Testing the
+refresh token expires after 7 days and releases start failing on auth.
+
+Do **not** use `wxt submit init` to mint the token. It requests Google's
+`urn:ietf:wg:oauth:2.0:oob` redirect, which Google deprecated in 2023
+([wxt-dev/wxt#1462](https://github.com/wxt-dev/wxt/issues/1462)). Use the
+loopback flow instead, authorizing as the account that owns the extension in
+the Web Store:
+
+```bash
+npx chrome-webstore-upload-keys
+```
+
+### Sources zip
+
+AMO review must be able to rebuild the add-on, so `wxt zip -b firefox` also
+emits a sources zip spanning the whole monorepo. **It walks the working tree
+and ignores `.gitignore` entirely** — anything sitting in your checkout is a
+candidate for upload, tracked or not. Building in CI from a fresh clone is what
+makes that safe; `zip.excludeSources` in `wxt.config.ts` is the backstop for
+local runs.
+
 ## Conventions
 
 - **Currency** — all monetary values are integer cents in code. Conversion to YNAB

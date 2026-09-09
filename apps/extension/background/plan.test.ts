@@ -69,8 +69,8 @@ describe("switchPlan fetches before committing", () => {
       { id: "cat-1", name: "Groceries", groupName: "Everyday" },
     ]);
     expect(mocked.saveSettings).toHaveBeenCalledWith({ planId: "plan-b", planName: "Budget B" });
-    const putOrder = mocked.putCategories.mock.invocationCallOrder[0];
-    const saveOrder = mocked.saveSettings.mock.invocationCallOrder[0];
+    const putOrder = mocked.putCategories.mock.invocationCallOrder[0]!;
+    const saveOrder = mocked.saveSettings.mock.invocationCallOrder[0]!;
     expect(putOrder).toBeLessThan(saveOrder);
   });
 });
@@ -142,8 +142,8 @@ describe("adoptLegacyLearnedDataOnce", () => {
     expect(mocked.adoptLegacyLearnedData).toHaveBeenCalledWith("plan-a");
     expect(storageState.learnedDataAdopted).toBe(true);
     // The flag commits only after the adoption succeeded.
-    const adoptOrder = mocked.adoptLegacyLearnedData.mock.invocationCallOrder[0];
-    const setOrder = vi.mocked(browser.storage.local.set).mock.invocationCallOrder[0];
+    const adoptOrder = mocked.adoptLegacyLearnedData.mock.invocationCallOrder[0]!;
+    const setOrder = vi.mocked(browser.storage.local.set).mock.invocationCallOrder[0]!;
     expect(adoptOrder).toBeLessThan(setOrder);
   });
 

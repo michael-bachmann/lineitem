@@ -2,7 +2,7 @@
   "name": "extension",
   "description": "Match YNAB transactions to your Amazon and Target orders and split each charge into the right budget categories",
   "private": true,
-  "version": "1.1.0",
+  "version": "1.3.0",
   "type": "module",
   "scripts": {
     "dev": "wxt",
@@ -27,25 +27,25 @@
     "@lineitem/ui": "workspace:*",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
-    "remeda": "^2.39.0"
+    "remeda": "^2.45.0"
   },
   "devDependencies": {
-    "@storybook/addon-a11y": "^10.5.4",
-    "@storybook/react-vite": "^10.5.4",
+    "@storybook/addon-a11y": "^10.6.0",
+    "@storybook/react-vite": "^10.6.0",
     "@tailwindcss/vite": "^4.3.3",
-    "@types/chrome": "^0.2.2",
-    "@types/react": "^19.2.17",
-    "@types/react-dom": "^19.2.3",
-    "@vitest/coverage-v8": "^4.1.10",
-    "@wxt-dev/auto-icons": "^1.1.1",
+    "@types/chrome": "^0.2.8",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.6",
+    "@vitest/coverage-v8": "^4.1.11",
+    "@wxt-dev/auto-icons": "^1.1.2",
     "@wxt-dev/module-react": "^1.1.5",
     "fake-indexeddb": "^6.2.5",
-    "happy-dom": "^20.11.1",
-    "storybook": "^10.5.4",
+    "happy-dom": "^20.13.2",
+    "storybook": "^10.6.0",
     "tailwindcss": "^4.3.3",
     "typescript": "^7.0.2",
     "vite-plugin-svgr": "^5.2.0",
-    "vitest": "^4.1.10",
-    "wxt": "^0.20.27"
+    "vitest": "^4.1.11",
+    "wxt": "^0.21.4"
   }
 }

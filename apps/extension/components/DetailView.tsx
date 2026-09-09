@@ -11,7 +11,10 @@ import { StatusTile } from "@/components/status";
 interface DetailViewProps {
   entry: QueueEntry;
   categories: Category[];
+  /** More reviewable transactions remain — approving advances to the next one. */
+  hasNext: boolean;
   onBack: () => void;
+  /** Approves and navigates (next entry or back to the queue) on success. */
   onApprove: (ynabTransactionId: string, items: ApprovalItem[]) => Promise<void>;
 }
 
@@ -21,7 +24,7 @@ function parseOrderId(orderKey: string): string {
   return i >= 0 ? orderKey.slice(i + 1) : orderKey;
 }
 
-export default function DetailView({ entry, categories, onBack, onApprove }: DetailViewProps) {
+export default function DetailView({ entry, categories, hasNext, onBack, onApprove }: DetailViewProps) {
   const { ynabTransaction, matchStatus } = entry;
 
   const [selectedCategories, setSelectedCategories] = useState<Map<number, string>>(() => {
@@ -89,7 +92,6 @@ export default function DetailView({ entry, categories, onBack, onApprove }: Det
     setApproving(true);
     try {
       await onApprove(ynabTransaction.id, items);
-      onBack();
     } finally {
       setApproving(false);
     }
@@ -179,7 +181,9 @@ export default function DetailView({ entry, categories, onBack, onApprove }: Det
         >
           {uncats > 0
             ? `${uncats} ${plural(uncats, { one: "item still needs", other: "items still need" })} a category`
-            : "Approve & write split"}
+            : hasNext
+              ? "Approve & next"
+              : "Approve & write split"}
         </Button>
       </div>
     </div>

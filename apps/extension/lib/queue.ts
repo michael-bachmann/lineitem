@@ -8,6 +8,21 @@ export function isFullyClassified(entry: QueueEntry): boolean {
   );
 }
 
+/** The entry the detail screen should advance to after approving `approvedId`:
+ *  the next reviewable entry in the order the queue screen lists them
+ *  (needs-review first, then ready-to-approve), starting after the approved
+ *  entry and wrapping to the top. Null when nothing reviewable remains. */
+export function nextReviewableEntry(queue: QueueEntry[], approvedId: string): QueueEntry | null {
+  const matched = queue.filter((e) => e.matchStatus.status === "matched");
+  const ordered = [
+    ...matched.filter((e) => !isFullyClassified(e)),
+    ...matched.filter((e) => isFullyClassified(e)),
+  ];
+  const i = ordered.findIndex((e) => e.ynabTransaction.id === approvedId);
+  const after = i >= 0 ? [...ordered.slice(i + 1), ...ordered.slice(0, i)] : ordered;
+  return after[0] ?? null;
+}
+
 /** Presentational status vocabulary used by the queue/detail UI (`statusInfo`). */
 export type QueueDisplayStatus =
   | "classified"

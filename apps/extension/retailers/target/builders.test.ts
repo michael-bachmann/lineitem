@@ -36,7 +36,7 @@ describe("buildPurchaseOrder", () => {
 
     const result = distributeOrder(order, [charge({ amountCents: 1859, isRefund: false })]);
     expect(result.failures).toEqual([]);
-    expect(result.allocated[0].items[0].allocatedCents).toBe(1859);
+    expect(result.allocated[0]!.items[0]!.allocatedCents).toBe(1859);
   });
 
   it("falls back to empty imageUrl when productId is absent from imageMap", () => {
@@ -50,7 +50,7 @@ describe("buildPurchaseOrder", () => {
       paymentLines: [{ cardLabel: "American Express*1014", isGiftCard: false, amountCents: 1859 }],
     };
     const order = buildPurchaseOrder("912003510147483", detail, {});
-    expect(order.items[0].imageUrl).toBe("");
+    expect(order.items[0]!.imageUrl).toBe("");
   });
 
   it("maps two items and distributes a single charge across both", () => {
@@ -73,7 +73,7 @@ describe("buildPurchaseOrder", () => {
 
     const result = distributeOrder(order, [charge({ amountCents: 2500, isRefund: false })]);
     expect(result.failures).toEqual([]);
-    const allocatedItems = result.allocated[0].items;
+    const allocatedItems = result.allocated[0]!.items;
     const totalAllocated = allocatedItems.reduce((s, it) => s + it.allocatedCents, 0);
     expect(totalAllocated).toBe(2500);
   });
@@ -99,11 +99,11 @@ describe("buildRefundOrder", () => {
     // displayedItemsSubtotalCents must be the gross item sum, not the refund/card total.
     expect(order.displayedItemsSubtotalCents).toBe(4000);
     expect(order.refund).toEqual({ itemCents: 4000, taxCents: 390, totalCents: 2890 });
-    expect(order.items[0].refundedAmountCents).toBe(4000);
+    expect(order.items[0]!.refundedAmountCents).toBe(4000);
 
     const result = distributeOrder(order, [refundCharge]);
     expect(result.failures).toEqual([]);
-    expect(result.allocated[0].items[0].allocatedCents).toBe(2890);
+    expect(result.allocated[0]!.items[0]!.allocatedCents).toBe(2890);
   });
 });
 

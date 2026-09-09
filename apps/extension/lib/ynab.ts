@@ -112,11 +112,22 @@ export async function getCategories(planId: string): Promise<Category[]> {
     .flatMap((g) => g.categories.filter(isVisible).map((c) => ({ id: c.id, name: c.name, groupName: g.name })));
 }
 
+/** YNAB's `type` filter only accepts one value per request, and a transaction can be
+ *  uncategorized without being unapproved (or vice versa) — so we fetch both and
+ *  dedupe by id rather than missing either set. */
 export async function getUnapprovedTransactions(planId: string): Promise<YnabTransaction[]> {
-  const { data } = await ynabFetch<YnabApiResponse<{ transactions: YnabTransaction[] }>>(
-    `/plans/${planId}/transactions?type=unapproved`,
+  const [unapproved, uncategorized] = await Promise.all([
+    ynabFetch<YnabApiResponse<{ transactions: YnabTransaction[] }>>(
+      `/plans/${planId}/transactions?type=unapproved`,
+    ),
+    ynabFetch<YnabApiResponse<{ transactions: YnabTransaction[] }>>(
+      `/plans/${planId}/transactions?type=uncategorized`,
+    ),
+  ]);
+  const byId = new Map(
+    [...unapproved.data.transactions, ...uncategorized.data.transactions].map((tx) => [tx.id, tx]),
   );
-  return data.transactions;
+  return [...byId.values()];
 }
 
 /**

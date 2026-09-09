@@ -83,10 +83,10 @@ export function assignItemsToCharges(
 
   // Scaled subset sum and per-charge distance helper.
   const scaledSum = (indices: number[]): number =>
-    Math.round(indices.reduce((s, i) => s + itemSubtotalsCents[i], 0) * ratio);
+    Math.round(indices.reduce((s, i) => s + itemSubtotalsCents[i]!, 0) * ratio);
 
   const distanceForCharge = (indices: number[], chargeIdx: number): number =>
-    Math.abs(scaledSum(indices) - chargeAmountsCents[chargeIdx]);
+    Math.abs(scaledSum(indices) - chargeAmountsCents[chargeIdx]!);
 
   // Track best total distance found so far. Best partition is recorded as
   // a parallel array of index-lists, one per charge, in input order.
@@ -163,13 +163,13 @@ export function assignItemsToCharges(
 
 /** Index of the largest value; ties resolve to the lowest index. */
 function argmax(values: number[]): number {
-  return values.reduce((best, v, i) => (v > values[best] ? i : best), 0);
+  return values.reduce((best, v, i) => (v > values[best]! ? i : best), 0);
 }
 
 /** Total subtotal a bucket of item indices carries, scaled by the tax/fee ratio
  *  into charge space — what its charge would have to cover. */
 function scaledBucketCents(bucket: number[], itemSubtotalsCents: number[], ratio: number): number {
-  return Math.round(sum(bucket.map((i) => itemSubtotalsCents[i])) * ratio);
+  return Math.round(sum(bucket.map((i) => itemSubtotalsCents[i]!)) * ratio);
 }
 
 /**
@@ -206,9 +206,9 @@ function partitionByClosestSubset(
       // closestSubset indexes into the pool-projected values, so map its answer
       // back onto the original item indices before recording the bucket.
       const picked = closestSubset(
-        acc.pool.map((i) => itemSubtotalsCents[i]),
+        acc.pool.map((i) => itemSubtotalsCents[i]!),
         Math.round(target),
-      ).indices.map((k) => acc.pool[k]);
+      ).indices.map((k) => acc.pool[k]!);
       const taken = new Set(picked);
       return {
         pool: acc.pool.filter((i) => !taken.has(i)),
@@ -221,8 +221,8 @@ function partitionByClosestSubset(
     },
   );
 
-  const remainderCharge = bySmallestTarget[bySmallestTarget.length - 1].charge;
-  return targets.map((_, charge) => (charge === remainderCharge ? pool : assigned[charge]));
+  const remainderCharge = bySmallestTarget[bySmallestTarget.length - 1]!.charge;
+  return targets.map((_, charge) => (charge === remainderCharge ? pool : assigned[charge]!));
 }
 
 /**
@@ -234,8 +234,8 @@ function repairEmptyBuckets(buckets: number[][], itemSubtotalsCents: number[]): 
   const emptyCharges = buckets.flatMap((b, j) => (b.length === 0 ? [j] : []));
   return emptyCharges.reduce((acc, target) => {
     const donor = argmax(acc.map((b) => b.length));
-    const smallest = acc[donor].reduce((min, i) =>
-      itemSubtotalsCents[i] < itemSubtotalsCents[min] ? i : min,
+    const smallest = acc[donor]!.reduce((min, i) =>
+      itemSubtotalsCents[i]! < itemSubtotalsCents[min]! ? i : min,
     );
     return acc.map((b, j) =>
       j === donor ? b.filter((i) => i !== smallest) : j === target ? [...b, smallest] : b,
@@ -280,7 +280,7 @@ function assignItemsToChargesBySubsetSum(
   return {
     indicesPerCharge,
     distanceCentsPerCharge: indicesPerCharge.map((bucket, j) =>
-      Math.abs(scaledBucketCents(bucket, itemSubtotalsCents, ratio) - chargeAmountsCents[j]),
+      Math.abs(scaledBucketCents(bucket, itemSubtotalsCents, ratio) - chargeAmountsCents[j]!),
     ),
   };
 }
@@ -303,10 +303,10 @@ function enumerateSubsets(
     }
     // Include items[i]
     if (included.length < maxSize) {
-      search(i + 1, [...included, items[i]], excluded);
+      search(i + 1, [...included, items[i]!], excluded);
     }
     // Exclude items[i]
-    search(i + 1, included, [...excluded, items[i]]);
+    search(i + 1, included, [...excluded, items[i]!]);
   }
   search(0, [], []);
 }
@@ -357,7 +357,7 @@ export function matchRefundToItems(
     chargeAmountCents,
     ratio,
   );
-  return matches.length === 1 ? matches[0] : null;
+  return matches.length === 1 ? matches[0]! : null;
 }
 
 /**
@@ -379,8 +379,8 @@ function findMatchingSubsets(
       const tolerance = REFUND_MATCH_TOLERANCE_CENTS_PER_ITEM * current.length;
       return Math.abs(grossed - chargeAmountCents) <= tolerance ? [current] : [];
     }
-    const idx = eligible[i];
-    const include = recurse(i + 1, [...current, idx], currentSum + refundedAmounts[idx]);
+    const idx = eligible[i]!;
+    const include = recurse(i + 1, [...current, idx], currentSum + refundedAmounts[idx]!);
     if (include.length >= 2) return include.slice(0, 2);
     const exclude = recurse(i + 1, current, currentSum);
     return [...include, ...exclude].slice(0, 2);
@@ -496,7 +496,7 @@ function allocateItems(
   total: number,
 ): AllocatedItem[] {
   const amounts = allocateProportional(subtotals, total);
-  return items.map((item, i) => ({ ...item, allocatedCents: amounts[i] }));
+  return items.map((item, i) => ({ ...item, allocatedCents: amounts[i]! }));
 }
 
 // ---------------------------------------------------------------------------
@@ -649,7 +649,7 @@ function allocateRefund(
   idx: number[],
   weights: number[],
 ): { outcome: ChargeOutcome; newlyConsumed: readonly number[] } {
-  const selected = idx.map((i) => weights[i]);
+  const selected = idx.map((i) => weights[i]!);
   if (sum(selected) === 0) {
     return {
       outcome: failed(charge, "Couldn't unambiguously match refund to specific items"),
@@ -657,7 +657,7 @@ function allocateRefund(
     };
   }
   const items = allocateItems(
-    idx.map((i) => order.items[i]),
+    idx.map((i) => order.items[i]!),
     selected,
     charge.amountCents,
   );
@@ -720,9 +720,9 @@ function allocatePurchaseCharges(
   logAssignmentDistance(order, assignment);
 
   return charges.map((charge, chargeIdx) => {
-    const localIndices = assignment.indicesPerCharge[chargeIdx];
-    const subsetItems = localIndices.map((i) => nonRefundedItems[i]);
-    const subsetSubtotals = localIndices.map((i) => itemSubtotals[i]);
+    const localIndices = assignment.indicesPerCharge[chargeIdx]!;
+    const subsetItems = localIndices.map((i) => nonRefundedItems[i]!);
+    const subsetSubtotals = localIndices.map((i) => itemSubtotals[i]!);
     const items = allocateItems(subsetItems, subsetSubtotals, charge.amountCents);
     return allocated(buildAllocatedTx(order, charge, items));
   });

@@ -62,7 +62,7 @@ describe("getValidAccessToken", () => {
     expect(await getValidAccessToken()).toBe("fresh");
 
     expect(fetchSpy).toHaveBeenCalledOnce();
-    const [url, init] = fetchSpy.mock.calls[0];
+    const [url, init] = fetchSpy.mock.calls[0]!;
     expect(String(url)).toContain("/oauth/refresh");
     expect(JSON.parse(init!.body as string)).toEqual({ refresh_token: "rt" });
 
@@ -140,7 +140,7 @@ describe("exchangeCodeForTokens", () => {
     const after = Date.now();
 
     expect(fetchSpy).toHaveBeenCalledOnce();
-    const [url, init] = fetchSpy.mock.calls[0];
+    const [url, init] = fetchSpy.mock.calls[0]!;
     expect(String(url)).toContain("/oauth/exchange");
     expect(JSON.parse(init!.body as string)).toEqual({
       code: "CODE",
@@ -154,7 +154,7 @@ describe("exchangeCodeForTokens", () => {
         accessTokenExpiresAt: expect.any(Number),
       }),
     );
-    const { accessTokenExpiresAt } = saveSettingsMock.mock.calls[0][0];
+    const { accessTokenExpiresAt } = saveSettingsMock.mock.calls[0]![0];
     expect(accessTokenExpiresAt).toBeGreaterThanOrEqual(before + 7200_000);
     expect(accessTokenExpiresAt).toBeLessThanOrEqual(after + 7200_000);
   });
@@ -196,7 +196,7 @@ describe("runOAuthFlow", () => {
     await runOAuthFlow();
 
     expect(fetchSpy).toHaveBeenCalledOnce();
-    expect(String(fetchSpy.mock.calls[0][0])).toContain("/oauth/exchange");
+    expect(String(fetchSpy.mock.calls[0]![0])).toContain("/oauth/exchange");
   });
 
   it("aborts without exchanging when the returned state does not match (CSRF)", async () => {

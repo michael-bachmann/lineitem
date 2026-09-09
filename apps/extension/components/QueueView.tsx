@@ -37,6 +37,8 @@ interface QueueViewProps {
   onCoffeeClick?: () => void;
 }
 
+// This ordering is mirrored by nextReviewableEntry (lib/queue.ts), which walks
+// entries in display order — keep the two in sync.
 const GROUPS: { key: string; label: string; has: (s: QueueDisplayStatus) => boolean }[] = [
   { key: "review", label: "Needs review", has: (s) => s === "partial" },
   { key: "ready", label: "Ready to approve", has: (s) => s === "classified" },
@@ -46,7 +48,7 @@ const GROUPS: { key: string; label: string; has: (s: QueueDisplayStatus) => bool
 /** ISO date (YYYY-MM-DD) → compact "May 20". */
 function formatDate(iso: string): string {
   const [y, m, d] = iso.split("-").map(Number);
-  return new Date(y, m - 1, d).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  return new Date(y!, m! - 1, d!).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
 export default function QueueView({
