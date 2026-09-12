@@ -1,4 +1,6 @@
-import type { RawTargetOrder, RawTargetInvoice, RawTargetInvoiceDetail } from "./scraper";
+import type {
+  RawTargetOrder, RawTargetInvoice, RawTargetInvoiceDetail, RawTargetStoreOrder, RawTargetStoreDetail,
+} from "./scraper";
 import { isLoginUrl } from "./selectors";
 
 /**
@@ -26,6 +28,20 @@ export type TargetPageResult =
   | { pageKind: "invoices"; orderId: string; invoices: RawTargetInvoice[] }
   | { pageKind: "invoice-detail"; orderId: string; invoiceId: string; detail: RawTargetInvoiceDetail }
   | { pageKind: "order-images"; orderId: string; imageMap: Record<string, string> }
+  | {
+      pageKind: "store-orders";
+      orders: RawTargetStoreOrder[];
+      /** Whether a "Load more" button is present — same semantics as `orders`. */
+      hasMore: boolean;
+      fingerprint: string;
+    }
+  | {
+      pageKind: "store-purchase-detail";
+      receiptId: string;
+      detail: RawTargetStoreDetail;
+      /** From the same page/document as `detail` — no separate fetch needed. */
+      imageMap: Record<string, string>;
+    }
   | { pageKind: "other" };
 
 export type TargetPageKind = TargetPageResult["pageKind"];
@@ -42,15 +58,21 @@ function segments(url: string): string[] | null {
  * Classify a Target URL into the page kind a content script should report. Pure
  * and URL-only so it's unit-testable and shared by the content script (to label
  * itself) and the adapter (for await predicates). Order paths nest by depth:
- *   /orders                              → orders (list)
+ *   /orders                              → orders (list — the "orders" kind
+ *                                           also covers the in-store tab, since
+ *                                           switching tabs doesn't change the
+ *                                           URL; the content script tracks
+ *                                           which list is showing itself)
  *   /orders/{id}                         → order-images (order detail page)
  *   /orders/{id}/invoices                → invoices
  *   /orders/{id}/invoices/{invoiceId}    → invoice-detail
+ *   /orders/stores/{receiptId}           → store-purchase-detail
  */
 export function detectTargetPageKind(url: string): TargetPageKind {
   if (isLoginUrl(url)) return "login";
   const seg = segments(url);
   if (!seg || seg[0] !== "orders") return "other";
+  if (seg.length === 3 && seg[1] === "stores") return "store-purchase-detail";
   if (seg.length === 1) return "orders";
   if (seg.length === 2) return "order-images";
   if (seg.length === 3 && seg[2] === "invoices") return "invoices";
@@ -62,6 +84,12 @@ export function detectTargetPageKind(url: string): TargetPageKind {
 export function targetOrderIdFromUrl(url: string): string {
   const seg = segments(url);
   return seg && seg[0] === "orders" ? (seg[1] ?? "") : "";
+}
+
+/** The receipt id from an `/orders/stores/{receiptId}` URL, or "" if absent. */
+export function targetReceiptIdFromUrl(url: string): string {
+  const seg = segments(url);
+  return seg && seg[0] === "orders" && seg[1] === "stores" ? (seg[2] ?? "") : "";
 }
 
 /** The invoice id from an `/orders/{id}/invoices/{invoiceId}` URL, or "". */
@@ -76,4 +104,9 @@ export function targetInvoiceIdFromUrl(url: string): string {
  *  new page. The growth is what we care about, so the orderId join is enough. */
 export function ordersFingerprint(orders: RawTargetOrder[]): string {
   return orders.map((o) => o.orderId).join("|");
+}
+
+/** Same idea as `ordersFingerprint`, for the in-store tab's list. */
+export function storeOrdersFingerprint(orders: RawTargetStoreOrder[]): string {
+  return orders.map((o) => o.receiptId).join("|");
 }

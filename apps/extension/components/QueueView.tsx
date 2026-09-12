@@ -110,6 +110,12 @@ export default function QueueView({
         </Button>
       </div>
 
+      {syncing && (
+        <p role="status" className="text-[12px] leading-[1.4] text-muted">
+          Syncing — switching to or closing the Amazon/Target tab it opens can interrupt the scrape.
+        </p>
+      )}
+
       {error && (
         <div
           role="alert"

@@ -4,13 +4,17 @@ import {
   parseInvoicesListFromDocument,
   parseInvoiceDetailFromDocument,
   parseOrderImageMap,
+  parseStoreOrdersFromDocument,
+  parseStorePurchaseDetailFromDocument,
 } from "@/retailers/target/scraper";
 import { SELECTORS } from "@/retailers/target/selectors";
 import {
   detectTargetPageKind,
   targetOrderIdFromUrl,
   targetInvoiceIdFromUrl,
+  targetReceiptIdFromUrl,
   ordersFingerprint,
+  storeOrdersFingerprint,
   type TargetPageResult,
 } from "@/retailers/target/page";
 import { waitUntil, waitForElement, waitForQuietDom } from "@/lib/dom-wait";
@@ -20,7 +24,15 @@ import { waitUntil, waitForElement, waitForQuietDom } from "@/lib/dom-wait";
 type ContentMessage =
   | { type: "PING" }
   | { type: "DESCRIBE" }
+  | { type: "DESCRIBE_STORE_ORDERS" }
   | { type: "LOAD_MORE" };
+
+/** The "orders" URL (/orders) covers both tabs — switching is client-side, no
+ *  navigation — so which list is showing has to be read from the DOM itself
+ *  rather than tracked as content-script state. */
+function isStoreTabActive(): boolean {
+  return document.querySelector(SELECTORS.tabInstore)?.getAttribute("aria-selected") === "true";
+}
 
 export default defineContentScript({
   matches: ["*://*.target.com/*"],
@@ -32,6 +44,7 @@ export default defineContentScript({
       // PAGE_RESULT, so a LOAD_MORE that redirects to step-up never hangs.
       if (message.type === "PING") return Promise.resolve({ pong: true });
       if (message.type === "LOAD_MORE") void loadMore();
+      else if (message.type === "DESCRIBE_STORE_ORDERS") void describeStoreOrders();
       else void describe();
     });
 
@@ -49,6 +62,21 @@ async function describe(): Promise<void> {
       return post({ pageKind: "login" });
 
     case "orders": {
+      if (isStoreTabActive()) {
+        // storeOrderCard's wrapper class is shared with the online list (see
+        // scraper.test.ts's online fixture), so waiting on it alone can resolve
+        // against online cards still mounted mid-tab-switch and report zero
+        // in-store receipts. storeOrderCardLink's href pattern is unique to the
+        // in-store list, so it can't resolve early like that.
+        await waitForElement(SELECTORS.storeOrderCardLink);
+        const orders = parseStoreOrdersFromDocument(document);
+        return post({
+          pageKind: "store-orders",
+          orders,
+          hasMore: loadMoreButton() !== null,
+          fingerprint: storeOrdersFingerprint(orders),
+        });
+      }
       await waitForElement(SELECTORS.orderCard);
       const orders = parseOrdersFromDocument(document);
       return post({
@@ -87,10 +115,30 @@ async function describe(): Promise<void> {
       });
     }
 
+    case "store-purchase-detail": {
+      await waitForElement(SELECTORS.storeItemWrapper);
+      return post({
+        pageKind: "store-purchase-detail",
+        receiptId: targetReceiptIdFromUrl(href),
+        detail: parseStorePurchaseDetailFromDocument(document),
+        imageMap: parseOrderImageMap(document),
+      });
+    }
+
     default:
       // Unrecognized page — nothing awaits it, so don't post (avoids buffer noise).
       return;
   }
+}
+
+/** Switch to the in-store tab (if not already there), wait for its list to
+ *  render, and describe it. A subsequent LOAD_MORE/DESCRIBE on this same
+ *  /orders page reads `isStoreTabActive()` fresh each time, so it keeps
+ *  reading the in-store list without any state of its own. */
+async function describeStoreOrders(): Promise<void> {
+  const tab = document.querySelector<HTMLElement>(SELECTORS.tabInstore);
+  if (tab && tab.getAttribute("aria-selected") !== "true") tab.click();
+  return describe();
 }
 
 /** "Load more" appends rows in-page (no navigation). Click it, wait for the list
@@ -100,13 +148,17 @@ async function describe(): Promise<void> {
 async function loadMore(): Promise<void> {
   const btn = loadMoreButton();
   if (!btn) return describe(); // no more pages — re-describe shows hasMore:false
-  const before = document.querySelectorAll(SELECTORS.orderCard).length;
+  // storeOrderCardLink, not storeOrderCard, for the same reason as describe()'s
+  // wait above — its wrapper class is shared with the online list, so counting
+  // it here could count online cards as in-store ones.
+  const cardSelector = isStoreTabActive() ? SELECTORS.storeOrderCardLink : SELECTORS.orderCard;
+  const before = document.querySelectorAll(cardSelector).length;
   btn.click();
   // Wait for the append to actually land (generously — Firefox's append can lag
   // a few seconds), THEN let the list settle before reading. Reporting a stale
   // list because we gave up too early is what truncated the walk on slow runs.
   const grew = await waitUntil(
-    () => document.querySelectorAll(SELECTORS.orderCard).length > before,
+    () => document.querySelectorAll(cardSelector).length > before,
     { timeoutMs: 20_000 },
   );
   if (grew) await waitForQuietDom({ quietMs: 400, timeoutMs: 4_000 });

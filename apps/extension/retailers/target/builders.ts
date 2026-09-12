@@ -1,6 +1,6 @@
 // apps/extension/retailers/target/builders.ts
 import type { ScrapedItem, ScrapedOrder, YnabCharge } from "@/lib/types";
-import type { RawTargetInvoiceDetail } from "./scraper";
+import type { RawTargetInvoiceDetail, RawTargetItem, RawTargetStoreDetail, RawTargetStoreSection } from "./scraper";
 
 const RETAILER = "target";
 
@@ -25,11 +25,11 @@ export function cardPaymentCandidates(
 }
 
 function toScrapedItems(
-  detail: RawTargetInvoiceDetail,
+  items: RawTargetItem[],
   imageMap: Record<string, string>,
   refunded: boolean,
 ): ScrapedItem[] {
-  return detail.items.map((it) => ({
+  return items.map((it) => ({
     productId: it.productId,
     title: it.title,
     imageUrl: imageMap[it.productId] ?? "",
@@ -44,7 +44,7 @@ export function buildPurchaseOrder(
   detail: RawTargetInvoiceDetail,
   imageMap: Record<string, string>,
 ): ScrapedOrder {
-  const items = toScrapedItems(detail, imageMap, false);
+  const items = toScrapedItems(detail.items, imageMap, false);
   return {
     retailer: RETAILER,
     orderId,
@@ -67,7 +67,7 @@ export function buildRefundOrder(
   cardCharge: YnabCharge,
   imageMap: Record<string, string>,
 ): ScrapedOrder {
-  const items = toScrapedItems(detail, imageMap, true);
+  const items = toScrapedItems(detail.items, imageMap, true);
   const itemCents = detail.itemSubtotalCents;
   // taxCents is informational; the ratio that matters is totalCents/itemCents,
   // where totalCents is the card-billed refund (the matched charge amount).
@@ -83,5 +83,66 @@ export function buildRefundOrder(
       taxCents,
       totalCents: cardCharge.amountCents,
     },
+  };
+}
+
+/**
+ * A pure (single-direction) in-store receipt has exactly one section — convert
+ * it to the same shape the online-order builders already consume, so
+ * `buildPurchaseOrder`/`buildRefundOrder` work unchanged for the case that's
+ * already built and tested. Only valid when `detail.sections.length === 1`.
+ */
+export function toInvoiceDetail(detail: RawTargetStoreDetail): RawTargetInvoiceDetail {
+  const section = detail.sections[0]!;
+  return {
+    isRefund: section.isRefund,
+    items: section.items,
+    itemSubtotalCents: section.itemSubtotalCents,
+    invoiceTotalCents: detail.invoiceTotalCents,
+    paymentLines: detail.paymentLines,
+  };
+}
+
+/**
+ * A mixed in-store receipt's PURCHASE side. Live-verified: the original card
+ * charge covers EVERY item on the receipt, including ones later returned —
+ * Target's per-section "Purchased"/"Return complete" labels describe an
+ * item's current status, not what was billed. So the purchase charge must
+ * reconcile against every section's items combined (none marked refunded
+ * here — that marking is for the separate refund charge/order, built via
+ * `toReturnSectionDetail` below), using the receipt's one blended total,
+ * which — confirmed live — IS the real original purchase amount, not an
+ * artificial sum of two unrelated transactions.
+ */
+export function toMixedPurchaseDetail(detail: RawTargetStoreDetail): RawTargetInvoiceDetail {
+  const items = detail.sections.flatMap((s) => s.items);
+  return {
+    isRefund: false,
+    items,
+    itemSubtotalCents: detail.sections.reduce((sum, s) => sum + s.itemSubtotalCents, 0),
+    invoiceTotalCents: detail.invoiceTotalCents,
+    paymentLines: detail.paymentLines,
+  };
+}
+
+/**
+ * A mixed receipt's return section, viewed as its own standalone refund order
+ * once a specific refund charge has been found for it (see adapter.ts's
+ * refund-discovery pass — there's no independently displayed total for just
+ * the return, so it can't be matched by total the way the purchase side can).
+ * `refundCharge.amountCents` stands in for `invoiceTotalCents` so
+ * `buildRefundOrder`'s existing `taxCents = invoiceTotalCents - itemCents`
+ * derives the right (real, not estimated) tax from the real matched charge.
+ */
+export function toReturnSectionDetail(
+  section: RawTargetStoreSection,
+  refundCharge: YnabCharge,
+): RawTargetInvoiceDetail {
+  return {
+    isRefund: true,
+    items: section.items,
+    itemSubtotalCents: section.itemSubtotalCents,
+    invoiceTotalCents: refundCharge.amountCents,
+    paymentLines: [],
   };
 }
