@@ -35,6 +35,14 @@ function isStoreTabActive(): boolean {
   return document.querySelector(SELECTORS.tabInstore)?.getAttribute("aria-selected") === "true";
 }
 
+/** True when PerimeterX has rendered its "press & hold" bot check. Only
+ *  consulted AFTER a page's meaningful DOM failed to appear: the challenge can
+ *  also sit as an overlay above a fully rendered, parseable page (confirmed
+ *  live), and such a page should be described normally. */
+function challengeShowing(): boolean {
+  return document.querySelector(SELECTORS.challengeContainer) !== null;
+}
+
 export default defineContentScript({
   matches: ["*://*.target.com/*"],
   main() {
@@ -70,7 +78,8 @@ async function describe(): Promise<void> {
         // against online cards still mounted mid-tab-switch and report zero
         // in-store receipts. storeOrderCardLink's href pattern is unique to the
         // in-store list, so it can't resolve early like that.
-        await waitForElement(SELECTORS.storeOrderCardLink);
+        const link = await waitForElement(SELECTORS.storeOrderCardLink);
+        if (!link && challengeShowing()) return post({ pageKind: "challenge" });
         const orders = parseStoreOrdersFromDocument(document);
         return post({
           pageKind: "store-orders",
@@ -79,7 +88,8 @@ async function describe(): Promise<void> {
           fingerprint: storeOrdersFingerprint(orders),
         });
       }
-      await waitForElement(SELECTORS.orderCard);
+      const card = await waitForElement(SELECTORS.orderCard);
+      if (!card && challengeShowing()) return post({ pageKind: "challenge" });
       const orders = parseOrdersFromDocument(document);
       return post({
         pageKind: "orders",
@@ -90,7 +100,8 @@ async function describe(): Promise<void> {
     }
 
     case "invoices": {
-      await waitForElement(SELECTORS.invoiceRow);
+      const row = await waitForElement(SELECTORS.invoiceRow);
+      if (!row && challengeShowing()) return post({ pageKind: "challenge" });
       return post({
         pageKind: "invoices",
         orderId: targetOrderIdFromUrl(href),
@@ -99,7 +110,8 @@ async function describe(): Promise<void> {
     }
 
     case "invoice-detail": {
-      await waitForElement(SELECTORS.invoiceItemRow);
+      const row = await waitForElement(SELECTORS.invoiceItemRow);
+      if (!row && challengeShowing()) return post({ pageKind: "challenge" });
       return post({
         pageKind: "invoice-detail",
         orderId: targetOrderIdFromUrl(href),
@@ -109,7 +121,8 @@ async function describe(): Promise<void> {
     }
 
     case "order-images": {
-      await waitForElement(SELECTORS.orderItemTitle);
+      const title = await waitForElement(SELECTORS.orderItemTitle);
+      if (!title && challengeShowing()) return post({ pageKind: "challenge" });
       return post({
         pageKind: "order-images",
         orderId: targetOrderIdFromUrl(href),
@@ -118,7 +131,8 @@ async function describe(): Promise<void> {
     }
 
     case "store-purchase-detail": {
-      await waitForElement(SELECTORS.storeItemWrapper);
+      const item = await waitForElement(SELECTORS.storeItemWrapper);
+      if (!item && challengeShowing()) return post({ pageKind: "challenge" });
       return post({
         pageKind: "store-purchase-detail",
         receiptId: targetReceiptIdFromUrl(href),

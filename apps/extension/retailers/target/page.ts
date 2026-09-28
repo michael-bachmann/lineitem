@@ -15,6 +15,7 @@ import { isLoginUrl } from "./selectors";
  */
 export type TargetPageResult =
   | { pageKind: "login" }
+  | { pageKind: "challenge" }
   | {
       pageKind: "orders";
       orders: RawTargetOrder[];

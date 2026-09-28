@@ -13,7 +13,7 @@ vi.mock("@/background/tabs", () => ({
 
 import {
   orderMightMatch, invoiceMightSplitMatch, storeReceiptMightTenderMatch, storeReceiptMightCoverReturn,
-  readWithRetry, StepUpRequired, targetAdapter,
+  readWithRetry, StepUpRequired, ChallengeRequired, targetAdapter,
 } from "./adapter";
 import type { RawTargetOrder, RawTargetInvoice, RawTargetStoreOrder } from "./scraper";
 import type { TargetPageResult } from "./page";
@@ -136,6 +136,12 @@ describe("readWithRetry", () => {
     await expect(readWithRetry("x", read)).rejects.toBeInstanceOf(StepUpRequired);
     expect(read).toHaveBeenCalledTimes(1);
   });
+
+  it("does NOT retry a ChallengeRequired (the whole session is challenged)", async () => {
+    const read = vi.fn(async () => { throw new ChallengeRequired(); });
+    await expect(readWithRetry("x", read)).rejects.toBeInstanceOf(ChallengeRequired);
+    expect(read).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("targetAdapter.scrapeMatchedOrders (coordinator)", () => {
@@ -156,10 +162,15 @@ describe("targetAdapter.scrapeMatchedOrders (coordinator)", () => {
     awaitPageResult.mockImplementation(async () => q.shift());
   }
 
+  // navPacingMs: 0 — production paces between driven navigations; tests
+  // shouldn't wait out real timers.
+  const scrape = (charges: YnabCharge[]) =>
+    targetAdapter.scrapeMatchedOrders(charges, { navPacingMs: 0 });
+
   it("returns signed_out when the orders list shows login", async () => {
     queueResults({ pageKind: "login" });
     const c = charge({});
-    const res = await targetAdapter.scrapeMatchedOrders([c]);
+    const res = await scrape([c]);
     expect(res.matched).toEqual([]);
     expect(res.blocked).toEqual({ reason: "signed_out", charges: [c] });
   });
@@ -175,9 +186,39 @@ describe("targetAdapter.scrapeMatchedOrders (coordinator)", () => {
       },
       { pageKind: "login" }, // the invoices navigation landed on Target's step-up
     );
-    const res = await targetAdapter.scrapeMatchedOrders([c]);
+    const res = await scrape([c]);
     expect(res.matched).toEqual([]);
     expect(res.blocked?.reason).toBe("step_up");
+    expect(res.blocked?.charges).toEqual([c]);
+    expect(res.blocked?.url).toContain("/orders/O1/invoices");
+  });
+
+  it("returns a challenge block when the first page shows the bot check", async () => {
+    queueResults({ pageKind: "challenge" });
+    const c = charge({});
+    const res = await scrape([c]);
+    expect(res.matched).toEqual([]);
+    expect(res.blocked).toEqual({
+      reason: "challenge",
+      charges: [c],
+      url: "https://www.target.com/orders",
+    });
+  });
+
+  it("keeps partial results and surfaces a challenge block when a gated page hits the bot check", async () => {
+    const c = charge({ amountCents: 1000, date: "2026-06-01" });
+    queueResults(
+      {
+        pageKind: "orders",
+        hasMore: false,
+        fingerprint: "f1",
+        orders: [{ orderId: "O1", date: "2026-06-01", orderTotalCents: 5000 }],
+      },
+      { pageKind: "challenge" }, // the invoices navigation got the bot check
+    );
+    const res = await scrape([c]);
+    expect(res.matched).toEqual([]);
+    expect(res.blocked?.reason).toBe("challenge");
     expect(res.blocked?.charges).toEqual([c]);
     expect(res.blocked?.url).toContain("/orders/O1/invoices");
   });
@@ -211,7 +252,7 @@ describe("targetAdapter.scrapeMatchedOrders (coordinator)", () => {
       { pageKind: "order-images", orderId: "O1", imageMap: { P1: "img-url" } },
     );
 
-    const res = await targetAdapter.scrapeMatchedOrders([c]);
+    const res = await scrape([c]);
     expect(res.blocked).toBeUndefined();
     expect(res.unmatched).toEqual([]);
     expect(res.matched).toHaveLength(1);
@@ -257,7 +298,7 @@ describe("targetAdapter.scrapeMatchedOrders (coordinator)", () => {
         },
       );
 
-      const res = await targetAdapter.scrapeMatchedOrders([c]);
+      const res = await scrape([c]);
       expect(res.unmatched).toEqual([]);
       expect(res.matched).toHaveLength(1);
       expect(res.matched[0]!.order.orderId).toBe("instore-R1");
@@ -293,7 +334,7 @@ describe("targetAdapter.scrapeMatchedOrders (coordinator)", () => {
         },
       );
 
-      const res = await targetAdapter.scrapeMatchedOrders([c]);
+      const res = await scrape([c]);
       expect(res.unmatched).toEqual([]);
       expect(res.matched).toHaveLength(1);
       expect(res.matched[0]!.order.orderId).toBe("instore-R2");
@@ -317,7 +358,7 @@ describe("targetAdapter.scrapeMatchedOrders (coordinator)", () => {
         },
       );
 
-      const res = await targetAdapter.scrapeMatchedOrders([c]);
+      const res = await scrape([c]);
       expect(res.matched).toEqual([]);
       expect(res.unmatched).toEqual([{ charge: c, reason: NO_MATCH_REASON }]);
       expect(awaitPageResult).toHaveBeenCalledTimes(3);
@@ -355,7 +396,7 @@ describe("targetAdapter.scrapeMatchedOrders (coordinator)", () => {
       const c = charge({ amountCents: 8223, date: "2026-08-22", isRefund: false });
       queueResults(emptyOnlineOrders, emptyOnlineOrders, bagDiscountStoreOrder, bagDiscountDetail);
 
-      const res = await targetAdapter.scrapeMatchedOrders([c]);
+      const res = await scrape([c]);
       expect(res.unmatched).toEqual([]);
       expect(res.matched).toHaveLength(1);
       expect(res.matched[0]!.order.orderId).toBe("instore-R6");
@@ -367,7 +408,7 @@ describe("targetAdapter.scrapeMatchedOrders (coordinator)", () => {
       const c = charge({ amountCents: 8220, date: "2026-08-22", isRefund: false });
       queueResults(emptyOnlineOrders, emptyOnlineOrders, bagDiscountStoreOrder, bagDiscountDetail);
 
-      const res = await targetAdapter.scrapeMatchedOrders([c]);
+      const res = await scrape([c]);
       expect(res.matched).toEqual([]);
       expect(res.unmatched).toEqual([{ charge: c, reason: NO_MATCH_REASON }]);
     });
@@ -376,7 +417,7 @@ describe("targetAdapter.scrapeMatchedOrders (coordinator)", () => {
       const c = charge({ amountCents: 8300, date: "2026-08-22", isRefund: false });
       queueResults(emptyOnlineOrders, emptyOnlineOrders, bagDiscountStoreOrder);
 
-      const res = await targetAdapter.scrapeMatchedOrders([c]);
+      const res = await scrape([c]);
       expect(res.matched).toEqual([]);
       expect(res.unmatched).toEqual([{ charge: c, reason: NO_MATCH_REASON }]);
       expect(awaitPageResult).toHaveBeenCalledTimes(3);
@@ -428,7 +469,7 @@ describe("targetAdapter.scrapeMatchedOrders (coordinator)", () => {
       // return-section refund match both come from that single read.
       queueResults(emptyOnlineOrders, emptyOnlineOrders, mixedStoreOrder, mixedDetail);
 
-      const res = await targetAdapter.scrapeMatchedOrders([purchase, refund]);
+      const res = await scrape([purchase, refund]);
       expect(res.unmatched).toEqual([]);
       expect(res.matched).toHaveLength(2);
 
@@ -453,7 +494,7 @@ describe("targetAdapter.scrapeMatchedOrders (coordinator)", () => {
       // match its list total), so only one detail read happens.
       queueResults(emptyOnlineOrders, emptyOnlineOrders, mixedStoreOrder, mixedDetail);
 
-      const res = await targetAdapter.scrapeMatchedOrders([refund]);
+      const res = await scrape([refund]);
       expect(res.unmatched).toEqual([]);
       expect(res.matched).toHaveLength(1);
       expect(res.matched[0]!.charges).toEqual([refund]);
@@ -465,7 +506,7 @@ describe("targetAdapter.scrapeMatchedOrders (coordinator)", () => {
       const refundB = charge({ ynabTransactionId: "yt-rb", amountCents: 6800, date: "2026-05-04", isRefund: true });
       queueResults(emptyOnlineOrders, emptyOnlineOrders, mixedStoreOrder, mixedDetail);
 
-      const res = await targetAdapter.scrapeMatchedOrders([refundA, refundB]);
+      const res = await scrape([refundA, refundB]);
       expect(res.matched).toEqual([]);
       expect(res.unmatched).toHaveLength(2);
       expect(res.unmatched.map((u) => u.charge.ynabTransactionId).sort()).toEqual(["yt-ra", "yt-rb"]);
@@ -507,7 +548,7 @@ describe("targetAdapter.scrapeMatchedOrders (coordinator)", () => {
       const refund = charge({ ynabTransactionId: "yt-r", amountCents: 4700, date: "2026-06-16", isRefund: true });
       queueResults(emptyOnlineOrders, emptyOnlineOrders, fullyReturnedStoreOrder, fullyReturnedDetail);
 
-      const res = await targetAdapter.scrapeMatchedOrders([purchase, refund]);
+      const res = await scrape([purchase, refund]);
       expect(res.unmatched).toEqual([]);
       expect(res.matched).toHaveLength(2);
 
@@ -529,7 +570,7 @@ describe("targetAdapter.scrapeMatchedOrders (coordinator)", () => {
       const purchase = charge({ ynabTransactionId: "yt-p", amountCents: 5000, date: "2026-06-01", isRefund: false });
       queueResults(emptyOnlineOrders, emptyOnlineOrders, fullyReturnedStoreOrder, fullyReturnedDetail);
 
-      const res = await targetAdapter.scrapeMatchedOrders([purchase]);
+      const res = await scrape([purchase]);
       expect(res.unmatched).toEqual([]);
       expect(res.matched).toHaveLength(1);
       expect(res.matched[0]!.order.refund).toBeNull();

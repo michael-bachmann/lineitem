@@ -379,6 +379,10 @@ export interface RetailerAdapter {
    * it at natural pause points (between detail-page scrapes, between list-
    * page paginations) and throw the standard DOMException AbortError when
    * the signal aborts; in-progress detail scrapes are allowed to finish.
+   *
+   * `options.navPacingMs` overrides the adapter's pause between driven page
+   * navigations (plain rate limiting so a walk doesn't fire page loads
+   * back-to-back). Tests pass 0; production uses the adapter's default.
    */
   scrapeMatchedOrders(
     charges: YnabCharge[],
@@ -386,6 +390,7 @@ export interface RetailerAdapter {
       maxPages?: number;
       signal?: AbortSignal;
       onScrapeProgress?: (event: ScrapeProgress) => void;
+      navPacingMs?: number;
     },
   ): Promise<{
     matched: { order: ScrapedOrder; charges: YnabCharge[] }[];
@@ -400,12 +405,15 @@ export interface RetailerAdapter {
   }>;
 }
 
-/** Why a scrape is blocked on a user sign-in action. `signed_out`: the session
- *  isn't authenticated at all. `step_up`: authenticated, but the retailer forced
- *  a fresh sign-in to view a gated page mid-walk (Target invoices). */
-export type RetailerBlockReason = "signed_out" | "step_up";
+/** Why a scrape is blocked on a user action in the retailer tab. `signed_out`:
+ *  the session isn't authenticated at all. `step_up`: authenticated, but the
+ *  retailer forced a fresh sign-in to view a gated page mid-walk (Target
+ *  invoices). `challenge`: the retailer's bot check (e.g. Target's PerimeterX
+ *  "press & hold") rendered in place of a page's content — only a human in the
+ *  live tab can clear it. */
+export type RetailerBlockReason = "signed_out" | "step_up" | "challenge";
 
-/** A sign-in wall a retailer scrape hit, plus the charges it left unreadable. */
+/** A user-action wall a retailer scrape hit, plus the charges it left unreadable. */
 export interface RetailerBlock {
   reason: RetailerBlockReason;
   charges: YnabCharge[];

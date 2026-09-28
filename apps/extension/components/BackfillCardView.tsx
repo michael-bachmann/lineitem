@@ -151,10 +151,11 @@ export function BackfillCardView({ state, onStart, onCancel, onOpenRetailer }: B
                 </span>
                 <div className="flex flex-col items-start gap-[6px]">
                   <p className="m-0 text-[12.5px] leading-[21px] text-muted">
-                    {r.blocked === "step_up"
-                      ? `${retailerLabel(r.retailer)} needs you to finish signing in to read its orders.`
-                      : `You’re signed out of ${retailerLabel(r.retailer)}, so its orders couldn’t be read.`}{" "}
-                    Sign in, then run again.
+                    {r.blocked === "challenge"
+                      ? `${retailerLabel(r.retailer)} wants a quick press-and-hold check before its orders can be read. Complete it, then run again.`
+                      : r.blocked === "step_up"
+                        ? `${retailerLabel(r.retailer)} needs you to finish signing in to read its orders. Sign in, then run again.`
+                        : `You’re signed out of ${retailerLabel(r.retailer)}, so its orders couldn’t be read. Sign in, then run again.`}
                   </p>
                   {onOpenRetailer && (
                     <Button variant="secondary" sm onClick={() => onOpenRetailer(r.retailer, r.blockedUrl)}>

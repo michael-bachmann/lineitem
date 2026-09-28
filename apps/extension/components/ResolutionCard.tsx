@@ -5,11 +5,14 @@ import { Button, Icon } from "@lineitem/ui";
 
 function title(b: BlockedRetailer): string {
   const name = retailerLabel(b.retailer);
+  if (b.reason === "challenge") return `Verify you’re human on ${name}`;
   return b.reason === "step_up" ? `Finish signing in to ${name}` : `Sign in to ${name}`;
 }
 
 function subtitle(b: BlockedRetailer): string {
   const charges = `${b.count} ${plural(b.count, { one: "charge", other: "charges" })}`;
+  if (b.reason === "challenge")
+    return `${retailerLabel(b.retailer)} wants a quick press-and-hold check before ${charges} can be read. Complete it, then tap Sync.`;
   return b.reason === "step_up"
     ? `${retailerLabel(b.retailer)} needs a quick re-sign-in to read ${charges}. Sign in, then tap Sync.`
     : `You’re signed out, so ${charges} couldn’t be read. Sign in, then tap Sync.`;
