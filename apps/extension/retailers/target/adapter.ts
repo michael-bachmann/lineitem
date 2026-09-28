@@ -6,6 +6,7 @@ import {
   matchByAmountAndDate, cutoffDateFor, NO_MATCH_REASON, READ_FAILED_REASON, THREE_DAYS_MS,
 } from "@/lib/matcher";
 import { openRetailerTab, awaitPageResult, clearBufferedPageResult } from "@/background/tabs";
+import { dlog } from "@/lib/debug";
 import {
   ordersUrl, orderInvoicesUrl, invoiceDetailUrl, orderDetailUrl, storeOrderDetailUrl,
 } from "@/retailers/target/selectors";
@@ -88,6 +89,165 @@ export function invoiceMightSplitMatch(inv: RawTargetInvoice, charges: YnabCharg
       c.amountCents <= inv.amountCents &&
       Math.abs(new Date(c.date).getTime() - invTime) <= THREE_DAYS_MS,
   );
+}
+
+/**
+ * Pure Phase 5 pairing: assign each charge to the ONE in-store receipt whose
+ * list-card total and date match exactly (ambiguity fails closed inside
+ * matchByAmountAndDate; a receipt is consumed by its first pairing). Pairs
+ * need no page reads — a paired receipt's detail is opened later only to
+ * BUILD its order.
+ */
+export function pairChargesToStoreReceipts(
+  charges: YnabCharge[],
+  receipts: RawTargetStoreOrder[],
+): { byReceipt: Map<string, YnabCharge>; unpaired: YnabCharge[] } {
+  const byReceipt = new Map<string, YnabCharge>();
+  const unpaired: YnabCharge[] = [];
+  for (const charge of charges) {
+    const cand = receipts
+      .filter((r) => r.totalCents !== null && r.isRefund === charge.isRefund && !byReceipt.has(r.receiptId))
+      .map((r) => ({ receiptId: r.receiptId, amountCents: r.totalCents!, date: r.date }));
+    const hit = matchByAmountAndDate(charge.amountCents, charge.date, cand);
+    if (hit) byReceipt.set(hit.receiptId, charge);
+    else unpaired.push(charge);
+  }
+  return { byReceipt, unpaired };
+}
+
+/**
+ * Pre-filter: could this receipt's detail page tender-match a remaining
+ * PURCHASE charge? A card tender line is strictly below the displayed total
+ * (a post-total adjustment like a reusable-bag discount, or a partial
+ * gift-card tender) — an equal amount is the exact list-total pairing's to
+ * claim, so equality is deliberately excluded here.
+ */
+export function storeReceiptMightTenderMatch(
+  receipt: RawTargetStoreOrder,
+  charges: YnabCharge[],
+): boolean {
+  if (receipt.isRefund || receipt.totalCents === null) return false;
+  const receiptTime = new Date(receipt.date).getTime();
+  return charges.some(
+    (c) =>
+      !c.isRefund
+      && c.amountCents < receipt.totalCents!
+      && Math.abs(new Date(c.date).getTime() - receiptTime) <= THREE_DAYS_MS,
+  );
+}
+
+/**
+ * Pre-filter: could this receipt's return section cover a remaining REFUND
+ * charge? A refund can't exceed the receipt's own total, and — like
+ * orderMightMatch's refund rule — can't post before the receipt's own
+ * (purchase) date, though it may post arbitrarily long after. The date bound
+ * is what actually prunes a busy account down from "every receipt at or
+ * above the amount" to a plausible few.
+ */
+export function storeReceiptMightCoverReturn(
+  receipt: RawTargetStoreOrder,
+  charges: YnabCharge[],
+): boolean {
+  const receiptTime = new Date(receipt.date).getTime();
+  return charges.some(
+    (c) =>
+      c.isRefund
+      && c.amountCents <= (receipt.totalCents ?? Infinity)
+      && new Date(c.date).getTime() - receiptTime >= -PREFILTER_BEFORE_MS,
+  );
+}
+
+/**
+ * Pure Phase 5 per-receipt matcher: everything one opened receipt resolves,
+ * given the charge its list total was paired to (if any) and the charges
+ * still unmatched. Three disjoint claims, each failing closed:
+ *
+ * - `listCharge` build: the list card always says "Purchased" (even for a
+ *   receipt whose items were ALL later returned), so `listCharge` is a
+ *   purchase charge in every case seen live — `buildRefundOrder` only covers
+ *   the (unobserved) theoretical standalone refund-only list entry. A
+ *   purchase charge's order must reconcile against EVERY item on the receipt
+ *   regardless of section count: Target's per-section headings ("Purchased" /
+ *   "Return complete") describe an item's CURRENT status, not what was
+ *   originally billed, and toMixedPurchaseDetail generalizes over 1- and
+ *   2-section receipts either way.
+ * - Card tender match (unpaired purchase receipts only): a purchase charge
+ *   billed BELOW the displayed total (post-total reusable-bag discount —
+ *   confirmed live: $82.28 receipt, $82.23 charged — or partial gift-card
+ *   tender) matches a card tender line instead, mirroring Phase 3's split
+ *   handling online.
+ * - Return-section refund: the later, separate return half of a mixed
+ *   receipt (its purchase side may not even be in this batch — e.g. already
+ *   approved in an earlier sync). There's no displayed total for just the
+ *   return section, so the refund charge must be the ONE candidate within a
+ *   generous plausible-tax bound of the section's item subtotal; zero or
+ *   multiple candidates fails closed. Skipped when the receipt itself was
+ *   consumed as a pure refund, so one return can't pay out twice.
+ */
+export function matchStoreReceiptDetail(
+  receipt: RawTargetStoreOrder,
+  detail: RawTargetStoreDetail,
+  imageMap: Record<string, string>,
+  listCharge: YnabCharge | undefined,
+  remaining: YnabCharge[],
+): {
+  matches: { order: ScrapedOrder; charges: YnabCharge[] }[];
+  failure: { charge: YnabCharge; reason: string } | null;
+} {
+  if (detail.sections.length === 0 || detail.sections.some((s) => s.items.length === 0)) {
+    return {
+      matches: [],
+      failure: listCharge
+        ? { charge: listCharge, reason: "Target in-store purchase had no parseable items" }
+        : null,
+    };
+  }
+
+  const orderId = `instore-${receipt.receiptId}`;
+  const matches: { order: ScrapedOrder; charges: YnabCharge[] }[] = [];
+
+  if (listCharge) {
+    matches.push({
+      order: listCharge.isRefund
+        ? buildRefundOrder(orderId, toInvoiceDetail(detail), listCharge, imageMap)
+        : buildPurchaseOrder(orderId, toMixedPurchaseDetail(detail), imageMap),
+      charges: [listCharge],
+    });
+  } else if (!receipt.isRefund) {
+    const tender = detail.paymentLines
+      .filter((p) => !p.isGiftCard && p.amountCents > 0)
+      .map((p) => ({ date: receipt.date, amountCents: p.amountCents }));
+    const hit = remaining.find(
+      (c) => !c.isRefund && matchByAmountAndDate(c.amountCents, c.date, tender) !== null,
+    );
+    if (hit) {
+      matches.push({
+        order: buildPurchaseOrder(orderId, toMixedPurchaseDetail(detail), imageMap),
+        charges: [hit],
+      });
+    }
+  }
+
+  const returnSection = detail.sections.find((s) => s.isRefund);
+  if (listCharge?.isRefund !== true && returnSection && returnSection.items.length > 0) {
+    const sectionTime = new Date(returnSection.date).getTime();
+    const candidates = remaining.filter(
+      (c) =>
+        c.isRefund
+        && c.amountCents >= returnSection.itemSubtotalCents
+        && c.amountCents <= returnSection.itemSubtotalCents * (1 + RETURN_SECTION_MAX_TAX_RATE)
+        && Math.abs(new Date(c.date).getTime() - sectionTime) <= THREE_DAYS_MS,
+    );
+    if (candidates.length === 1) {
+      const refundCharge = candidates[0]!;
+      matches.push({
+        order: buildRefundOrder(orderId, toReturnSectionDetail(returnSection, refundCharge), refundCharge, imageMap),
+        charges: [refundCharge],
+      });
+    }
+  }
+
+  return { matches, failure: null };
 }
 
 export const targetAdapter: RetailerAdapter = {
@@ -286,6 +446,7 @@ export const targetAdapter: RetailerAdapter = {
         // auto-describe land) before switching tabs.
         navigate(tabId, ordersUrl());
         const backOnOrders = await awaitOrders(tabId, null);
+        dlog("target", "phase 5 back on orders:", backOnOrders?.pageKind ?? "timeout");
         if (backOnOrders?.pageKind === "login") throw new StepUpRequired(ordersUrl());
 
         describeStoreOrders(tabId);
@@ -297,102 +458,37 @@ export const targetAdapter: RetailerAdapter = {
             tabId, firstStore, remaining, maxPages, signal, onScrapeProgress,
           );
           console.info(`[target] phase 5: ${storeOrders.length} in-store purchases in the window`);
+          dlog("target", "phase 5 remaining charges", remaining.map(
+            (c) => ({ amountCents: c.amountCents, date: c.date, isRefund: c.isRefund })));
+          dlog("target", "phase 5 receipts", storeOrders.map(
+            (o) => ({ receiptId: o.receiptId, totalCents: o.totalCents, date: o.date, isRefund: o.isRefund })));
 
-          const storeMatches: { receiptId: string; charge: YnabCharge }[] = [];
-          const consumedReceipts = new Set<string>();
-          // Receipts 5a already fully accounted for via the (theoretical,
-          // unobserved) standalone-refund-only branch — 5b must not also try
-          // to match their return section to a different charge.
-          const pureRefundReceiptIds = new Set<string>();
-          const stillRemaining: YnabCharge[] = [];
-          for (const charge of remaining) {
-            const cand = storeOrders
-              .filter((o) => o.totalCents !== null && o.isRefund === charge.isRefund && !consumedReceipts.has(o.receiptId))
-              .map((o) => ({ receiptId: o.receiptId, amountCents: o.totalCents!, date: o.date }));
-            const hit = matchByAmountAndDate(charge.amountCents, charge.date, cand);
-            if (hit) {
-              consumedReceipts.add(hit.receiptId);
-              storeMatches.push({ receiptId: hit.receiptId, charge });
-            } else {
-              stillRemaining.push(charge);
-            }
-          }
-          remaining = stillRemaining;
-          onScrapeProgress?.({ phase: "matching", count: matchedInvoices.length + storeMatches.length });
+          const { byReceipt, unpaired } = pairChargesToStoreReceipts(remaining, storeOrders);
+          remaining = unpaired;
+          onScrapeProgress?.({ phase: "matching", count: matchedInvoices.length + byReceipt.size });
 
-          for (let i = 0; i < storeMatches.length; i++) {
-            signal?.throwIfAborted();
-            onScrapeProgress?.({
-              phase: "scraping",
-              index: matchedInvoices.length + i + 1,
-              total: matchedInvoices.length + storeMatches.length,
-            });
-            const sm = storeMatches[i]!;
-
-            let read: { detail: RawTargetStoreDetail; imageMap: Record<string, string> };
-            try {
-              read = await readWithRetry(`store purchase ${sm.receiptId}`, () =>
-                readStorePurchaseDetail(tabId, sm.receiptId));
-            } catch (err) {
-              if (err instanceof StepUpRequired) throw err;
-              console.warn(`[target] couldn't read in-store purchase ${sm.receiptId}`, err);
-              storeDetailFailures.push({ charge: sm.charge, reason: READ_FAILED_REASON });
-              continue;
-            }
-            const { detail, imageMap } = read;
-            if (detail.sections.length === 0 || detail.sections.some((s) => s.items.length === 0)) {
-              storeDetailFailures.push({ charge: sm.charge, reason: "Target in-store purchase had no parseable items" });
-              continue;
-            }
-            // The list card always says "Purchased" (even for a receipt whose
-            // items were all later returned), so `sm.charge` here is a purchase
-            // charge in every case seen live — `buildRefundOrder` below only
-            // covers the (unobserved) theoretical case of a standalone
-            // refund-only list entry. For a purchase charge, its order must
-            // reconcile against EVERY item on the receipt regardless of section
-            // count: Target's per-section labels ("Purchased"/"Return complete")
-            // describe an item's current status, not what was originally
-            // billed — a fully-returned receipt still renders as one
-            // "Return complete" section, and toMixedPurchaseDetail generalizes
-            // to that (and to the single ordinary-purchase section) the same
-            // way it does to a genuine 2-section mixed receipt.
-            const orderId = `instore-${sm.receiptId}`;
-            const order = sm.charge.isRefund
-              ? buildRefundOrder(orderId, toInvoiceDetail(detail), sm.charge, imageMap)
-              : buildPurchaseOrder(orderId, toMixedPurchaseDetail(detail), imageMap);
-            matched.push({ order, charges: [sm.charge] });
-            if (sm.charge.isRefund) pureRefundReceiptIds.add(sm.receiptId);
-          }
-
-          // Phase 5b: a still-remaining REFUND charge may be the later, separate
-          // return half of a mixed in-store receipt (see toMixedPurchaseDetail's
-          // note) — its purchase side may not even be in this batch (e.g.
-          // already approved in an earlier sync), so this doesn't depend on
-          // Phase 5a having matched anything. There's no independently displayed
-          // total for just the return section (only item prices), so this can't
-          // match by exact total the way everything else does — instead it opens
-          // every still-plausible receipt and requires the return section to be
-          // the ONE unambiguous candidate for a given remaining refund charge
-          // (date window + a generous plausible-tax bound); zero or multiple
-          // candidates fails closed, same as everywhere else in this file.
-          const consumedForReturn = new Set<string>();
+          // One effectful pass: open each receipt's detail at most once —
+          // when its list total was paired to a charge (the page is needed to
+          // build the order) or a pre-filter says the page could still
+          // resolve something — then let matchStoreReceiptDetail decide,
+          // purely, everything that page yields.
+          let built = 0;
           for (const storeOrder of storeOrders) {
-            if (!remaining.some((c) => c.isRefund)) break;
             signal?.throwIfAborted();
-            if (consumedForReturn.has(storeOrder.receiptId) || pureRefundReceiptIds.has(storeOrder.receiptId)) continue;
-            // A refund can't exceed the receipt's own total, and — like
-            // orderMightMatch's refund rule — can't post before the receipt's
-            // own (purchase) date, though it may post arbitrarily long after.
-            // The date bound is what actually prunes a busy account down from
-            // "every receipt at or above the amount" to a plausible few.
+            const listCharge = byReceipt.get(storeOrder.receiptId);
             if (
-              !remaining.some(
-                (c) =>
-                  c.isRefund
-                  && c.amountCents <= (storeOrder.totalCents ?? Infinity)
-                  && new Date(c.date).getTime() - new Date(storeOrder.date).getTime() >= -PREFILTER_BEFORE_MS,
-              )
+              !listCharge
+              && !storeReceiptMightTenderMatch(storeOrder, remaining)
+              && !storeReceiptMightCoverReturn(storeOrder, remaining)
             ) continue;
+            if (listCharge) {
+              built += 1;
+              onScrapeProgress?.({
+                phase: "scraping",
+                index: matchedInvoices.length + built,
+                total: matchedInvoices.length + byReceipt.size,
+              });
+            }
 
             let read: { detail: RawTargetStoreDetail; imageMap: Record<string, string> };
             try {
@@ -400,32 +496,30 @@ export const targetAdapter: RetailerAdapter = {
                 readStorePurchaseDetail(tabId, storeOrder.receiptId));
             } catch (err) {
               if (err instanceof StepUpRequired) throw err;
-              console.warn(`[target] skipping in-store receipt ${storeOrder.receiptId}: unreadable`, err);
+              console.warn(`[target] couldn't read in-store receipt ${storeOrder.receiptId}`, err);
+              if (listCharge) storeDetailFailures.push({ charge: listCharge, reason: READ_FAILED_REASON });
               continue;
             }
-            const { detail, imageMap } = read;
-            const returnSection = detail.sections.find((s) => s.isRefund);
-            if (!returnSection || returnSection.items.length === 0) continue;
 
-            const candidates = remaining.filter(
-              (c) =>
-                c.isRefund
-                && c.amountCents >= returnSection.itemSubtotalCents
-                && c.amountCents <= returnSection.itemSubtotalCents * (1 + RETURN_SECTION_MAX_TAX_RATE)
-                && Math.abs(new Date(c.date).getTime() - new Date(returnSection.date).getTime()) <= THREE_DAYS_MS,
+            const { matches, failure } = matchStoreReceiptDetail(
+              storeOrder, read.detail, read.imageMap, listCharge, remaining,
             );
-            if (candidates.length !== 1) continue; // zero or ambiguous — fail closed
-
-            const refundCharge = candidates[0]!;
-            remaining = remaining.filter((c) => c !== refundCharge);
-            consumedForReturn.add(storeOrder.receiptId);
-
-            const orderId = `instore-${storeOrder.receiptId}`;
-            const returnDetail = toReturnSectionDetail(returnSection, refundCharge);
-            const order = buildRefundOrder(orderId, returnDetail, refundCharge, imageMap);
-            matched.push({ order, charges: [refundCharge] });
-            onScrapeProgress?.({ phase: "matching", count: matched.length });
+            dlog("target", `phase 5 receipt ${storeOrder.receiptId}:`, {
+              tenderCents: read.detail.paymentLines.map((p) => p.amountCents),
+              matches: matches.length,
+            });
+            if (failure) storeDetailFailures.push(failure);
+            if (matches.length > 0) {
+              matched.push(...matches);
+              const consumed = new Set(matches.flatMap((m) => m.charges));
+              remaining = remaining.filter((c) => !consumed.has(c));
+              onScrapeProgress?.({ phase: "matching", count: matched.length });
+            }
           }
+        } else {
+          // The predicate only resolves on store-orders/login, so reaching here
+          // means the in-store list was never described before the timeout.
+          console.warn("[target] phase 5 skipped: in-store list never described (timeout)");
         }
       }
 

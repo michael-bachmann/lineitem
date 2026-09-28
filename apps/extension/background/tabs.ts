@@ -1,3 +1,5 @@
+import { dlog } from "@/lib/debug";
+
 /** Default ceiling for a content-script round-trip. A scrape on an already-
  *  loaded page should take well under a second; this only guards against a
  *  content script that received the message but never replies (e.g. a parser
@@ -192,6 +194,8 @@ export async function openRetailerTab(
 ): Promise<{ tabId: number; weOpenedTab: boolean } | null> {
   const domain = new URL(startUrl).hostname;
   const existingTabs = await browser.tabs.query({ url: `*://*.${domain}/*` });
+  dlog("tabs", `${existingTabs.length} candidate tab(s) for ${domain}`,
+    existingTabs.map((t) => ({ id: t.id, url: t.url })));
   const tab = existingTabs[0];
 
   if (!tab) {
