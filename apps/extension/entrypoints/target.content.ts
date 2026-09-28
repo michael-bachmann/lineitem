@@ -18,6 +18,7 @@ import {
   type TargetPageResult,
 } from "@/retailers/target/page";
 import { waitUntil, waitForElement, waitForQuietDom } from "@/lib/dom-wait";
+import { dlog } from "@/lib/debug";
 
 /** Actions the adapter triggers on the live page. Neither needs a reply: the
  *  adapter reacts to the PAGE_RESULT the page sends afterwards. */
@@ -43,6 +44,7 @@ export default defineContentScript({
       // LOAD_MORE are fire-and-forget triggers — the page answers with a
       // PAGE_RESULT, so a LOAD_MORE that redirects to step-up never hangs.
       if (message.type === "PING") return Promise.resolve({ pong: true });
+      dlog("target-cs", "received", message.type);
       if (message.type === "LOAD_MORE") void loadMore();
       else if (message.type === "DESCRIBE_STORE_ORDERS") void describeStoreOrders();
       else void describe();
@@ -136,8 +138,20 @@ async function describe(): Promise<void> {
  *  /orders page reads `isStoreTabActive()` fresh each time, so it keeps
  *  reading the in-store list without any state of its own. */
 async function describeStoreOrders(): Promise<void> {
-  const tab = document.querySelector<HTMLElement>(SELECTORS.tabInstore);
-  if (tab && tab.getAttribute("aria-selected") !== "true") tab.click();
+  // Two races hide in this click: the aria-selected flip lands in a later
+  // render tick, AND on a freshly loaded page the tab button can be rendered
+  // but not yet hydrated, so a single click is silently swallowed. Re-click
+  // each poll until the flip is actually observed. On timeout, fall through
+  // and describe whatever shows — the adapter fails closed on the wrong kind.
+  await waitUntil(() => {
+    if (isStoreTabActive()) return true;
+    document.querySelector<HTMLElement>(SELECTORS.tabInstore)?.click();
+    return false;
+  }, { timeoutMs: 10_000, intervalMs: 500 });
+  dlog("target-cs", "in-store tab after click loop:", {
+    present: document.querySelector(SELECTORS.tabInstore) !== null,
+    active: isStoreTabActive(),
+  });
   return describe();
 }
 
@@ -174,5 +188,6 @@ function loadMoreButton(): HTMLElement | null {
 }
 
 function post(result: TargetPageResult): void {
+  dlog("target-cs", "posting", result.pageKind);
   browser.runtime.sendMessage({ type: "PAGE_RESULT", result }).catch(() => {});
 }

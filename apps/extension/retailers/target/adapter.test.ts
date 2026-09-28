@@ -12,9 +12,10 @@ vi.mock("@/background/tabs", () => ({
 }));
 
 import {
-  orderMightMatch, invoiceMightSplitMatch, readWithRetry, StepUpRequired, targetAdapter,
+  orderMightMatch, invoiceMightSplitMatch, storeReceiptMightTenderMatch, storeReceiptMightCoverReturn,
+  readWithRetry, StepUpRequired, targetAdapter,
 } from "./adapter";
-import type { RawTargetOrder, RawTargetInvoice } from "./scraper";
+import type { RawTargetOrder, RawTargetInvoice, RawTargetStoreOrder } from "./scraper";
 import type { TargetPageResult } from "./page";
 import type { YnabCharge } from "@/lib/types";
 import { NO_MATCH_REASON } from "@/lib/matcher";
@@ -76,6 +77,36 @@ describe("invoiceMightSplitMatch", () => {
 
   it("skips on refund-sign mismatch", () => {
     expect(invoiceMightSplitMatch(inv, [charge({ date: "2025-07-27", amountCents: 2890, isRefund: true })])).toBe(false);
+  });
+});
+
+describe("storeReceiptMightTenderMatch", () => {
+  const receipt: RawTargetStoreOrder = { receiptId: "R", date: "2026-08-22", totalCents: 8228, isRefund: false };
+
+  it("keeps a purchase charge strictly below the total within the date window", () => {
+    expect(storeReceiptMightTenderMatch(receipt, [charge({ amountCents: 8223, date: "2026-08-22" })])).toBe(true);
+  });
+  it("excludes an equal amount — that's the exact list-total pairing's to claim", () => {
+    expect(storeReceiptMightTenderMatch(receipt, [charge({ amountCents: 8228, date: "2026-08-22" })])).toBe(false);
+  });
+  it("skips refund charges and refund receipts", () => {
+    expect(storeReceiptMightTenderMatch(receipt, [charge({ amountCents: 8223, date: "2026-08-22", isRefund: true })])).toBe(false);
+    expect(storeReceiptMightTenderMatch({ ...receipt, isRefund: true }, [charge({ amountCents: 8223, date: "2026-08-22" })])).toBe(false);
+  });
+});
+
+describe("storeReceiptMightCoverReturn", () => {
+  const receipt: RawTargetStoreOrder = { receiptId: "R", date: "2026-04-07", totalCents: 10065, isRefund: false };
+
+  it("keeps a refund at/below the total, even one posting long after the receipt", () => {
+    expect(storeReceiptMightCoverReturn(receipt, [charge({ amountCents: 6765, date: "2026-09-01", isRefund: true })])).toBe(true);
+  });
+  it("skips a refund above the receipt's total", () => {
+    expect(storeReceiptMightCoverReturn(receipt, [charge({ amountCents: 20000, date: "2026-05-01", isRefund: true })])).toBe(false);
+  });
+  it("skips purchase charges and refunds posting well before the receipt", () => {
+    expect(storeReceiptMightCoverReturn(receipt, [charge({ amountCents: 6765, date: "2026-05-01" })])).toBe(false);
+    expect(storeReceiptMightCoverReturn(receipt, [charge({ amountCents: 6765, date: "2026-03-01", isRefund: true })])).toBe(false);
   });
 });
 
@@ -293,6 +324,65 @@ describe("targetAdapter.scrapeMatchedOrders (coordinator)", () => {
     });
   });
 
+  describe("Phase 5a′ — card charge below the receipt's displayed total", () => {
+    // Real shape confirmed live on receipt /orders/stores/6234-3294-0074-1943:
+    // a post-total Reusable Bag Discount ($0.05) makes the card charge $82.23
+    // while the list card and receipt total both say $82.28 — only the detail
+    // page's tender line carries the amount YNAB sees.
+    const bagDiscountStoreOrder: TargetPageResult = {
+      pageKind: "store-orders",
+      orders: [{ receiptId: "R6", date: "2026-08-22", totalCents: 8228, isRefund: false }],
+      hasMore: false,
+      fingerprint: "s1",
+    };
+    const bagDiscountDetail: TargetPageResult = {
+      pageKind: "store-purchase-detail",
+      receiptId: "R6",
+      detail: {
+        sections: [{
+          isRefund: false,
+          date: "2026-08-22",
+          items: [{ productId: "P1", title: "Fairlife", unitPriceCents: 8228, quantity: 1, amountCents: 8228 }],
+          itemSubtotalCents: 8228,
+        }],
+        invoiceTotalCents: 8228,
+        paymentLines: [{ cardLabel: "AmEx", isGiftCard: false, amountCents: 8223 }],
+      },
+      imageMap: {},
+    };
+
+    it("matches the charge against the detail page's card tender line", async () => {
+      const c = charge({ amountCents: 8223, date: "2026-08-22", isRefund: false });
+      queueResults(emptyOnlineOrders, emptyOnlineOrders, bagDiscountStoreOrder, bagDiscountDetail);
+
+      const res = await targetAdapter.scrapeMatchedOrders([c]);
+      expect(res.unmatched).toEqual([]);
+      expect(res.matched).toHaveLength(1);
+      expect(res.matched[0]!.order.orderId).toBe("instore-R6");
+      expect(res.matched[0]!.order.refund).toBeNull();
+      expect(res.matched[0]!.charges).toEqual([c]);
+    });
+
+    it("fails closed when no card tender line equals the charge", async () => {
+      const c = charge({ amountCents: 8220, date: "2026-08-22", isRefund: false });
+      queueResults(emptyOnlineOrders, emptyOnlineOrders, bagDiscountStoreOrder, bagDiscountDetail);
+
+      const res = await targetAdapter.scrapeMatchedOrders([c]);
+      expect(res.matched).toEqual([]);
+      expect(res.unmatched).toEqual([{ charge: c, reason: NO_MATCH_REASON }]);
+    });
+
+    it("does not open a receipt whose displayed total is at or below the charge", async () => {
+      const c = charge({ amountCents: 8300, date: "2026-08-22", isRefund: false });
+      queueResults(emptyOnlineOrders, emptyOnlineOrders, bagDiscountStoreOrder);
+
+      const res = await targetAdapter.scrapeMatchedOrders([c]);
+      expect(res.matched).toEqual([]);
+      expect(res.unmatched).toEqual([{ charge: c, reason: NO_MATCH_REASON }]);
+      expect(awaitPageResult).toHaveBeenCalledTimes(3);
+    });
+  });
+
   describe("Phase 5a/5b — mixed (purchase + later return) in-store receipts", () => {
     // Real shape/numbers confirmed live on receipt
     // /orders/stores/6097-1430-0171-4403, corrected after live testing: the
@@ -334,9 +424,9 @@ describe("targetAdapter.scrapeMatchedOrders (coordinator)", () => {
     it("matches the purchase charge to the FULL receipt (both sections) via Phase 5a, and the later refund via Phase 5b", async () => {
       const purchase = charge({ ynabTransactionId: "yt-p", amountCents: 10065, date: "2026-04-07", isRefund: false });
       const refund = charge({ ynabTransactionId: "yt-r", amountCents: 6765, date: "2026-05-02", isRefund: true });
-      // The purchase side opens the receipt once (Phase 5a's list-total match);
-      // the refund-discovery pass (Phase 5b) opens it again independently.
-      queueResults(emptyOnlineOrders, emptyOnlineOrders, mixedStoreOrder, mixedDetail, mixedDetail);
+      // The receipt is opened exactly once: the purchase build and the
+      // return-section refund match both come from that single read.
+      queueResults(emptyOnlineOrders, emptyOnlineOrders, mixedStoreOrder, mixedDetail);
 
       const res = await targetAdapter.scrapeMatchedOrders([purchase, refund]);
       expect(res.unmatched).toEqual([]);
@@ -415,7 +505,7 @@ describe("targetAdapter.scrapeMatchedOrders (coordinator)", () => {
     it("matches the purchase charge to the receipt as a PURCHASE (not a refund) via Phase 5a, and the separate refund via Phase 5b", async () => {
       const purchase = charge({ ynabTransactionId: "yt-p", amountCents: 5000, date: "2026-06-01", isRefund: false });
       const refund = charge({ ynabTransactionId: "yt-r", amountCents: 4700, date: "2026-06-16", isRefund: true });
-      queueResults(emptyOnlineOrders, emptyOnlineOrders, fullyReturnedStoreOrder, fullyReturnedDetail, fullyReturnedDetail);
+      queueResults(emptyOnlineOrders, emptyOnlineOrders, fullyReturnedStoreOrder, fullyReturnedDetail);
 
       const res = await targetAdapter.scrapeMatchedOrders([purchase, refund]);
       expect(res.unmatched).toEqual([]);
