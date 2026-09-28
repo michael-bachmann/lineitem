@@ -10,11 +10,15 @@ updates:
     schedule:
       interval: "weekly"
     groups:
-      # Batch all minor + patch bumps into one PR; majors stay separate.
+      # One PR for all minor + patch bumps across every directory.
       minor-and-patch:
         update-types:
           - "minor"
           - "patch"
+      # One PR for all major bumps, kept apart from the low-risk group.
+      major:
+        update-types:
+          - "major"
 
   - package-ecosystem: "github-actions"
     directory: "/"
