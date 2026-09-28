@@ -380,9 +380,11 @@ export interface RetailerAdapter {
    * page paginations) and throw the standard DOMException AbortError when
    * the signal aborts; in-progress detail scrapes are allowed to finish.
    *
-   * `options.navPacingMs` overrides the adapter's pause between driven page
-   * navigations (plain rate limiting so a walk doesn't fire page loads
-   * back-to-back). Tests pass 0; production uses the adapter's default.
+   * `options.navPacingMs` overrides the FLOOR of the adapter's pause between
+   * driven page navigations (plain rate limiting so a walk doesn't fire page
+   * loads back-to-back); the adapter adds its own random increment on top.
+   * Tests pass 0, which disables pacing entirely; production uses the
+   * adapter's default.
    */
   scrapeMatchedOrders(
     charges: YnabCharge[],

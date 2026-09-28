@@ -73,13 +73,20 @@ export class ChallengeRequired extends Error {
   }
 }
 
-/** Pause between driven page navigations — plain rate limiting. Back-to-back
- *  programmatic page loads are what make a walk look bot-like to Target's
- *  traffic checks, and a scrape is not latency-sensitive. Overridable via
- *  `options.navPacingMs` (tests pass 0). */
+/** Floor for the pause between driven page navigations — plain rate limiting.
+ *  The walk used to fire page loads back-to-back; a scrape is not
+ *  latency-sensitive, so it can afford to be a much lighter client.
+ *  Overridable via `options.navPacingMs` (tests pass 0). */
 const NAV_PACING_MS = 1_500;
+/** Added to each pause, uniformly at random — so the floor is a floor rather
+ *  than the whole story, and a walk can't settle into lockstep with a fixed
+ *  server-side rate window. Strictly additive: pacing only ever gets gentler,
+ *  never faster than `NAV_PACING_MS`. */
+const NAV_PACING_JITTER_MS = 1_000;
 const pace = (ms: number): Promise<void> =>
-  ms > 0 ? new Promise((resolve) => setTimeout(resolve, ms)) : Promise.resolve();
+  ms > 0
+    ? new Promise((resolve) => setTimeout(resolve, ms + Math.random() * NAV_PACING_JITTER_MS))
+    : Promise.resolve();
 
 /**
  * Whether an order could plausibly contain one of the still-unmatched charges,
