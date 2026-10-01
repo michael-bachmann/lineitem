@@ -9,6 +9,13 @@ import { Icon } from "@lineitem/ui";
  * be pruned freely.
  */
 export const WHATS_NEW: Record<string, ReactNode[]> = {
+  "1.4.0": [
+    <>
+      Target purchases you made <b className="font-semibold text-text">in the store</b> now match
+      their receipt and split by item, the same as online orders.
+    </>,
+    <>In-store returns match back to the purchase they came from.</>,
+  ],
   "1.3.0": [
     <>
       Approving a split now takes you{" "}
