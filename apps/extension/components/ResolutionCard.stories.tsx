@@ -25,6 +25,10 @@ export const StepUp: Story = {
   args: { blocked: [{ retailer: "target", reason: "step_up", count: 2 }] },
 };
 
+export const Challenge: Story = {
+  args: { blocked: [{ retailer: "target", reason: "challenge", count: 2 }] },
+};
+
 export const Both: Story = {
   args: {
     blocked: [

@@ -27,6 +27,12 @@ export const SELECTORS = {
   storeOrderCard: ".styles_orderCard__AT6kC",
   storeOrderCardLink: "a[href*='/orders/stores/']",
 
+  // PerimeterX bot-check challenge ("press & hold"). Rendered either as the
+  // whole page (block mode) or as an overlay above still-parseable content
+  // (confirmed live) — which is why describe() only reports it when a page's
+  // meaningful DOM never appears.
+  challengeContainer: "#px-captcha, .px-captcha-container",
+
   // In-store purchase detail (/orders/stores/{receiptId}) — a single page with
   // items, totals, AND payment tender (unlike an online order, which splits
   // across separate invoices/invoice-detail/order-detail pages). Item cards

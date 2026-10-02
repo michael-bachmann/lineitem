@@ -57,6 +57,37 @@ export class StepUpRequired extends Error {
   }
 }
 
+/** Thrown when a page renders Target's bot check ("press & hold") in place of
+ *  its content. Only a human in the live tab can clear it, and retrying a
+ *  challenged session just deepens the flagging — so the walk bails
+ *  immediately (keeping partial results) and the adapter converts it into a
+ *  single `challenge` block. NOTE: the challenge can also render as an overlay
+ *  above a fully parseable page; the content script only reports it when the
+ *  page's meaningful DOM never appeared, so a working scrape is never
+ *  interrupted just because the overlay is showing. */
+export class ChallengeRequired extends Error {
+  /** The page whose load hit the challenge — surfaced as the block's `url`. */
+  constructor(readonly url?: string) {
+    super("challenge_required");
+    this.name = "ChallengeRequired";
+  }
+}
+
+/** Floor for the pause between driven page navigations — plain rate limiting.
+ *  The walk used to fire page loads back-to-back; a scrape is not
+ *  latency-sensitive, so it can afford to be a much lighter client.
+ *  Overridable via `options.navPacingMs` (tests pass 0). */
+const NAV_PACING_MS = 1_500;
+/** Added to each pause, uniformly at random — so the floor is a floor rather
+ *  than the whole story, and a walk can't settle into lockstep with a fixed
+ *  server-side rate window. Strictly additive: pacing only ever gets gentler,
+ *  never faster than `NAV_PACING_MS`. */
+const NAV_PACING_JITTER_MS = 1_000;
+const pace = (ms: number): Promise<void> =>
+  ms > 0
+    ? new Promise((resolve) => setTimeout(resolve, ms + Math.random() * NAV_PACING_JITTER_MS))
+    : Promise.resolve();
+
 /**
  * Whether an order could plausibly contain one of the still-unmatched charges,
  * used to decide if it's worth opening the order's invoices page. A single
@@ -257,6 +288,7 @@ export const targetAdapter: RetailerAdapter = {
 
   async scrapeMatchedOrders(charges, options) {
     const maxPages = options?.maxPages ?? DEFAULT_MAX_PAGES;
+    const pacingMs = options?.navPacingMs ?? NAV_PACING_MS;
     const signal = options?.signal;
     const onScrapeProgress = options?.onScrapeProgress;
 
@@ -279,13 +311,14 @@ export const targetAdapter: RetailerAdapter = {
       clearBufferedPageResult(tabId);
       describe(tabId);
       const first = await awaitOrders(tabId, null);
+      if (first?.pageKind === "challenge") throw new ChallengeRequired(ordersUrl());
       if (!first || first.pageKind !== "orders") {
         // login, or the list never described in time — nothing is readable.
         return { matched: [], unmatched: [], blocked: { reason: "signed_out", charges } };
       }
 
       // Phase 1: walk the orders list (paginate Load more) until past cutoff.
-      const orders = await collectOrders(tabId, first, charges, maxPages, signal, onScrapeProgress);
+      const orders = await collectOrders(tabId, first, charges, maxPages, pacingMs, signal, onScrapeProgress);
       console.info(`[target] phase 1: ${orders.length} orders in the window`);
 
       // Phase 2: for orders that could contain a still-unmatched charge, read the
@@ -310,9 +343,9 @@ export const targetAdapter: RetailerAdapter = {
         let invoices: RawTargetInvoice[];
         try {
           invoices = await readWithRetry(`invoices ${order.orderId}`, () =>
-            readInvoices(tabId, order.orderId));
+            readInvoices(tabId, order.orderId, pacingMs));
         } catch (err) {
-          if (err instanceof StepUpRequired) throw err;
+          if (err instanceof StepUpRequired || err instanceof ChallengeRequired) throw err;
           // Couldn't read this order's invoices — skip it; its charges stay
           // unmatched and a re-run will reattempt.
           console.warn(`[target] skipping order ${order.orderId}: invoices unreadable`, err);
@@ -358,9 +391,9 @@ export const targetAdapter: RetailerAdapter = {
             let detail: RawTargetInvoiceDetail;
             try {
               detail = await readWithRetry(`invoice detail ${orderId}/${inv.invoiceId}`, () =>
-                readInvoiceDetail(tabId, orderId, inv.invoiceId));
+                readInvoiceDetail(tabId, orderId, inv.invoiceId, pacingMs));
             } catch (err) {
-              if (err instanceof StepUpRequired) throw err;
+              if (err instanceof StepUpRequired || err instanceof ChallengeRequired) throw err;
               // Couldn't read this invoice's detail — skip it; the charge stays
               // unmatched and a re-run will reattempt.
               console.warn(`[target] skipping invoice ${orderId}/${inv.invoiceId}: detail unreadable`, err);
@@ -398,9 +431,9 @@ export const targetAdapter: RetailerAdapter = {
         try {
           detail = mi.detail
             ?? (await readWithRetry(`detail ${mi.orderId}/${mi.invoiceId}`, () =>
-              readInvoiceDetail(tabId, mi.orderId, mi.invoiceId)));
+              readInvoiceDetail(tabId, mi.orderId, mi.invoiceId, pacingMs)));
         } catch (err) {
-          if (err instanceof StepUpRequired) throw err;
+          if (err instanceof StepUpRequired || err instanceof ChallengeRequired) throw err;
           // This charge matched an invoice but its detail page couldn't be read —
           // surface it as a read failure (counts toward "couldn't be read") so a
           // re-run reattempts it, rather than tanking the whole scrape.
@@ -417,9 +450,9 @@ export const targetAdapter: RetailerAdapter = {
         if (!imageMap) {
           try {
             imageMap = await readWithRetry(`images ${mi.orderId}`, () =>
-              readOrderImages(tabId, mi.orderId));
+              readOrderImages(tabId, mi.orderId, pacingMs));
           } catch (err) {
-            if (err instanceof StepUpRequired) throw err;
+            if (err instanceof StepUpRequired || err instanceof ChallengeRequired) throw err;
             console.warn(`[target] couldn't read order images for ${mi.orderId}`, err);
             detailFailures.push({ charge: mi.charge, reason: READ_FAILED_REASON });
             continue;
@@ -444,18 +477,21 @@ export const targetAdapter: RetailerAdapter = {
         // read landed — the in-store tab only exists as client-side state on
         // /orders itself, so get back there (and let the fresh load's own
         // auto-describe land) before switching tabs.
+        await pace(pacingMs);
         navigate(tabId, ordersUrl());
         const backOnOrders = await awaitOrders(tabId, null);
         dlog("target", "phase 5 back on orders:", backOnOrders?.pageKind ?? "timeout");
         if (backOnOrders?.pageKind === "login") throw new StepUpRequired(ordersUrl());
+        if (backOnOrders?.pageKind === "challenge") throw new ChallengeRequired(ordersUrl());
 
         describeStoreOrders(tabId);
         const firstStore = await awaitStoreOrders(tabId, null);
         if (firstStore?.pageKind === "login") throw new StepUpRequired(ordersUrl());
+        if (firstStore?.pageKind === "challenge") throw new ChallengeRequired(ordersUrl());
 
         if (firstStore && firstStore.pageKind === "store-orders") {
           const storeOrders = await collectStoreOrders(
-            tabId, firstStore, remaining, maxPages, signal, onScrapeProgress,
+            tabId, firstStore, remaining, maxPages, pacingMs, signal, onScrapeProgress,
           );
           console.info(`[target] phase 5: ${storeOrders.length} in-store purchases in the window`);
           dlog("target", "phase 5 remaining charges", remaining.map(
@@ -493,9 +529,9 @@ export const targetAdapter: RetailerAdapter = {
             let read: { detail: RawTargetStoreDetail; imageMap: Record<string, string> };
             try {
               read = await readWithRetry(`store purchase ${storeOrder.receiptId}`, () =>
-                readStorePurchaseDetail(tabId, storeOrder.receiptId));
+                readStorePurchaseDetail(tabId, storeOrder.receiptId, pacingMs));
             } catch (err) {
-              if (err instanceof StepUpRequired) throw err;
+              if (err instanceof StepUpRequired || err instanceof ChallengeRequired) throw err;
               console.warn(`[target] couldn't read in-store receipt ${storeOrder.receiptId}`, err);
               if (listCharge) storeDetailFailures.push({ charge: listCharge, reason: READ_FAILED_REASON });
               continue;
@@ -531,18 +567,19 @@ export const targetAdapter: RetailerAdapter = {
       console.info(`[target] done: ${matched.length} matched, ${detailFailures.length + storeDetailFailures.length} read-failed of ${matchedInvoices.length} matched invoices`);
       return { matched, unmatched };
     } catch (err) {
-      if (err instanceof StepUpRequired) {
-        // The walk hit Target's step-up sign-in. Keep whatever we assembled
-        // before the wall; everything not yet matched becomes one sign-in block.
-        // One step-up elevates the session, so a re-sync after sign-in reads the
-        // rest (genuinely unmatchable charges then fall to no_match).
+      if (err instanceof StepUpRequired || err instanceof ChallengeRequired) {
+        // The walk hit a wall only the user can clear (step-up sign-in, or the
+        // bot check). Keep whatever we assembled before it; everything not yet
+        // matched becomes one block. Clearing the wall elevates the session,
+        // so a re-sync afterwards reads the rest (genuinely unmatchable
+        // charges then fall to no_match).
         const done = new Set(matched.flatMap((m) => m.charges.map((c) => c.ynabTransactionId)));
         const blockedCharges = charges.filter((c) => !done.has(c.ynabTransactionId));
         return {
           matched,
           unmatched: [],
           blocked: {
-            reason: "step_up",
+            reason: err instanceof ChallengeRequired ? "challenge" : "step_up",
             charges: blockedCharges,
             ...(err.url ? { url: err.url } : {}),
           },
@@ -569,69 +606,79 @@ interface MatchedInvoice {
 /**
  * Run one page read, retrying it once on failure. A failed/hung load usually
  * recovers on a fresh navigation, so one cheap retry absorbs transient blips. A
- * step-up won't clear on retry (the whole session is gated), so it propagates.
+ * step-up or bot check won't clear on retry (the whole session is gated), so
+ * those propagate.
  * (Cancellation is handled by the loop-level `signal.throwIfAborted()` calls.)
  */
 export async function readWithRetry<T>(label: string, read: () => Promise<T>): Promise<T> {
   try {
     return await read();
   } catch (err) {
-    if (err instanceof StepUpRequired) throw err;
+    if (err instanceof StepUpRequired || err instanceof ChallengeRequired) throw err;
     console.warn(`[target] ${label} failed; retrying once`, err);
     return await read();
   }
 }
 
-async function readInvoices(tabId: number, orderId: string): Promise<RawTargetInvoice[]> {
+async function readInvoices(tabId: number, orderId: string, pacingMs: number): Promise<RawTargetInvoice[]> {
   const url = orderInvoicesUrl(orderId);
+  await pace(pacingMs);
   navigate(tabId, url);
   const r = await awaitPageResult<TargetPageResult>(
     tabId,
-    (x) => x.pageKind === "login" || (x.pageKind === "invoices" && x.orderId === orderId),
+    (x) => x.pageKind === "login" || x.pageKind === "challenge" || (x.pageKind === "invoices" && x.orderId === orderId),
   );
   if (r.pageKind === "login") throw new StepUpRequired(url);
+  if (r.pageKind === "challenge") throw new ChallengeRequired(url);
   if (r.pageKind !== "invoices") throw new Error(`Target invoices ${orderId}: got ${r.pageKind}`);
   return r.invoices;
 }
 
 async function readInvoiceDetail(
-  tabId: number, orderId: string, invoiceId: string,
+  tabId: number, orderId: string, invoiceId: string, pacingMs: number,
 ): Promise<RawTargetInvoiceDetail> {
   const url = invoiceDetailUrl(orderId, invoiceId);
+  await pace(pacingMs);
   navigate(tabId, url);
   const r = await awaitPageResult<TargetPageResult>(
     tabId,
     (x) =>
       x.pageKind === "login" ||
+      x.pageKind === "challenge" ||
       (x.pageKind === "invoice-detail" && x.orderId === orderId && x.invoiceId === invoiceId),
   );
   if (r.pageKind === "login") throw new StepUpRequired(url);
+  if (r.pageKind === "challenge") throw new ChallengeRequired(url);
   if (r.pageKind !== "invoice-detail") throw new Error(`Target invoice detail ${orderId}/${invoiceId}: got ${r.pageKind}`);
   return r.detail;
 }
 
-async function readOrderImages(tabId: number, orderId: string): Promise<Record<string, string>> {
+async function readOrderImages(tabId: number, orderId: string, pacingMs: number): Promise<Record<string, string>> {
   const url = orderDetailUrl(orderId);
+  await pace(pacingMs);
   navigate(tabId, url);
   const r = await awaitPageResult<TargetPageResult>(
     tabId,
-    (x) => x.pageKind === "login" || (x.pageKind === "order-images" && x.orderId === orderId),
+    (x) => x.pageKind === "login" || x.pageKind === "challenge" || (x.pageKind === "order-images" && x.orderId === orderId),
   );
   if (r.pageKind === "login") throw new StepUpRequired(url);
+  if (r.pageKind === "challenge") throw new ChallengeRequired(url);
   if (r.pageKind !== "order-images") throw new Error(`Target order images ${orderId}: got ${r.pageKind}`);
   return r.imageMap;
 }
 
 async function readStorePurchaseDetail(
-  tabId: number, receiptId: string,
+  tabId: number, receiptId: string, pacingMs: number,
 ): Promise<{ detail: RawTargetStoreDetail; imageMap: Record<string, string> }> {
   const url = storeOrderDetailUrl(receiptId);
+  await pace(pacingMs);
   navigate(tabId, url);
   const r = await awaitPageResult<TargetPageResult>(
     tabId,
-    (x) => x.pageKind === "login" || (x.pageKind === "store-purchase-detail" && x.receiptId === receiptId),
+    (x) => x.pageKind === "login" || x.pageKind === "challenge" || (x.pageKind === "store-purchase-detail" && x.receiptId === receiptId),
   );
   if (r.pageKind === "login") throw new StepUpRequired(url);
+  if (r.pageKind === "challenge") throw new ChallengeRequired(url);
   if (r.pageKind !== "store-purchase-detail") throw new Error(`Target store purchase ${receiptId}: got ${r.pageKind}`);
   return { detail: r.detail, imageMap: r.imageMap };
 }
@@ -645,6 +692,7 @@ async function collectOrders(
   first: TargetPageResult & { pageKind: "orders" },
   charges: YnabCharge[],
   maxPages: number,
+  pacingMs: number,
   signal?: AbortSignal,
   onProgress?: (event: ScrapeProgress) => void,
 ): Promise<RawTargetOrder[]> {
@@ -685,11 +733,14 @@ async function collectOrders(
 
     const prevFingerprint = result.fingerprint;
     console.info(`[target] Load more (have ${orders.length})`);
+    await pace(pacingMs);
     loadMore(tabId);
     result = await awaitOrders(tabId, prevFingerprint);
-    // A login here means a step-up fired mid-pagination — bail the walk so the
-    // caller surfaces a single sign-in wall (keeping any partial matches).
+    // A login here means a step-up fired mid-pagination (a challenge, the bot
+    // check) — bail the walk so the caller surfaces a single wall (keeping
+    // any partial matches).
     if (result?.pageKind === "login") throw new StepUpRequired(ordersUrl());
+    if (result?.pageKind === "challenge") throw new ChallengeRequired(ordersUrl());
   }
 
   return orders;
@@ -707,6 +758,7 @@ async function awaitOrders(
       tabId,
       (r) =>
         r.pageKind === "login" ||
+        r.pageKind === "challenge" ||
         (r.pageKind === "orders" && (prevFingerprint === null || r.fingerprint !== prevFingerprint)),
     );
   } catch {
@@ -722,6 +774,7 @@ async function collectStoreOrders(
   first: TargetPageResult & { pageKind: "store-orders" },
   charges: YnabCharge[],
   maxPages: number,
+  pacingMs: number,
   signal?: AbortSignal,
   onProgress?: (event: ScrapeProgress) => void,
 ): Promise<RawTargetStoreOrder[]> {
@@ -755,9 +808,11 @@ async function collectStoreOrders(
 
     const prevFingerprint = result.fingerprint;
     console.info(`[target] Load more in-store (have ${orders.length})`);
+    await pace(pacingMs);
     loadMore(tabId);
     result = await awaitStoreOrders(tabId, prevFingerprint);
     if (result?.pageKind === "login") throw new StepUpRequired(ordersUrl());
+    if (result?.pageKind === "challenge") throw new ChallengeRequired(ordersUrl());
   }
 
   return orders;
@@ -773,6 +828,7 @@ async function awaitStoreOrders(
       tabId,
       (r) =>
         r.pageKind === "login" ||
+        r.pageKind === "challenge" ||
         (r.pageKind === "store-orders" && (prevFingerprint === null || r.fingerprint !== prevFingerprint)),
     );
   } catch {
