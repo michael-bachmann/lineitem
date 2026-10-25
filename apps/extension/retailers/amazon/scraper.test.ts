@@ -1,6 +1,8 @@
 // @vitest-environment happy-dom
 import { describe, expect, it, beforeEach } from "vitest";
 import {
+  parseNaturalDate,
+  parseTransactionsFromDocument,
   isGroceryOrder,
   parseItemmodFromDocument,
   parseItemsFromDocument,
@@ -11,6 +13,109 @@ import { verifyScrape } from "@/lib/verify-scrape";
 
 beforeEach(() => {
   document.body.innerHTML = "";
+});
+
+describe("parseNaturalDate", () => {
+  it("parses full and abbreviated month names", () => {
+    expect(parseNaturalDate("May 17, 2026")).toBe("2026-05-17");
+    expect(parseNaturalDate("Oct 09, 2026")).toBe("2026-10-09");
+    expect(parseNaturalDate("September 3, 2026")).toBe("2026-09-03");
+  });
+
+  it("returns null for non-dates", () => {
+    expect(parseNaturalDate("Amazon.com")).toBeNull();
+    expect(parseNaturalDate("-$23.80")).toBeNull();
+  });
+});
+
+describe("parseTransactionsFromDocument", () => {
+  // Mirrors the real list: one `transaction-link` row per transaction, flat
+  // `text` leaves inside, no date headers and no order hrefs.
+  const row = (...texts: string[]) =>
+    `<a href="#" data-testid="transaction-link"><div>${texts
+      .map((t) => `<div data-testid="text">${t}</div>`)
+      .join("")}</div></a>`;
+
+  it("reads date, order id and amount from each row, in order", () => {
+    document.body.innerHTML =
+      row("Oct 24, 2026", "·", "Amazon.com", "Order #113-5015674-9348226", "-$23.80", "Pending") +
+      row("Oct 23, 2026", "·", "AMZN Mktp US", "Order #113-0035213-2563406", "-$1,215.42", "Charged");
+    expect(parseTransactionsFromDocument(document)).toEqual([
+      { date: "2026-10-24", amountCents: 2380, orderId: "113-5015674-9348226", isRefund: false },
+      { date: "2026-10-23", amountCents: 121542, orderId: "113-0035213-2563406", isRefund: false },
+    ]);
+  });
+
+  it("flags refunds by the + amount and the Refunded status", () => {
+    document.body.innerHTML = row(
+      "Oct 06, 2026", "·", "AMZN Mktp US", "Order #111-3961562-8035415", "+$19.74", "Refunded",
+    );
+    expect(parseTransactionsFromDocument(document)).toEqual([
+      { date: "2026-10-06", amountCents: 1974, orderId: "111-3961562-8035415", isRefund: true },
+    ]);
+  });
+
+  it("keeps non-numeric order ids (Whole Foods in-store uses a UUID)", () => {
+    document.body.innerHTML = row(
+      "Oct 02, 2026", "·", "Whole Foods PIC 10653", "Order #20cf5e57-8026-456f-b90d-cc6b9257018c", "-$8.28", "Charged",
+    );
+    expect(parseTransactionsFromDocument(document)[0]!.orderId).toBe(
+      "20cf5e57-8026-456f-b90d-cc6b9257018c",
+    );
+  });
+
+  it("finds fields by shape, so a row without a descriptor or card still parses", () => {
+    document.body.innerHTML = row(
+      "Sep 17, 2026", "·", "", "Order #111-4659952-0457835", "-$6.69", "Charged",
+    );
+    expect(parseTransactionsFromDocument(document)).toEqual([
+      { date: "2026-09-17", amountCents: 669, orderId: "111-4659952-0457835", isRefund: false },
+    ]);
+  });
+
+  it("gives a null orderId to a row with no order, and skips rows with no date or amount", () => {
+    document.body.innerHTML =
+      row("Oct 01, 2026", "·", "Amazon Prime", "-$14.99", "Charged") +
+      row("Oct 01, 2026", "·", "Amazon.com", "Order #111-1") +
+      row("Order #111-2", "-$5.00");
+    expect(parseTransactionsFromDocument(document)).toEqual([
+      { date: "2026-10-01", amountCents: 1499, orderId: null, isRefund: false },
+    ]);
+  });
+});
+
+describe("parseTransactionsFromDocument — legacy paged layout", () => {
+  const legacyRow = (amount: string, href: string | null, extra = "") => `
+    <div class="apx-transactions-line-item-component-container">
+      <div class="a-span9">${href ? `<a href="${href}">Order #</a>` : "Amazon Prime"}${extra}</div>
+      <div class="a-span3"><span>${amount}</span></div>
+    </div>`;
+
+  it("reads rows grouped under date headers, carrying the date forward", () => {
+    document.body.innerHTML = `
+      <div class="apx-transaction-date-container"><span>May 17, 2026</span></div>
+      <div>${legacyRow("-$42.99", "/gp/css/summary/edit.html?orderID=111-A&ref=x")}
+           ${legacyRow("-$5.00", "/gp/css/summary/edit.html?orderID=111-B")}</div>
+      <div class="apx-transaction-date-container"><span>May 16, 2026</span></div>
+      <div>${legacyRow("+$3.50", null, " Refund")}</div>
+    `;
+    expect(parseTransactionsFromDocument(document)).toEqual([
+      { date: "2026-05-17", amountCents: 4299, orderId: "111-A", isRefund: false },
+      { date: "2026-05-17", amountCents: 500, orderId: "111-B", isRefund: false },
+      { date: "2026-05-16", amountCents: 350, orderId: null, isRefund: true },
+    ]);
+  });
+
+  it("prefers the scrolling list when both are present", () => {
+    document.body.innerHTML = `
+      <div class="apx-transaction-date-container"><span>May 17, 2026</span></div>
+      <div>${legacyRow("-$1.00", "/x?orderID=OLD")}</div>
+      <a data-testid="transaction-link">
+        <div data-testid="text">Oct 24, 2026</div><div data-testid="text">Order #NEW</div>
+        <div data-testid="text">-$2.00</div>
+      </a>`;
+    expect(parseTransactionsFromDocument(document).map((t) => t.orderId)).toEqual(["NEW"]);
+  });
 });
 
 describe("isGroceryOrder", () => {
@@ -26,6 +131,17 @@ describe("isGroceryOrder", () => {
 });
 
 describe("parseItemmodFromDocument", () => {
+  it("adds a row's promotion back, since Amazon's Item(s) Subtotal is pre-promotion", () => {
+    document.body.innerHTML = `
+      <div id="B08Q6GS7C9-item-grid-row" role="row">
+        <a href="/gp/product/B08Q6GS7C9?ref_=foo"><span> Evolution Fresh Juice </span></a>
+        <span id="B08Q6GS7C9-item-total-price"> $9.00 </span>
+        <span class="a-size-small a-color-success"><i class="a-icon"></i> $0.99 promotion applied </span>
+      </div>
+    `;
+    expect(parseItemmodFromDocument(document)[0]!.priceCents).toBe(999);
+  });
+
   it("extracts a by-weight item with line total and quantity=1", () => {
     document.body.innerHTML = `
       <div id="B0787Y4V6T-item-grid-row" role="row">

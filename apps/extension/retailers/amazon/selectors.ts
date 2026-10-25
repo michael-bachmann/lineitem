@@ -1,13 +1,24 @@
 export const SELECTORS = {
-  // Transactions page
-  dateContainer: ".apx-transaction-date-container",
-  lineItem: ".apx-transactions-line-item-component-container",
-  amountSpan: ".a-span3 span, .a-text-right span",
-  orderLink: "a[href*='orderID=']",
+  // Transactions page. A Next.js/React-Native-Web list: every transaction is one
+  // `transaction-link` row (no date headers, no order hrefs — the order id is
+  // text, "Order #111-..."), and more rows are appended inline as the page
+  // scrolls. Class names are hashed (`css-...`), so only `data-testid` is stable.
+  transactionRow: '[data-testid="transaction-link"]',
+  // Leaf text nodes inside a row: date, descriptor, order id, amount, status.
+  transactionText: '[data-testid="text"]',
+
+  // LEGACY transactions layout (paged, server-rendered Amazon UI library). Amazon
+  // replaced it in Oct 2026; kept as a fallback in case the rollout is staged.
+  // TODO(2026-12-24): if no old-layout reports by now, delete every `legacy*` /
+  // `Legacy` bit here, in scraper.ts, page.ts (hasNextPage) and amazon.content.ts.
+  legacyDateContainer: ".apx-transaction-date-container",
+  legacyLineItem: ".apx-transactions-line-item-component-container",
+  legacyAmountSpan: ".a-span3 span, .a-text-right span",
+  legacyOrderLink: "a[href*='orderID=']",
   // Amazon's pagination widget emits an input whose `name` encodes the event
   // (`ppw-widgetEvent:DefaultNextPageNavigationEvent:...`). Stable across pages;
   // `aria-labelledby` is present on page 0 only.
-  nextPageButton:
+  legacyNextPageButton:
     'span.a-button:not(.a-button-disabled) input[type="submit"][name*="NextPageNavigationEvent"]',
 
   // Order detail page (summary)

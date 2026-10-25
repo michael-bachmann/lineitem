@@ -45,6 +45,11 @@ export default defineContentScript({
   },
 });
 
+/** How many transaction rows this tab has already reported. The list grows in
+ *  place as it scrolls, so each result carries only the rows past this mark —
+ *  the adapter accumulates, and never sees a row twice. */
+let reportedRows = 0;
+
 /** Detect the page, wait for its meaningful DOM, parse, and report one result. */
 async function describe(): Promise<void> {
   const kind = detectAmazonPageKind(window.location.href);
@@ -55,12 +60,14 @@ async function describe(): Promise<void> {
     case "transactions": {
       // The list renders asynchronously after load; wait for rows before reading
       // so we never report an empty page and skip real transactions.
-      await waitForElement(SELECTORS.lineItem);
+      await waitForElement(`${SELECTORS.transactionRow}, ${SELECTORS.legacyLineItem}`);
       const transactions = parseTransactionsFromDocument(document);
+      // A (re-)describe is a fresh read of the whole list, so start the mark over.
+      reportedRows = transactions.length;
       return post({
         pageKind: "transactions",
         fingerprint: transactionsFingerprint(transactions),
-        hasNext: hasNextPage(document),
+        hasNext: isLegacyLayout() ? hasNextPage(document) : true,
         transactions,
       });
     }
@@ -112,26 +119,60 @@ async function describe(): Promise<void> {
   }
 }
 
-/** Turn Amazon's transactions pager. In Chrome this is an in-page AJAX swap, so
- *  the same context waits for the new rows and re-describes; in Firefox the click
- *  reloads the page, so this context is torn down and the freshly-loaded page
- *  describes itself. Either way the adapter gets the next transactions result. */
+/** Load the next batch of transactions. Amazon's list is infinite-scroll: new
+ *  rows are appended in place once the bottom is reached, there is no pager. Scroll
+ *  down, wait for the rows to arrive and settle, and report just the new ones.
+ *  If none arrive the list is exhausted: report an empty, final result. */
 async function turnPage(): Promise<void> {
-  const nextButton = document.querySelector<HTMLInputElement>(SELECTORS.nextPageButton);
+  if (isLegacyLayout()) return turnLegacyPage();
+  const before = document.querySelectorAll(SELECTORS.transactionRow);
+  // The last row's own scroll container may not be the window, so scroll both.
+  before[before.length - 1]?.scrollIntoView({ block: "end" });
+  window.scrollTo(0, document.documentElement.scrollHeight);
+
+  const grew = await waitUntil(
+    () => document.querySelectorAll(SELECTORS.transactionRow).length > before.length,
+    { timeoutMs: 15_000 },
+  );
+  if (grew) await waitForQuietDom({ quietMs: 400, timeoutMs: 4_000 });
+
+  const transactions = parseTransactionsFromDocument(document).slice(reportedRows);
+  reportedRows += transactions.length;
+  return post({
+    pageKind: "transactions",
+    fingerprint: transactionsFingerprint(transactions),
+    hasNext: transactions.length > 0,
+    transactions,
+  });
+}
+
+/** The old paged layout: no scroll-loaded rows, only the legacy next button.
+ *  TODO(2026-12-24): remove with the rest of the legacy layout (see selectors.ts). */
+function isLegacyLayout(): boolean {
+  return (
+    document.querySelector(SELECTORS.transactionRow) === null &&
+    document.querySelector(SELECTORS.legacyLineItem) !== null
+  );
+}
+
+/** Turn the legacy pager. In Chrome this is an in-page AJAX swap, so the same
+ *  context waits for the new rows and re-describes; in Firefox the click reloads
+ *  the page, so this context is torn down and the freshly-loaded page describes
+ *  itself. Either way the adapter gets the next transactions result. */
+async function turnLegacyPage(): Promise<void> {
+  const nextButton = document.querySelector<HTMLInputElement>(SELECTORS.legacyNextPageButton);
   if (!nextButton) {
     // No next page after all — re-describe so the adapter sees hasNext:false.
     return describe();
   }
-  const sentinel = document.querySelector(SELECTORS.lineItem);
+  const sentinel = document.querySelector(SELECTORS.legacyLineItem);
   nextButton.click();
-  // Wait for the AJAX swap to replace the old rows with new ones (Chrome), then
-  // let the new rows finish rendering before we read — same settle contract as
-  // Target's Load more, so we never describe a half-swapped page. On a Firefox
-  // reload this context is torn down mid-wait and the fresh page describes
-  // itself instead — either way the adapter gets the next result.
+  // Wait for the AJAX swap to replace the old rows with new ones, then let the
+  // new rows finish rendering before we read, so we never describe a half-swapped
+  // page.
   if (sentinel) {
     const swapped = await waitUntil(
-      () => !sentinel.isConnected && document.querySelector(SELECTORS.lineItem) !== null,
+      () => !sentinel.isConnected && document.querySelector(SELECTORS.legacyLineItem) !== null,
       { timeoutMs: 15_000 },
     );
     if (swapped) await waitForQuietDom({ quietMs: 400, timeoutMs: 4_000 });

@@ -27,28 +27,29 @@ export interface RawItem {
 // ---------------------------------------------------------------------------
 
 const MONTHS: Record<string, string> = {
-  January: "01",
-  February: "02",
-  March: "03",
-  April: "04",
-  May: "05",
-  June: "06",
-  July: "07",
-  August: "08",
-  September: "09",
-  October: "10",
-  November: "11",
-  December: "12",
+  jan: "01",
+  feb: "02",
+  mar: "03",
+  apr: "04",
+  may: "05",
+  jun: "06",
+  jul: "07",
+  aug: "08",
+  sep: "09",
+  oct: "10",
+  nov: "11",
+  dec: "12",
 };
 
 /**
- * Parse a natural-language date like "May 17, 2026" to ISO "2026-05-17".
- * Returns an empty string if the input cannot be parsed.
+ * Parse a natural-language date like "May 17, 2026" or "Oct 09, 2026" to ISO
+ * "2026-05-17". Month names may be full or abbreviated. Returns null if the
+ * input cannot be parsed.
  */
 export function parseNaturalDate(dateStr: string): string | null {
-  const m = dateStr.trim().match(/^(\w+)\s+(\d{1,2}),?\s+(\d{4})$/);
+  const m = dateStr.trim().match(/^([A-Za-z]+)\s+(\d{1,2}),?\s+(\d{4})$/);
   if (!m) return null;
-  const month = MONTHS[m[1]!];
+  const month = MONTHS[m[1]!.slice(0, 3).toLowerCase()];
   if (!month) return null;
   const day = m[2]!.padStart(2, "0");
   return `${m[3]}-${month}-${day}`;
@@ -68,14 +69,52 @@ export function parseCents(dollarStr: string): number {
 // Transaction parsing (transactions page)
 // ---------------------------------------------------------------------------
 
+const AMOUNT_REGEX = /^[-+]?\$[\d,]+(?:\.\d{2})?$/;
+const ORDER_ID_REGEX = /^Order #(\S+)$/;
+
+/** Whichever transactions layout the page is in: the scrolling list, else the
+ *  legacy paged one (see SELECTORS.legacy*). */
 export function parseTransactionsFromDocument(
   doc: Document,
 ): RawTransaction[] {
+  return doc.querySelector(SELECTORS.transactionRow) !== null
+    ? parseScrollListTransactions(doc)
+    : parseLegacyTransactions(doc);
+}
+
+function parseScrollListTransactions(doc: Document): RawTransaction[] {
+  const results: RawTransaction[] = [];
+
+  doc.querySelectorAll(SELECTORS.transactionRow).forEach((row) => {
+    // Each row is a flat run of text nodes — date, descriptor, order id, amount,
+    // status — whose order isn't relied on (a gift-card row drops the card
+    // details), so each field is found by its shape.
+    const texts = Array.from(row.querySelectorAll(SELECTORS.transactionText)).map(
+      (el) => el.textContent?.trim() ?? "",
+    );
+    const date = texts.map(parseNaturalDate).find((d) => d !== null);
+    const amountText = texts.find((t) => AMOUNT_REGEX.test(t));
+    if (!date || !amountText) return;
+
+    const orderId = texts.map((t) => t.match(ORDER_ID_REGEX)?.[1]).find(Boolean) ?? null;
+
+    results.push({
+      date,
+      amountCents: parseCents(amountText),
+      orderId,
+      isRefund: /refund/i.test(row.textContent ?? "") || amountText.startsWith("+"),
+    });
+  });
+
+  return results;
+}
+
+// TODO(2026-12-24): remove with the rest of the legacy layout (see selectors.ts).
+function parseLegacyTransactions(doc: Document): RawTransaction[] {
   const results: RawTransaction[] = [];
   let currentDate: string | null = null;
 
-  const dateContainers = doc.querySelectorAll(SELECTORS.dateContainer);
-  dateContainers.forEach((dateEl) => {
+  doc.querySelectorAll(SELECTORS.legacyDateContainer).forEach((dateEl) => {
     const dateSpan = dateEl.querySelector("span");
     if (dateSpan) {
       currentDate = parseNaturalDate(dateSpan.textContent?.trim() ?? "");
@@ -86,16 +125,16 @@ export function parseTransactionsFromDocument(
     const sibling = dateEl.nextElementSibling;
     if (!sibling) return;
 
-    sibling.querySelectorAll(SELECTORS.lineItem).forEach((item) => {
+    sibling.querySelectorAll(SELECTORS.legacyLineItem).forEach((item) => {
       const text = item.textContent ?? "";
-      const amountEl = item.querySelector(SELECTORS.amountSpan);
+      const amountEl = item.querySelector(SELECTORS.legacyAmountSpan);
       if (!amountEl) return;
       const amountText = amountEl.textContent?.trim() ?? "";
       const isRefund = /refund/i.test(text) || amountText.startsWith("+");
       const amountCents = parseCents(amountText);
 
       let orderId: string | null = null;
-      const orderLink = item.querySelector(SELECTORS.orderLink);
+      const orderLink = item.querySelector(SELECTORS.legacyOrderLink);
       if (orderLink) {
         const orderMatch = (orderLink.getAttribute("href") ?? "").match(
           /orderID=([^&]+)/,
@@ -103,12 +142,7 @@ export function parseTransactionsFromDocument(
         if (orderMatch) orderId = orderMatch[1]!;
       }
 
-      results.push({
-        date,
-        amountCents,
-        orderId,
-        isRefund,
-      });
+      results.push({ date, amountCents, orderId, isRefund });
     });
   });
 
@@ -244,6 +278,9 @@ function readItemmodStatus(item: Element): ItemmodStatus {
   );
 }
 
+// "$0.46 promotion applied" — a per-row note on a discounted grocery item.
+const PROMOTION_REGEX = /\$([0-9,]+\.[0-9]{2})\s*promotion applied/i;
+
 function parseItemmodElement(item: Element): RawItem | null {
   const productLinks = item.querySelectorAll(SELECTORS.productLink);
   let titleEl: Element | null = null;
@@ -286,8 +323,16 @@ function parseItemmodElement(item: Element): RawItem | null {
   // keeps the credit out of refundedAmountCents, which must mean "money came
   // back on a charge" — distribution excludes refund-marked items from purchase
   // charges, which would drop the unit the customer did pay for.
-  const priceCents = lineTotalCents - status.outOfStockCredit;
-  if (priceCents <= 0) return null;
+  const netOfCreditCents = lineTotalCents - status.outOfStockCredit;
+  if (netOfCreditCents <= 0) return null;
+
+  // The row's total is already net of any promotion, but Amazon's Item(s)
+  // Subtotal is not — it counts the pre-promotion price. Add the promotion back
+  // so the items reconcile to that subtotal (the scrape-completeness check); the
+  // discount still reaches the charge, since distribution scales item prices to
+  // what was actually charged.
+  const promotionCents = parseCents(item.textContent?.match(PROMOTION_REGEX)?.[1] ?? "0");
+  const priceCents = netOfCreditCents + promotionCents;
 
   return {
     productId,
