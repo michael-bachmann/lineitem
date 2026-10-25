@@ -1,3 +1,5 @@
+import { isNonNull } from "remeda";
+import { isLegacyLayout } from "./page";
 import { SELECTORS, ASIN_REGEX } from "./selectors";
 
 // ---------------------------------------------------------------------------
@@ -77,36 +79,50 @@ const ORDER_ID_REGEX = /^Order #(\S+)$/;
 export function parseTransactionsFromDocument(
   doc: Document,
 ): RawTransaction[] {
-  return doc.querySelector(SELECTORS.transactionRow) !== null
-    ? parseScrollListTransactions(doc)
-    : parseLegacyTransactions(doc);
+  return readTransactions(doc).transactions;
 }
 
-function parseScrollListTransactions(doc: Document): RawTransaction[] {
-  const results: RawTransaction[] = [];
+/**
+ * Read the transactions from row `fromRow` onward, plus how many rows the list
+ * holds now. The scrolling list only ever grows at the end, so a caller that
+ * remembers `rowCount` can ask for just what was appended since. The mark counts
+ * DOM rows, not parsed ones — a row that doesn't parse (or is still rendering)
+ * must not shift which rows count as new. The legacy layout is one page at a
+ * time, so it ignores `fromRow`.
+ */
+export function readTransactions(
+  doc: Document,
+  fromRow = 0,
+): { transactions: RawTransaction[]; rowCount: number } {
+  if (isLegacyLayout(doc)) {
+    return { transactions: parseLegacyTransactions(doc), rowCount: 0 };
+  }
+  const rows = Array.from(doc.querySelectorAll(SELECTORS.transactionRow));
+  return {
+    transactions: rows.slice(fromRow).map(parseTransactionRow).filter(isNonNull),
+    rowCount: rows.length,
+  };
+}
 
-  doc.querySelectorAll(SELECTORS.transactionRow).forEach((row) => {
-    // Each row is a flat run of text nodes — date, descriptor, order id, amount,
-    // status — whose order isn't relied on (a gift-card row drops the card
-    // details), so each field is found by its shape.
-    const texts = Array.from(row.querySelectorAll(SELECTORS.transactionText)).map(
-      (el) => el.textContent?.trim() ?? "",
-    );
-    const date = texts.map(parseNaturalDate).find((d) => d !== null);
-    const amountText = texts.find((t) => AMOUNT_REGEX.test(t));
-    if (!date || !amountText) return;
+/** One scroll-list row, or null when it lacks a date or an amount (not yet
+ *  rendered, or not a transaction we can use). */
+function parseTransactionRow(row: Element): RawTransaction | null {
+  // Each row is a flat run of text nodes — date, descriptor, order id, amount,
+  // status — whose order isn't relied on (a gift-card row drops the card
+  // details), so each field is found by its shape.
+  const texts = Array.from(row.querySelectorAll(SELECTORS.transactionText)).map(
+    (el) => el.textContent?.trim() ?? "",
+  );
+  const date = texts.map(parseNaturalDate).find((d) => d !== null);
+  const amountText = texts.find((t) => AMOUNT_REGEX.test(t));
+  if (!date || !amountText) return null;
 
-    const orderId = texts.map((t) => t.match(ORDER_ID_REGEX)?.[1]).find(Boolean) ?? null;
-
-    results.push({
-      date,
-      amountCents: parseCents(amountText),
-      orderId,
-      isRefund: /refund/i.test(row.textContent ?? "") || amountText.startsWith("+"),
-    });
-  });
-
-  return results;
+  return {
+    date,
+    amountCents: parseCents(amountText),
+    orderId: texts.map((t) => t.match(ORDER_ID_REGEX)?.[1]).find(Boolean) ?? null,
+    isRefund: /refund/i.test(row.textContent ?? "") || amountText.startsWith("+"),
+  };
 }
 
 // TODO(2026-12-24): remove with the rest of the legacy layout (see selectors.ts).

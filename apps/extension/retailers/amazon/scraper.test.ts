@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { describe, expect, it, beforeEach } from "vitest";
 import {
+  readTransactions,
   parseNaturalDate,
   parseTransactionsFromDocument,
   isGroceryOrder,
@@ -81,6 +82,54 @@ describe("parseTransactionsFromDocument", () => {
     expect(parseTransactionsFromDocument(document)).toEqual([
       { date: "2026-10-01", amountCents: 1499, orderId: null, isRefund: false },
     ]);
+  });
+});
+
+describe("readTransactions", () => {
+  const row = (date: string, order: string, amount: string | null) =>
+    `<a data-testid="transaction-link"><div data-testid="text">${date}</div>
+     <div data-testid="text">Order #${order}</div>${
+       amount ? `<div data-testid="text">${amount}</div>` : ""
+     }</a>`;
+
+  it("returns only rows past the mark, and the new row count", () => {
+    document.body.innerHTML =
+      row("Oct 03, 2026", "A", "-$1.00") +
+      row("Oct 02, 2026", "B", "-$2.00") +
+      row("Oct 01, 2026", "C", "-$3.00");
+    const first = readTransactions(document);
+    expect(first.rowCount).toBe(3);
+    expect(first.transactions.map((t) => t.orderId)).toEqual(["A", "B", "C"]);
+
+    document.body.innerHTML += row("Sep 30, 2026", "D", "-$4.00");
+    const next = readTransactions(document, first.rowCount);
+    expect(next.rowCount).toBe(4);
+    expect(next.transactions.map((t) => t.orderId)).toEqual(["D"]);
+  });
+
+  it("counts a row that doesn't parse, so it can't shift which rows are new", () => {
+    // Row B has no amount yet. Marking by parsed rows would call the mark 2 and
+    // re-report C on the next read; marking by DOM rows keeps C reported once.
+    document.body.innerHTML =
+      row("Oct 03, 2026", "A", "-$1.00") + row("Oct 02, 2026", "B", null) + row("Oct 01, 2026", "C", "-$3.00");
+    const first = readTransactions(document);
+    expect(first.transactions.map((t) => t.orderId)).toEqual(["A", "C"]);
+    expect(first.rowCount).toBe(3);
+    expect(readTransactions(document, first.rowCount).transactions).toEqual([]);
+  });
+
+  it("returns nothing new when the list hasn't grown", () => {
+    document.body.innerHTML = row("Oct 03, 2026", "A", "-$1.00");
+    expect(readTransactions(document, 1)).toEqual({ transactions: [], rowCount: 1 });
+  });
+
+  it("reads the whole legacy page regardless of the mark", () => {
+    document.body.innerHTML = `
+      <div class="apx-transaction-date-container"><span>May 17, 2026</span></div>
+      <div><div class="apx-transactions-line-item-component-container">
+        <a href="/x?orderID=111-A">o</a><div class="a-span3"><span>-$1.00</span></div>
+      </div></div>`;
+    expect(readTransactions(document, 5).transactions).toHaveLength(1);
   });
 });
 

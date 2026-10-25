@@ -1,5 +1,5 @@
 import {
-  parseTransactionsFromDocument,
+  readTransactions,
   parseItemsFromDocument,
   parseItemmodFromDocument,
   isGroceryOrder,
@@ -11,6 +11,7 @@ import {
   detectAmazonPageKind,
   transactionsFingerprint,
   hasNextPage,
+  isLegacyLayout,
   orderIdFromUrl,
   type AmazonPageResult,
 } from "@/retailers/amazon/page";
@@ -45,9 +46,9 @@ export default defineContentScript({
   },
 });
 
-/** How many transaction rows this tab has already reported. The list grows in
- *  place as it scrolls, so each result carries only the rows past this mark —
- *  the adapter accumulates, and never sees a row twice. */
+/** How many transaction rows (DOM rows) this tab has already reported. The list
+ *  grows in place as it scrolls, so each result carries only the rows past this
+ *  mark — the adapter accumulates, and never sees a row twice. */
 let reportedRows = 0;
 
 /** Detect the page, wait for its meaningful DOM, parse, and report one result. */
@@ -61,13 +62,13 @@ async function describe(): Promise<void> {
       // The list renders asynchronously after load; wait for rows before reading
       // so we never report an empty page and skip real transactions.
       await waitForElement(`${SELECTORS.transactionRow}, ${SELECTORS.legacyLineItem}`);
-      const transactions = parseTransactionsFromDocument(document);
+      const { transactions, rowCount } = readTransactions(document);
       // A (re-)describe is a fresh read of the whole list, so start the mark over.
-      reportedRows = transactions.length;
+      reportedRows = rowCount;
       return post({
         pageKind: "transactions",
         fingerprint: transactionsFingerprint(transactions),
-        hasNext: isLegacyLayout() ? hasNextPage(document) : true,
+        hasNext: isLegacyLayout(document) ? hasNextPage(document) : true,
         transactions,
       });
     }
@@ -124,20 +125,13 @@ async function describe(): Promise<void> {
  *  down, wait for the rows to arrive and settle, and report just the new ones.
  *  If none arrive the list is exhausted: report an empty, final result. */
 async function turnPage(): Promise<void> {
-  if (isLegacyLayout()) return turnLegacyPage();
-  const before = document.querySelectorAll(SELECTORS.transactionRow);
-  // The last row's own scroll container may not be the window, so scroll both.
-  before[before.length - 1]?.scrollIntoView({ block: "end" });
-  window.scrollTo(0, document.documentElement.scrollHeight);
-
-  const grew = await waitUntil(
-    () => document.querySelectorAll(SELECTORS.transactionRow).length > before.length,
-    { timeoutMs: 15_000 },
-  );
+  if (isLegacyLayout(document)) return turnLegacyPage();
+  const grew = await scrollForMoreRows();
   if (grew) await waitForQuietDom({ quietMs: 400, timeoutMs: 4_000 });
+  else console.warn("[amazon] scrolling loaded no new rows; treating it as the end of the list");
 
-  const transactions = parseTransactionsFromDocument(document).slice(reportedRows);
-  reportedRows += transactions.length;
+  const { transactions, rowCount } = readTransactions(document, reportedRows);
+  reportedRows = rowCount;
   return post({
     pageKind: "transactions",
     fingerprint: transactionsFingerprint(transactions),
@@ -146,19 +140,27 @@ async function turnPage(): Promise<void> {
   });
 }
 
-/** The old paged layout: no scroll-loaded rows, only the legacy next button.
- *  TODO(2026-12-24): remove with the rest of the legacy layout (see selectors.ts). */
-function isLegacyLayout(): boolean {
-  return (
-    document.querySelector(SELECTORS.transactionRow) === null &&
-    document.querySelector(SELECTORS.legacyLineItem) !== null
-  );
+/** Scroll to the bottom and wait for rows to be appended; true if they were.
+ *  Tries twice before giving up: a slow load shouldn't be mistaken for the end of
+ *  the list, since ending early silently drops the rest of the charges. */
+async function scrollForMoreRows(): Promise<boolean> {
+  const rowCount = () => document.querySelectorAll(SELECTORS.transactionRow).length;
+  const before = rowCount();
+  for (let attempt = 0; attempt < 2; attempt++) {
+    // The page scrolls, or a nested container does (scrollIntoView reaches it);
+    // the window scroll also clears any footer/sentinel below the last row.
+    Array.from(document.querySelectorAll(SELECTORS.transactionRow)).at(-1)?.scrollIntoView({ block: "end" });
+    window.scrollTo(0, document.documentElement.scrollHeight);
+    if (await waitUntil(() => rowCount() > before, { timeoutMs: 8_000 })) return true;
+  }
+  return false;
 }
 
-/** Turn the legacy pager. In Chrome this is an in-page AJAX swap, so the same
- *  context waits for the new rows and re-describes; in Firefox the click reloads
- *  the page, so this context is torn down and the freshly-loaded page describes
- *  itself. Either way the adapter gets the next transactions result. */
+/** Turn Amazon's transactions pager. In Chrome this is an in-page AJAX swap, so
+ *  the same context waits for the new rows and re-describes; in Firefox the click
+ *  reloads the page, so this context is torn down and the freshly-loaded page
+ *  describes itself. Either way the adapter gets the next transactions result.
+ *  TODO(2026-12-24): remove with the rest of the legacy layout (see selectors.ts). */
 async function turnLegacyPage(): Promise<void> {
   const nextButton = document.querySelector<HTMLInputElement>(SELECTORS.legacyNextPageButton);
   if (!nextButton) {
@@ -167,9 +169,11 @@ async function turnLegacyPage(): Promise<void> {
   }
   const sentinel = document.querySelector(SELECTORS.legacyLineItem);
   nextButton.click();
-  // Wait for the AJAX swap to replace the old rows with new ones, then let the
-  // new rows finish rendering before we read, so we never describe a half-swapped
-  // page.
+  // Wait for the AJAX swap to replace the old rows with new ones (Chrome), then
+  // let the new rows finish rendering before we read — same settle contract as
+  // Target's Load more, so we never describe a half-swapped page. On a Firefox
+  // reload this context is torn down mid-wait and the fresh page describes
+  // itself instead — either way the adapter gets the next result.
   if (sentinel) {
     const swapped = await waitUntil(
       () => !sentinel.isConnected && document.querySelector(SELECTORS.legacyLineItem) !== null,

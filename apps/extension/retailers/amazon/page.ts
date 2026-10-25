@@ -87,6 +87,16 @@ export function orderIdFromUrl(url: string): string {
   }
 }
 
+/** The old paged layout: legacy rows with no scroll-list rows. Every
+ *  layout-dependent branch (parse, turn, hasNext) asks this one question.
+ *  TODO(2026-12-24): remove with the rest of the legacy layout. */
+export function isLegacyLayout(doc: Document): boolean {
+  return (
+    doc.querySelector(SELECTORS.transactionRow) === null &&
+    doc.querySelector(SELECTORS.legacyLineItem) !== null
+  );
+}
+
 /** Legacy layout only: whether the paged list shows an enabled next-page button.
  *  TODO(2026-12-24): remove with the rest of the legacy layout. */
 export function hasNextPage(doc: Document): boolean {
