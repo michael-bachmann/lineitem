@@ -61,8 +61,15 @@ jobs:
           echo "tag=v$version" >> "$GITHUB_OUTPUT"
           echo "Releasing v$version"
           if git rev-parse -q --verify "refs/tags/v$version" >/dev/null; then
-            echo "::error::Tag v$version already exists — bump the version in apps/extension/package.json"
-            exit 1
+            # A dry run never tags or submits, so an already-shipped version is
+            # harmless there — and it's the normal state when checking credentials
+            # between releases.
+            if [ "${{ inputs.dry_run }}" = "true" ]; then
+              echo "::warning::Tag v$version already exists — fine for a dry run, but bump before a real release"
+            else
+              echo "::error::Tag v$version already exists — bump the version in apps/extension/package.json"
+              exit 1
+            fi
           fi
 
       # Same gates as CI. They run before anything leaves the runner, so a
