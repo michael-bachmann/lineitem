@@ -9,6 +9,13 @@ import { Icon } from "@lineitem/ui";
  * be pruned freely.
  */
 export const WHATS_NEW: Record<string, ReactNode[]> = {
+  "1.4.1": [
+    <>
+      Amazon syncing works again with Amazon&apos;s{" "}
+      <b className="font-semibold text-text">redesigned transactions page</b>.
+    </>,
+    <>Amazon grocery orders with promotions now read without erroring.</>,
+  ],
   "1.4.0": [
     <>
       Target purchases you made <b className="font-semibold text-text">in the store</b> now match
