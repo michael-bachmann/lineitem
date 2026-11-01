@@ -21,9 +21,12 @@ export type AmazonPageResult =
       /** Identifies this page's content so the adapter can tell a real page turn
        *  from a re-render of the same page. */
       fingerprint: string;
-      /** Whether a (non-disabled) next-page button exists — the adapter stops
-       *  paginating when it doesn't. */
+      /** False once there is nothing more to load — the adapter stops paginating
+       *  then. On the scrolling list, true means "may have more", not "has more"
+       *  (scrolling is how we find out). */
       hasNext: boolean;
+      /** The rows not yet reported for this tab: the whole list on the first
+       *  read, then only what each scroll appended (legacy layout: the page). */
       transactions: RawTransaction[];
     }
   | {
@@ -68,8 +71,8 @@ export function detectAmazonPageKind(url: string): AmazonPageKind {
   return "other";
 }
 
-/** A stable-ish signature of a transactions page's rows, used to detect that a
- *  page turn actually advanced (vs re-rendered the same page). Order-linked rows
+/** A stable-ish signature of a transactions result's rows, used to detect that a
+ *  scroll actually advanced (vs re-reported the same rows). Order-linked rows
  *  carry an orderId; fall back to date+amount for the rest. */
 export function transactionsFingerprint(transactions: RawTransaction[]): string {
   return transactions.map((t) => t.orderId ?? `${t.date}:${t.amountCents}`).join("|");
@@ -84,7 +87,18 @@ export function orderIdFromUrl(url: string): string {
   }
 }
 
-/** Whether the transactions page shows an enabled next-page button. */
+/** The old paged layout: legacy rows with no scroll-list rows. Every
+ *  layout-dependent branch (parse, turn, hasNext) asks this one question.
+ *  TODO(2026-12-24): remove with the rest of the legacy layout. */
+export function isLegacyLayout(doc: Document): boolean {
+  return (
+    doc.querySelector(SELECTORS.transactionRow) === null &&
+    doc.querySelector(SELECTORS.legacyLineItem) !== null
+  );
+}
+
+/** Legacy layout only: whether the paged list shows an enabled next-page button.
+ *  TODO(2026-12-24): remove with the rest of the legacy layout. */
 export function hasNextPage(doc: Document): boolean {
-  return doc.querySelector(SELECTORS.nextPageButton) !== null;
+  return doc.querySelector(SELECTORS.legacyNextPageButton) !== null;
 }

@@ -233,16 +233,14 @@ async function paginateAndMatch(
     if (oldestOnPage < cutoffIso) break;
     if (!page.hasNext) break;
 
-    // Turn the pager and wait for the next page to announce itself. In Chrome
-    // that's an in-place AJAX swap; in Firefox the click reloads the page and a
-    // fresh content script describes it. Either way we just await the next
+    // Scroll the list for its next batch and wait for the page to report the
+    // rows that arrived (the list grows in place — there is no pager). We await a
     // transactions result whose fingerprint differs (or a login wall).
     const prevFingerprint = page.fingerprint;
     turnPage(tabId);
-    // Wait for the next page (AJAX swap in Chrome, full reload in Firefox) at the
-    // default timeout. We deliberately don't cap it tighter: dropping later pages
-    // silently is worse than a rare slow turn, and a genuine "no next page" is
-    // caught by the !page.hasNext break above before we ever turn.
+    // Wait at the default timeout. We deliberately don't cap it tighter: dropping
+    // later rows silently is worse than a rare slow scroll. The end of the list
+    // arrives as an empty result, which the loop breaks on above.
     page = await awaitTransactionsPage(tabId, prevFingerprint);
   }
 
