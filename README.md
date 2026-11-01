@@ -184,9 +184,9 @@ can't be unsent, so a human decides when it happens. Store review and
 publish-on-approval stay automatic once submitted.
 
 **Run with `dry_run` checked first.** It authenticates against both stores and
-stops. Note what it does *not* check: upload permission, the contents of the
-zips, or `CHROME_EXTENSION_ID` (unused until a real upload) — so a wrong Chrome
-extension ID passes a dry run and fails the real submit.
+stops. Note what it does *not* check: upload permission or the contents of the
+zips. (For Chrome it does fetch the item's status, so a wrong publisher or
+extension ID fails the dry run.)
 
 ### After a partial failure
 
@@ -207,29 +207,36 @@ run's earlier attempts' artifacts as soon as a new attempt starts.
 
 ### Store credentials
 
-Seven repo secrets: `CHROME_EXTENSION_ID`, `CHROME_CLIENT_ID`,
-`CHROME_CLIENT_SECRET`, `CHROME_REFRESH_TOKEN`, `FIREFOX_EXTENSION_ID`,
-`FIREFOX_JWT_ISSUER`, `FIREFOX_JWT_SECRET`.
+Seven repo secrets: `CHROME_EXTENSION_ID`, `CHROME_PUBLISHER_ID`,
+`CHROME_SERVICE_ACCOUNT_CLIENT_EMAIL`, `CHROME_SERVICE_ACCOUNT_PRIVATE_KEY`,
+`FIREFOX_EXTENSION_ID`, `FIREFOX_JWT_ISSUER`, `FIREFOX_JWT_SECRET`.
 
 Firefox's JWT issuer and secret come from the
 [AMO API key page](https://addons.mozilla.org/developers/addon/api/key/).
 
-Chrome needs a Google Cloud OAuth client, because the Chrome Web Store
-publishing API is an ordinary Google API and the store dashboard has no
-token UI of its own. In a GCP project: enable the **Chrome Web Store API**,
-then under **Google Auth Platform** create a **Desktop app** client and set
-**Audience → Publish app** to move the app out of Testing — in Testing the
-refresh token expires after 7 days and releases start failing on auth.
+Chrome uses the Chrome Web Store **API v2** (v1.1 was scheduled to stop working
+2026-10-15), which authenticates as a **service account** — there is no
+refresh token to expire. Set it up once:
 
-Do **not** use `wxt submit init` to mint the token. It requests Google's
-`urn:ietf:wg:oauth:2.0:oob` redirect, which Google deprecated in 2023
-([wxt-dev/wxt#1462](https://github.com/wxt-dev/wxt/issues/1462)). Use the
-loopback flow instead, authorizing as the account that owns the extension in
-the Web Store:
+1. In a Google Cloud project, enable the **Chrome Web Store API**, create a
+   service account, and download a JSON key
+   ([Google's guide](https://developer.chrome.com/docs/webstore/service-accounts)).
+2. In the Chrome Web Store developer dashboard, grant that service account's
+   email access to the publisher.
+3. `CHROME_PUBLISHER_ID` is the ID in the dashboard URL
+   (`chrome.google.com/webstore/devconsole/<publisher-id>`).
+4. Set the secrets from the key file. The private key must keep its **real
+   newlines** (the JSON stores them as `\n`); piping through `jq -r` does that:
 
-```bash
-npx chrome-webstore-upload-keys
-```
+   ```bash
+   jq -r .client_email key.json | gh secret set CHROME_SERVICE_ACCOUNT_CLIENT_EMAIL
+   jq -r .private_key  key.json | gh secret set CHROME_SERVICE_ACCOUNT_PRIVATE_KEY
+   ```
+
+   Then delete `key.json`.
+
+The old `CHROME_CLIENT_ID`, `CHROME_CLIENT_SECRET` and `CHROME_REFRESH_TOKEN`
+secrets are no longer used and can be deleted.
 
 ### Sources zip
 

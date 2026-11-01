@@ -118,10 +118,10 @@ jobs:
       # directly) rather than flags, so nothing sensitive lands in the command
       # line.
       #
-      # --dry-run checks credentials only: a real OAuth exchange for Chrome, an
-      # authenticated add-on GET for Firefox. It does NOT verify upload
-      # permission, read the zips, or touch CHROME_EXTENSION_ID at all — a wrong
-      # Chrome extension ID passes a dry run and fails the real submit.
+      # --dry-run checks credentials only: for Chrome (API v2) a service-account
+      # token exchange plus a status fetch of publishers/<id>/items/<id>, so a
+      # wrong publisher or extension ID fails it; an authenticated add-on GET for
+      # Firefox. It does NOT verify upload permission or read the zips.
       # One step per store rather than a single two-store call. `wxt submit`
       # fans out concurrently with exitOnError: false, so a half-failure leaves
       # one store submitted and the run red — and every re-run of both stays red
@@ -138,10 +138,13 @@ jobs:
             ${{ inputs.dry_run && '--dry-run' || '' }} \
             --chrome-zip "${{ steps.zips.outputs.chrome }}"
         env:
+          # Chrome Web Store API v2 (v1.1 was scheduled to stop 2026-10-15).
+          # Authenticates as a service account rather than an OAuth refresh token.
+          CHROME_API_VERSION: v2
           CHROME_EXTENSION_ID: ${{ secrets.CHROME_EXTENSION_ID }}
-          CHROME_CLIENT_ID: ${{ secrets.CHROME_CLIENT_ID }}
-          CHROME_CLIENT_SECRET: ${{ secrets.CHROME_CLIENT_SECRET }}
-          CHROME_REFRESH_TOKEN: ${{ secrets.CHROME_REFRESH_TOKEN }}
+          CHROME_PUBLISHER_ID: ${{ secrets.CHROME_PUBLISHER_ID }}
+          CHROME_SERVICE_ACCOUNT_CLIENT_EMAIL: ${{ secrets.CHROME_SERVICE_ACCOUNT_CLIENT_EMAIL }}
+          CHROME_SERVICE_ACCOUNT_PRIVATE_KEY: ${{ secrets.CHROME_SERVICE_ACCOUNT_PRIVATE_KEY }}
 
       - name: Submit to Firefox AMO
         if: ${{ inputs.stores == 'both' || inputs.stores == 'firefox' }}
