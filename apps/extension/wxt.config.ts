@@ -2,16 +2,26 @@ import { defineConfig } from "wxt";
 import tailwindcss from "@tailwindcss/vite";
 import svgr from "vite-plugin-svgr";
 import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
+import { realpathSync } from "node:fs";
 
-// Absolute path to the installed transformers dist dir. Resolved relative to
-// this config (apps/extension/) — pnpm symlinks the direct dependency into the
-// app's own node_modules, so this URL points at apps/extension/node_modules/...
-const ORT_DIST = fileURLToPath(
-  new URL("node_modules/@huggingface/transformers/dist/", import.meta.url),
+// The ONNX runtime files ship in onnxruntime-web, which is transformers.js's own
+// dependency — pnpm doesn't link it into this app's node_modules, so resolve it
+// from where transformers.js actually lives (the real path, past the symlink).
+// onnxruntime-web exports each file as a public subpath, which keeps the .mjs
+// glue and .wasm binary a matched pair from one package version.
+const requireFromTransformers = createRequire(
+  realpathSync(
+    fileURLToPath(
+      new URL("node_modules/@huggingface/transformers/package.json", import.meta.url),
+    ),
+  ),
 );
+// transformers.js v4 bundles onnxruntime-web/webgpu, whose glue loads the
+// `asyncify` build (v3 used `jsep`).
 const ORT_FILES = [
-  "ort-wasm-simd-threaded.jsep.mjs",
-  "ort-wasm-simd-threaded.jsep.wasm",
+  "ort-wasm-simd-threaded.asyncify.mjs",
+  "ort-wasm-simd-threaded.asyncify.wasm",
 ];
 
 export default defineConfig({
@@ -124,7 +134,10 @@ export default defineConfig({
   hooks: {
     "build:publicAssets"(_wxt, assets) {
       for (const f of ORT_FILES) {
-        assets.push({ absoluteSrc: ORT_DIST + f, relativeDest: `ort/${f}` });
+        assets.push({
+          absoluteSrc: requireFromTransformers.resolve(`onnxruntime-web/${f}`),
+          relativeDest: `ort/${f}`,
+        });
       }
     },
   },
@@ -141,9 +154,9 @@ export default defineConfig({
       // (e.g. @lineitem/ui's Mark). Default include is **/*.svg?react, so plain
       // SVG URL imports (public/, assets/) are untouched.
       svgr(),
-      // De-inline the 21 MB ORT wasm. The glue locates its binary with
-      // `new URL("...jsep.wasm", import.meta.url)`, which Vite resolves and
-      // inlines as a ~28.8 MB data: URI. Neutralize the pattern (enforce:"pre",
+      // De-inline the ~27 MB ORT wasm. The glue locates its binary with
+      // `new URL("...asyncify.wasm", import.meta.url)`, which Vite resolves and
+      // inlines as a ~36 MB data: URI. Neutralize the pattern (enforce:"pre",
       // before Vite's asset plugin) so the binary is never inlined, and point
       // the lookup at the /ort/ files copied above. This base is what Chrome's
       // statically-bundled glue uses to FETCH the wasm (Chrome can't set
@@ -155,19 +168,20 @@ export default defineConfig({
         enforce: "pre" as const,
         transform(code: string, id: string) {
           if (
-            !id.includes("ort-wasm-simd-threaded.jsep.mjs") &&
-            !id.includes("ort.bundle.min.mjs")
+            !id.includes("ort-wasm-simd-threaded.asyncify.mjs") &&
+            !id.includes("ort.webgpu.bundle.min.mjs")
           )
             return null;
-          const PATTERN = 'new URL("ort-wasm-simd-threaded.jsep.wasm",import.meta.url)';
+          const PATTERN = 'new URL("ort-wasm-simd-threaded.asyncify.wasm",import.meta.url)';
           const out = code.replaceAll(
             PATTERN,
-            'new URL("ort-wasm-simd-threaded.jsep.wasm",(globalThis.chrome??globalThis.browser).runtime.getURL("ort/"))',
+            'new URL("ort-wasm-simd-threaded.asyncify.wasm",(globalThis.chrome??globalThis.browser).runtime.getURL("ort/"))',
           );
           // Fail loudly if the upstream string drifts (e.g. an onnxruntime-web
           // bump changes whitespace/quoting): a silent no-op here re-inlines the
-          // 21 MB wasm as a data: URI and balloons background.js back to ~56 MB
-          // with no build error. Better a broken build than a 60x bundle.
+          // ~27 MB wasm as a data: URI (twice — glue and proxy worker) and balloons
+          // background.js back to ~72 MB with no build error. Better a broken build
+          // than an 80x bundle.
           if (out === code) {
             throw new Error(
               `[ort-no-inline-wasm] expected ORT wasm-URL pattern not found in ${id}; ` +
