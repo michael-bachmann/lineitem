@@ -20,18 +20,18 @@
     "react-dom": "^19.3.1"
   },
   "devDependencies": {
-    "@storybook/addon-a11y": "^10.6.3",
-    "@storybook/react-vite": "^10.6.3",
-    "@tailwindcss/vite": "^4.3.3",
-    "@types/node": "^26.6.5",
+    "@storybook/addon-a11y": "^10.6.5",
+    "@storybook/react-vite": "^10.6.5",
+    "@tailwindcss/vite": "^4.3.4",
+    "@types/node": "^26.6.6",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
-    "@vitejs/plugin-react": "^6.1.2",
-    "storybook": "^10.6.3",
-    "tailwindcss": "^4.3.3",
+    "@vitejs/plugin-react": "^6.2.1",
+    "storybook": "^10.6.5",
+    "tailwindcss": "^4.3.4",
     "typescript": "^7.0.2",
-    "vite": "^8.3.5",
+    "vite": "^8.3.6",
     "vite-plugin-svgr": "^5.2.0",
-    "wrangler": "^4.151.3"
+    "wrangler": "^4.157.0"
   }
 }
